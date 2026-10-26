@@ -60,3 +60,18 @@ test("SKILL.md: failed job = exit 0 + status failed, ใช้ error.code, ล�
   assert.match(sec, /\| 2 \| USAGE \|[^\n]*ห้ามลองซ้ำแบบไม่ดู/);
   assert.match(sec, /worker หยุดกลางทาง/);
 });
+
+test("references/project.md และ README ตรงกับโค้ด: .vf/costs.jsonl, ไม่มี sheet.png, ตั้งค่าด้วย set-env.sh + setup", () => {
+  const ref = readFileSync(join(root, "skills/videofactoro/references/project.md"), "utf8");
+  assert.match(ref, /\.vf\/\s+[^\n]*costs\.jsonl|\.vf\/costs\.jsonl/);
+  assert.doesNotMatch(ref, /sheet\.png/);
+  assert.doesNotMatch(ref, /^\s*costs\.jsonl/m);
+  for (const p of ["ref/extra-", "ref/old-", ".jobs/", "library/blobs/", "create-state.json"]) assert.ok(ref.includes(p), p);
+  for (const f of [join(root, "README.md"), join(root, "docs/README.md")]) {
+    const t = readFileSync(f, "utf8");
+    assert.ok(t.indexOf("bash tools/set-env.sh") >= 0 && t.indexOf("bash tools/set-env.sh") < t.indexOf("node bin/vf.mjs setup"), f);
+    assert.doesNotMatch(t, /cp \.env\.example/);
+  }
+  const ex = readFileSync(join(root, ".env.example"), "utf8");
+  for (const line of ex.split("\n").filter((l) => l.trim() && !l.startsWith("#"))) assert.match(line, /^[A-Z0-9_]+=$/);
+});
