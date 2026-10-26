@@ -13,23 +13,37 @@ export const PRICES = {
   [MODELS.rmbg]: null,
 };
 
+const num = (v) => typeof v === "number" && Number.isFinite(v);
+const QUALITIES = ["hd", "fhd", "draft"];
+
 export function estimate(model, units = {}) {
+  if (typeof model !== "string" || model === "asOf" || !Object.hasOwn(PRICES, model)) return null;
   const p = PRICES[model];
-  if (!p || model === "asOf") return null;
-  const u = units;
+  if (typeof p !== "object" || p === null) return null;
+  const u = units ?? {};
   if (p.firstMp !== undefined) {
     const mp = u.mp ?? 1;
-    const per = p.firstMp + Math.max(0, mp - 1) * p.extraMp;
-    return per * (u.images ?? 1);
+    const images = u.images ?? 1;
+    if (!num(mp) || !num(images)) return null;
+    return (p.firstMp + Math.max(0, mp - 1) * p.extraMp) * images;
   }
   if (p.unit === "clip") {
-    const price = p[u.quality ?? "hd"];
-    return price === undefined ? null : (u.clips ?? 1) * price;
+    if (!QUALITIES.includes(u.quality) || !num(p[u.quality]) || !num(u.clips)) return null;
+    return u.clips * p[u.quality];
   }
   if (p.inPerM !== undefined) {
-    return ((u.tokensIn ?? 0) * p.inPerM + (u.tokensOut ?? 0) * (p.outPerM ?? 0)) / 1e6;
+    if (!num(u.tokensIn)) return null;
+    if (p.outPerM === undefined) return (u.tokensIn * p.inPerM) / 1e6;
+    if (!num(u.tokensOut)) return null;
+    return (u.tokensIn * p.inPerM + u.tokensOut * p.outPerM) / 1e6;
   }
-  if (p.perMin !== undefined) return (u.minutes ?? (u.seconds ?? 0) / 60) * p.perMin;
-  if (p.perSec !== undefined) return (u.seconds ?? (u.minutes ?? 0) * 60) * p.perSec;
+  if (p.perMin !== undefined) {
+    if (num(u.minutes)) return u.minutes * p.perMin;
+    return num(u.seconds) ? (u.seconds / 60) * p.perMin : null;
+  }
+  if (p.perSec !== undefined) {
+    if (num(u.seconds)) return u.seconds * p.perSec;
+    return num(u.minutes) ? u.minutes * 60 * p.perSec : null;
+  }
   return null;
 }

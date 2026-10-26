@@ -17,6 +17,7 @@ export function readCosts(dir) {
     if (e.code === "ENOENT") return [];
     throw e;
   }
+  // ledger เสียต้อง throw ดังๆ โดยตั้งใจ ห้ามเดาตัวเลข
   return text.split("\n").filter(Boolean).map((l) => JSON.parse(l));
 }
 
@@ -28,7 +29,7 @@ export function summarize(entries) {
   for (const e of entries) {
     const key = `${e.step}\u0000${e.model}`;
     let r = map.get(key);
-    if (!r) map.set(key, (r = { step: e.step, model: e.model, calls: 0, ok: 0, rerolls: 0, units: {}, usd: 0 }));
+    if (!r) map.set(key, (r = { step: e.step, model: e.model, calls: 0, ok: 0, rerolls: 0, units: {}, usd: null }));
     r.calls++;
     if (e.outcome === "ok") r.ok++;
     if (e.outcome === "qa_reject") r.rerolls++;
@@ -37,7 +38,7 @@ export function summarize(entries) {
       if (typeof v === "number") r.units[k] = (r.units[k] ?? 0) + v;
     }
     if (typeof e.usd === "number") {
-      r.usd += e.usd;
+      r.usd = (r.usd ?? 0) + e.usd;
       totalUsd += e.usd;
     } else {
       unknown.add(e.model);
@@ -46,7 +47,7 @@ export function summarize(entries) {
   return { rows: [...map.values()], totalUsd, cachedCount, unknownPriceModels: [...unknown] };
 }
 
-const fmtUsd = (n) => `$${n < 0.01 && n > 0 ? n.toFixed(4) : n.toFixed(2)}`;
+const fmtUsd = (n) => n == null ? "?" : `$${n < 0.01 && n > 0 ? n.toFixed(4) : n.toFixed(2)}`;
 const fmtUnits = (u) => Object.entries(u).map(([k, v]) => `${Number.isInteger(v) ? v : +v.toFixed(3)} ${k}`).join(", ") || "-";
 
 export function renderCostTable(summary, usdThb) {

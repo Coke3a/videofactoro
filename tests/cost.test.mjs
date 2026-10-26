@@ -86,3 +86,28 @@ test("renderCostTable มียอดบาท", () => {
   assert.ok(md.includes("ไม่รวม: ค่า LLM ของ agent ที่สั่ง tool (Claude/Hermes) — tool มองไม่เห็นค่านี้"));
   assert.ok(renderCostTable({ rows: [{ step: "s", model: "m", calls: 1, ok: 1, rerolls: 0, units: {}, usd: 0.0034 }], totalUsd: 0.0034, cachedCount: 0, unknownPriceModels: [] }, 33.5).includes("$0.0034"));
 });
+
+test("estimate ไม่เดา: quality แปลก, หน่วยขาด, key แปลก -> null", () => {
+  assert.equal(estimate(MODELS.video, { clips: 1, quality: "4k" }), null);
+  assert.equal(estimate(MODELS.video, { quality: "4k" }), null);
+  assert.equal(estimate(MODELS.video, { clips: 1 }), null);
+  assert.equal(estimate(MODELS.video, { clips: NaN, quality: "hd" }), null);
+  assert.equal(estimate(MODELS.llm[0], {}), null);
+  assert.equal(estimate(MODELS.llm[0], { tokensIn: 100 }), null);
+  assert.equal(estimate(MODELS.llm[0], { tokensIn: "5", tokensOut: 1 }), null);
+  assert.equal(estimate(MODELS.qa, {}), null);
+  assert.equal(estimate(MODELS.music, {}), null);
+  assert.equal(estimate(MODELS.asr, { minutes: Infinity }), null);
+  assert.equal(estimate(MODELS.image, { mp: NaN }), null);
+  assert.equal(estimate("asOf", {}), null);
+  assert.equal(estimate("toString", {}), null);
+  assert.equal(estimate("__proto__", {}), null);
+});
+
+test("renderCostTable แถวที่ usd เป็น null ทุกรายการแสดง ?", () => {
+  const s = summarize([{ step: "rmbg", model: "bria/remove-background", units: {}, usd: null, outcome: "ok" }]);
+  assert.equal(s.rows[0].usd, null);
+  const md = renderCostTable(s, 33.5);
+  assert.ok(md.includes("| ? |"));
+  assert.ok(!md.includes("| $0.00 |"));
+});
