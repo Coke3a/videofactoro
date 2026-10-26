@@ -10,6 +10,7 @@ import { MODELS } from "../tools/models.mjs";
 import { readCosts } from "../tools/cost.mjs";
 import { main as create } from "../tools/project-create.mjs";
 import { main as clip, validateClipPlan } from "../tools/clip.mjs";
+import { mixArgs, narrationTempo } from "../tools/audio.mjs";
 import { goodBible } from "./fixtures/bible.mjs";
 import { bodyOf } from "./fixtures/body.mjs";
 
@@ -22,16 +23,26 @@ const PLAN = () => ({
   title: "Cake Heist", summary: "แมวแอบกินเค้ก หมาจับได้", duration: 5, characters: ["cat", "dog"], place: "kitchen",
   first_frame_prompt: "The cat reaches for a cake on the kitchen table while the dog peeks from the door.",
   video_prompt: "0-2s: the cat sniffs the cake. 2-5s: the dog barks softly and the cat freezes.",
+  narration: "มะลิแอบชิมเค้ก แต่ถุงเท้าเห็นหมด", music_prompt: "Light acoustic guitar, playful, 100 BPM",
 });
 
-let MP4, root, dir, saved, calls, origWrite, plan, pollFail;
+let MP4, WAV, MP3, root, dir, saved, calls, origWrite, plan, pollFail, needsMusic;
 const reply = (result) => ({ ok: true, status: 200, text: async () => JSON.stringify({ success: true, result }) });
 const videoPosts = () => calls.filter((c) => c.method === "POST" && c.body?.model === MODELS.video);
 const imagePosts = () => calls.filter((c) => c.body?.model === MODELS.image);
+const ttsPosts = () => calls.filter((c) => c.body?.model === MODELS.tts);
+const musicPosts = () => calls.filter((c) => c.body?.model === MODELS.music);
+const streams = (f) => JSON.parse(execFileSync("ffprobe", ["-v", "error", "-show_entries", "stream=codec_type:format=duration", "-of", "json", f], { encoding: "utf8" }));
 
 before(() => {
   MP4 = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "vf-clipfix-")), "tiny.mp4");
-  execFileSync("ffmpeg", ["-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=160x284:rate=8:duration=1", "-pix_fmt", "yuv420p", MP4]);
+  const fx = path.dirname(MP4);
+  execFileSync("ffmpeg", ["-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=160x284:rate=8:duration=2", "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+    "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", MP4]);
+  WAV = path.join(fx, "n.wav");
+  execFileSync("ffmpeg", ["-loglevel", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=220:duration=1", "-ar", "24000", "-ac", "1", WAV]);
+  MP3 = path.join(fx, "m.mp3");
+  execFileSync("ffmpeg", ["-loglevel", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=330:duration=3", MP3]);
 });
 
 function install() {
@@ -39,6 +50,7 @@ function install() {
   cf.setFetch(async (url, init = {}) => {
     const u = String(url);
     const method = init.method ?? "GET";
+    if (u.startsWith("https://cdn.example/m")) return new Response(fs.readFileSync(MP3));
     if (u.startsWith("https://cdn.example/")) return new Response(fs.readFileSync(MP4));
     if (u.includes("/ai/requests/")) {
       calls.push({ url: u, method, body: null });
@@ -48,11 +60,13 @@ function install() {
     const body = bodyOf(url, init);
     calls.push({ url: u, method, body });
     if (u.includes("clef-omni")) {
-      const answers = Object.fromEntries(Object.keys(body.questions).map((k) => [k, { noul: /text/.test(k) || k === "has_people_or_animals" ? 0 : 0.9 }]));
+      const answers = Object.fromEntries(Object.keys(body.questions).map((k) => [k, { noul: /text/.test(k) || k === "has_people_or_animals" || k === "dialogue_heavy" ? 0 : k === "needs_music" ? needsMusic : 0.9 }]));
       return reply({ answers, usage: { prompt_tokens: 1500 } });
     }
     if (body?.model === MODELS.image) return reply({ image: B64 });
     if (body?.model === MODELS.video) return reply({ state: "queued", request_id: "req-1" });
+    if (body?.model === MODELS.tts) return reply({ audio: "data:audio/wav;base64," + fs.readFileSync(WAV).toString("base64") });
+    if (body?.model === MODELS.music) return reply({ state: "Completed", result: { audio: "https://cdn.example/m.mp3" } });
     if (body?.model === MODELS.llm[0]) {
       const sys = body.input.systemInstruction.parts[0].text;
       const data = sys.includes("story bible") ? goodBible() : plan;
@@ -69,6 +83,7 @@ beforeEach(async () => {
   cf.setSleep(async () => {});
   plan = PLAN();
   pollFail = false;
+  needsMusic = 0.9;
   install();
   origWrite = process.stderr.write;
   process.stderr.write = () => true;
@@ -167,4 +182,64 @@ test("validateClipPlan: id ที่ไม่มี, จำนวนตัวล
   assert.ok(validateClipPlan({ ...PLAN(), duration: 30 }, ctx).length);
   assert.deepEqual(validateClipPlan({ ...PLAN(), duration: 30 }, ctx, { duration: 8 }), []);
   assert.deepEqual(validateClipPlan(null, ctx), ["แผนคลิปต้องเป็น object"]);
+});
+
+test("clip: พากย์ (TTS เสียงผู้บรรยาย) + เพลง แล้ว mix เป็น renders ที่มีเสียง ยาวเท่าวิดีโอ", async () => {
+  const r = await make();
+  assert.equal(ttsPosts().length, 1);
+  assert.deepEqual(ttsPosts()[0].body.input, { text: PLAN().narration, voice: "Kore" });
+  assert.equal(musicPosts().length, 1);
+  const m = musicPosts()[0].body.input;
+  assert.equal(m.music_length_ms, 10000);
+  assert.equal(m.force_instrumental, true);
+  assert.match(m.prompt, /^Light acoustic guitar/);
+  assert.equal(r.clip.music, true);
+  assert.equal(r.clip.narration, PLAN().narration);
+  for (const f of ["narration.wav", "music.mp3", "clip.mp4"]) assert.ok(fs.existsSync(path.join(dir, "clips", r.clip.id, f)), f);
+  const info = streams(r.clip.file);
+  assert.ok(info.streams.some((x) => x.codec_type === "audio"));
+  assert.ok(Math.abs(Number(info.format.duration) - 2) < 0.2, info.format.duration);
+  const steps = readCosts(path.join(dir, ".vf")).map((x) => x.step);
+  assert.ok(steps.includes("narration") && steps.includes("music"));
+});
+
+test("clip --no-narration --no-music: ไม่เรียก TTS/เพลง และ renders = คลิปดิบ", async () => {
+  const r = await make(["--no-narration", "--no-music"]);
+  assert.equal(ttsPosts().length, 0);
+  assert.equal(musicPosts().length, 0);
+  assert.equal(r.clip.narration, null);
+  assert.ok(fs.readFileSync(r.clip.file).equals(fs.readFileSync(r.clip.raw)));
+});
+
+test("clip: music gate needs_music ต่ำ → ไม่สร้างเพลง (ยังพากย์)", async () => {
+  needsMusic = 0.1;
+  const r = await make();
+  assert.equal(musicPosts().length, 0);
+  assert.equal(ttsPosts().length, 1);
+  assert.equal(r.clip.music, false);
+});
+
+test("clip --music กับ --no-music พร้อมกัน → USAGE", async () => {
+  await assert.rejects(make(["--music", "--no-music"]), (e) => e.code === "USAGE");
+});
+
+test("validateClipPlan: narration ยาวเกินเวลาคลิป", () => {
+  const ctx = { characters: [{ id: "cat" }, { id: "dog" }], places: [{ id: "kitchen" }], lang: "en" };
+  const long = Array(20).fill("word").join(" ");
+  assert.ok(validateClipPlan({ ...PLAN(), narration: long }, ctx).some((i) => i.includes("narration ยาวเกินไป")));
+  assert.deepEqual(validateClipPlan({ ...PLAN(), narration: "Short and sweet line here." }, ctx), []);
+  assert.ok(validateClipPlan({ ...PLAN(), music_prompt: "" }, ctx).some((i) => i.includes("music_prompt")));
+});
+
+test("audio: narrationTempo และ mixArgs", () => {
+  assert.equal(narrationTempo(3, 6), 1);
+  assert.equal(narrationTempo(7, 6), 1.27);
+  assert.equal(narrationTempo(20, 6), 1.3);
+  assert.throws(() => mixArgs({ video: "v.mp4", duration: 5, sceneAudio: false, out: "o.mp4" }), /อย่างน้อยหนึ่ง/);
+  const a = mixArgs({ video: "v.mp4", duration: 5, sceneAudio: true, narration: "n.wav", tempo: 1.2, music: "m.mp3", musicGain: 0.4, out: "o.mp4" });
+  const g = a[a.indexOf("-filter_complex") + 1];
+  assert.match(g, /atempo=1.2/);
+  assert.match(g, /sidechaincompress/);
+  assert.match(g, /amix=inputs=3/);
+  assert.ok(a.includes("copy"));
 });
