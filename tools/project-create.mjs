@@ -10,12 +10,11 @@ import { generateImage } from "./images.mjs";
 import { pickBest, generateWithQa, NO_PASS_WARNING } from "./qa.mjs";
 import { RULES } from "./qa-rules.mjs";
 import { openState, step } from "./state.mjs";
-import { startJob, jobRootOf } from "./jobs.mjs";
 import { libAdd, libLoad, libUpdate } from "./cache.mjs";
 import { readCosts, summarize } from "./cost.mjs";
 import { estimate } from "./pricing.mjs";
 import { MODELS } from "./models.mjs";
-import { pinInput, shq } from "./entities.mjs";
+import { pinInput, runEntity } from "./entities.mjs";
 import { BIBLE_SCHEMA, validateBible, bibleSystemPrompt, writeProjectFiles } from "./bible.mjs";
 
 const execFileP = promisify(execFile);
@@ -76,30 +75,34 @@ export async function toPng(src, dest) {
   await convert(src, dest, [], "png");
 }
 
-export async function useUserImage(projectDir, charId, srcPath) {
+// dest (relative to project): เขียนภาพไว้ที่ staging ก่อน ยังไม่แตะ main.png และสถานะในคลัง
+export async function useUserImage(projectDir, charId, srcPath, { dest } = {}) {
   if (!existsSync(srcPath)) throw new VfError("USAGE", `ไม่พบไฟล์ภาพ: ${srcPath}`);
   const rel = `characters/${charId}/ref/main.png`;
-  await toPng(srcPath, join(projectDir, rel));
-  const bytes = readFileSync(join(projectDir, rel));
+  const out = dest ?? rel;
+  await toPng(srcPath, join(projectDir, out));
+  const bytes = readFileSync(join(projectDir, out));
   const id = `character-ref-user-${sha(bytes).slice(0, 12)}`;
   const lib = libLoad(projectDir);
-  for (const e of lib.entries) {
-    if (e.id !== id && e.kind === "character-ref" && e.status === "selected" && (e.characters ?? []).includes(charId)) {
-      libUpdate(projectDir, e.id, { status: "candidate" });
+  if (!dest) {
+    for (const e of lib.entries) {
+      if (e.id !== id && e.kind === "character-ref" && e.status === "selected" && (e.characters ?? []).includes(charId)) {
+        libUpdate(projectDir, e.id, { status: "candidate" });
+      }
     }
   }
   let entry = lib.entries.find((e) => e.id === id);
   if (!entry) {
     const added = libAdd(projectDir, {
       id, kind: "character-ref", key: `user:${sha(bytes)}`, prompt: "", need: "user image", model: null, refs: [],
-      characters: [charId], place: null, tags: [], tag_p: {}, qa: null, status: "selected", used_in: [],
+      characters: [charId], place: null, tags: [], tag_p: {}, qa: null, status: dest ? "candidate" : "selected", used_in: [],
       cost_usd: 0, seed: null,
     }, bytes, "png");
     entry = libUpdate(projectDir, added.id, { file: added.blob });
-  } else if (entry.status !== "selected") {
+  } else if (!dest && entry.status !== "selected") {
     entry = libUpdate(projectDir, id, { status: "selected" });
   }
-  return { ref: rel, entry };
+  return { ref: rel, entry, ...(dest ? { staged: dest } : {}) };
 }
 
 function parseImages(list = []) {
@@ -139,10 +142,11 @@ function dryRun(images) {
   };
 }
 
-export async function makeRef(dir, slug, bible, c, costDir, { refs = [] } = {}) {
-  const meta = { project: slug, step: `ref:${c.id}` };
+// dest: เขียนภาพที่เลือกไว้ staging (ไม่แตะ main.png/สถานะ) · seedKey: ผสมใน seed base (ค่าเริ่ม = id)
+export async function makeRef(dir, slug, bible, c, costDir, { refs = [], dest, run, seedKey } = {}) {
+  const meta = { project: slug, step: `ref:${c.id}`, run };
   const prompt = `${c.look} ${bible.style_prompt}${REF_SUFFIX}`;
-  const base = baseSeed(slug, c.id);
+  const base = baseSeed(slug, seedKey ?? c.id);
   const cands = [];
   for (let i = 0; i < CANDIDATES; i++) {
     cands.push(await generateImage({
@@ -152,7 +156,8 @@ export async function makeRef(dir, slug, bible, c, costDir, { refs = [] } = {}) 
   }
   const { best } = await pickBest(cands, RULES.characterRef, { look: c.look, style: bible.style_prompt }, { meta, costDir });
   const rel = `characters/${c.id}/ref/main.png`;
-  await toPng(best.file, join(dir, rel));
+  await toPng(best.file, join(dir, dest ?? rel));
+  if (dest) return { ref: rel, staged: dest, entryId: best.entry.id, ...(best.warning ? { warning: best.warning } : {}) };
   const lib = libLoad(dir);
   for (const e of lib.entries) {
     if (e.kind === "character-ref" && e.status === "selected" && e.id !== best.entry.id && (e.characters ?? []).includes(c.id)) {
@@ -163,8 +168,8 @@ export async function makeRef(dir, slug, bible, c, costDir, { refs = [] } = {}) 
   return { ref: rel, ...(best.warning ? { warning: best.warning } : {}) };
 }
 
-export async function makePlate(dir, slug, bible, p, aspect, maxRerolls, costDir) {
-  const meta = { project: slug, step: `plate:${p.id}` };
+export async function makePlate(dir, slug, bible, p, aspect, maxRerolls, costDir, { run } = {}) {
+  const meta = { project: slug, step: `plate:${p.id}`, run };
   const prompt = `${p.desc} ${bible.style_prompt}${PLATE_SUFFIX}`;
   const ctx = { desc: p.desc, style: bible.style_prompt };
   const base = baseSeed(slug, p.id);
@@ -295,17 +300,8 @@ export async function main(argv) {
   checkInput(state, { prompt_sha: sha(prompt), lang, aspect, images: images.map((i) => `${i.name}=${i.path}`) });
 
   const command = buildCommand({ prompt, slug, lang, aspect, maxRerolls, images });
-  if (!values.foreground) {
-    mkdirSync(join(dir, ".jobs"), { recursive: true });
-    const job = startJob({ jobRoot: jobRootOf(dir), command, label: `project create ${slug}` });
-    return { project: slug, dir, job: { id: job.id, dir: job.dir, status: job.status }, next: [`vf wait ${slug} ${job.id}`] };
-  }
-  try {
-    return await work({ dir, slug, prompt, lang, aspect, images, maxRerolls });
-  } catch (e) {
-    if (e instanceof VfError) {
-      e.details = { ...e.details, project: slug, resume: `vf ${command.map(shq).join(" ")}` };
-    }
-    throw e;
-  }
+  return await runEntity({
+    dir, projectRef: slug, slug, command, label: `project create ${slug}`, foreground: values.foreground, jobExtra: { dir },
+    work: () => work({ dir, slug, prompt, lang, aspect, images, maxRerolls }),
+  });
 }

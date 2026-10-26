@@ -4,6 +4,7 @@ import { riskFindings } from "./risk.mjs";
 import { replaceAuto } from "./md.mjs";
 import { readCosts, summarize, renderCostTable } from "./cost.mjs";
 import { writeJsonAtomic, readJson } from "./state.mjs";
+import { isDeepStrictEqual } from "node:util";
 import { VfError } from "./out.mjs";
 
 // เสียง prebuilt ของ Gemini TTS 30 ชื่อ (genhaha/app/lib/cinematic/board.ts)
@@ -142,12 +143,14 @@ export function validateBible(b) {
   return issues;
 }
 
+const COPYRIGHT_RULE = "- ห้ามใช้ชื่อคนจริง แบรนด์ หรือตัวละครมีลิขสิทธิ์ทั้งในชื่อและคำบรรยาย ถ้า prompt ของผู้ใช้พูดถึง ให้แทนด้วยตัวละครต้นฉบับที่ออกแบบใหม่";
+
 export function bibleSystemPrompt(lang) {
   return [
     "คุณคือผู้เขียน story bible สำหรับโปรเจกต์วิดีโอสั้น ตอบเป็น JSON ตาม schema เท่านั้น",
     "- เขียนเฉพาะภาพใหญ่ของเรื่อง (ตัวละคร สถานที่ โลก สไตล์ กฎของเรื่อง) ไม่ใช่สคริปต์หรือสตอรีบอร์ดของวิดีโอ",
     "- look ของแต่ละตัวละครต้องละเอียดอย่างน้อย 120 ตัวอักษร: บอกสี ลาย สัดส่วน และจุดเด่นที่ต้องคงที่ทุกภาพ (look ถูกใส่ใน prompt ภาพทุกครั้งคำต่อคำ)",
-    "- ห้ามใช้ชื่อคนจริง แบรนด์ หรือตัวละครมีลิขสิทธิ์ทั้งในชื่อและคำบรรยาย ถ้า prompt ของผู้ใช้พูดถึง ให้แทนด้วยตัวละครต้นฉบับที่ออกแบบใหม่",
+    COPYRIGHT_RULE,
     "- style_prompt ไม่ใช้โทนน้ำเงิน-ม่วง เว้นแต่ prompt ของผู้ใช้ขอ; palette 3–6 สีรูปแบบ #RRGGBB",
     "- เลือก narrator (true/false) และ narrator_voice ตามแนวเรื่อง; tts_voice ต้องเป็นเสียงจากรายชื่อใน schema",
     "- id ของตัวละครและสถานที่ใช้ a-z 0-9 และ - เท่านั้น ขึ้นต้นด้วยตัวอักษร ห้ามซ้ำกัน",
@@ -157,7 +160,7 @@ export function bibleSystemPrompt(lang) {
 }
 
 const ADD_RULES = (lang) => [
-  "- ห้ามใช้ชื่อคนจริง แบรนด์ หรือตัวละครมีลิขสิทธิ์ทั้งในชื่อและคำบรรยาย ถ้า prompt ของผู้ใช้พูดถึง ให้แทนด้วยตัวละครต้นฉบับที่ออกแบบใหม่",
+  COPYRIGHT_RULE,
   "- id ใช้ a-z 0-9 และ - เท่านั้น ขึ้นต้นด้วยตัวอักษร และต้องไม่ซ้ำกับ id ที่มีอยู่แล้วใน project (ตัวละครหรือสถานที่)",
   `- ข้อความในฟิลด์เป็นภาษา ${lang} ยกเว้น look (และ desc ของสถานที่) ที่ต้องเป็นภาษาอังกฤษเสมอ`,
 ];
@@ -323,26 +326,33 @@ function refreshProjectMd(projectDir, project) {
   writeFileSync(mdFile, md);
 }
 
-function addEntity(projectDir, key, entity, replace, write) {
+function addEntity(projectDir, key, entity, { replace, write, commit }) {
   const file = join(projectDir, "project.json");
   const project = readJson(file);
   const list = Array.isArray(project[key]) ? project[key] : [];
+  const other = Array.isArray(project[key === "characters" ? "places" : "characters"]) ? project[key === "characters" ? "places" : "characters"] : [];
+  if (other.some((x) => x.id === entity.id)) throw new VfError("USAGE", `id "${entity.id}" ถูกใช้แล้ว (เป็นอีกประเภทหนึ่งใน project นี้)`);
   const i = list.findIndex((x) => x.id === entity.id);
+  if (i >= 0 && !replace && isDeepStrictEqual(list[i], entity)) return project;
   if (i >= 0 && !replace) throw new VfError("USAGE", `มี id นี้แล้ว: ${entity.id} (ใช้ --replace ถ้าต้องการแทนที่)`);
   const next = { ...project, [key]: i >= 0 ? list.map((x, j) => (j === i ? entity : x)) : [...list, entity] };
+  // เช็ก id อีกครั้งตรงนี้ (ก่อนย้ายไฟล์เข้าที่) กันกรณีมี job อื่นเพิ่ม id เดียวกันระหว่างที่เราสร้างภาพ
+  commit?.();
   write(next);
   refreshProjectMd(projectDir, next);
-  // project.json เขียนท้ายสุด: ถ้าพังกลางทาง รันขั้นนี้ซ้ำได้ (ยังไม่นับว่าเพิ่มแล้ว)
+  // project.json เขียนท้ายสุด: ถ้าพังกลางทาง รันขั้นนี้ซ้ำได้
   writeJsonAtomic(file, next);
   return next;
 }
 
-export function addCharacterFiles(projectDir, character, { ref, extras = [], replace = false } = {}) {
-  return addEntity(projectDir, "characters", character, replace, (p) => writeCharacterFiles(projectDir, character, p, { ref, extras }));
+export function addCharacterFiles(projectDir, character, { ref, extras = [], replace = false, commit } = {}) {
+  return addEntity(projectDir, "characters", character, {
+    replace, commit, write: (p) => writeCharacterFiles(projectDir, character, p, { ref, extras }),
+  });
 }
 
-export function addPlaceFiles(projectDir, place, { plate, replace = false } = {}) {
-  return addEntity(projectDir, "places", place, replace, () => writePlaceFiles(projectDir, place, { plate }));
+export function addPlaceFiles(projectDir, place, { plate, replace = false, commit } = {}) {
+  return addEntity(projectDir, "places", place, { replace, commit, write: () => writePlaceFiles(projectDir, place, { plate }) });
 }
 
 export function writeProjectFiles(projectDir, bible, opts = {}) {

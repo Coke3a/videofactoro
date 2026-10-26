@@ -81,7 +81,8 @@ function takeLock(jobRoot) {
   }
 }
 
-export function startJob({ jobRoot, command, label, entry = DEFAULT_ENTRY, execPath = process.execPath }) {
+// ลงทะเบียน job ภายใต้ lock ของ project: ถ้ามี job อื่นกำลังรัน → USAGE (ใช้ร่วมกันทั้ง worker และ foreground)
+export function registerJob({ jobRoot, command, label, pid }) {
   const lock = takeLock(jobRoot);
   try {
     for (const id of listJobIds(jobRoot)) {
@@ -105,33 +106,45 @@ export function startJob({ jobRoot, command, label, entry = DEFAULT_ENTRY, execP
       status: "running",
       started_at: new Date().toISOString(),
     });
-    const fail = (e) => {
-      const error = { code: "INTERNAL", message: `เริ่ม worker ไม่สำเร็จ: ${e?.message ?? e}` };
-      try {
-        finishJob(dir, { error });
-      } catch {}
-      return new VfError("INTERNAL", error.message);
-    };
-    const fd = openSync(join(dir, "job.log"), "a");
-    let child;
-    try {
-      child = spawn(execPath, [entry, ...command, "--foreground", "--job-dir", dir], {
-        detached: true,
-        stdio: ["ignore", fd, fd],
-      });
-    } catch (e) {
-      throw fail(e);
-    } finally {
-      closeSync(fd);
-    }
-    child.on("error", fail);
-    child.unref();
-    if (!child.pid) throw fail(new Error("ไม่มี pid"));
-    writeFileSync(join(dir, "job.pid"), String(child.pid));
-    return { id, dir, status: "running", pid: child.pid };
+    if (pid) writeFileSync(join(dir, "job.pid"), String(pid));
+    return { id, dir };
   } finally {
     rmSync(lock, { force: true });
   }
+}
+
+let workerJobDir = null;
+export const setWorkerJob = (dir) => {
+  workerJobDir = dir || null;
+};
+export const isWorker = () => workerJobDir !== null;
+
+export function startJob({ jobRoot, command, label, entry = DEFAULT_ENTRY, execPath = process.execPath }) {
+  const { id, dir } = registerJob({ jobRoot, command, label });
+  const fail = (e) => {
+    const error = { code: "INTERNAL", message: `เริ่ม worker ไม่สำเร็จ: ${e?.message ?? e}` };
+    try {
+      finishJob(dir, { error });
+    } catch {}
+    return new VfError("INTERNAL", error.message);
+  };
+  const fd = openSync(join(dir, "job.log"), "a");
+  let child;
+  try {
+    child = spawn(execPath, [entry, ...command, "--foreground", "--job-dir", dir], {
+      detached: true,
+      stdio: ["ignore", fd, fd],
+    });
+  } catch (e) {
+    throw fail(e);
+  } finally {
+    closeSync(fd);
+  }
+  child.on("error", fail);
+  child.unref();
+  if (!child.pid) throw fail(new Error("ไม่มี pid"));
+  writeFileSync(join(dir, "job.pid"), String(child.pid));
+  return { id, dir, status: "running", pid: child.pid };
 }
 
 export function finishJob(dir, outcome) {

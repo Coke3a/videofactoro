@@ -13,6 +13,7 @@ import { waitJob } from "../tools/jobs.mjs";
 import { main as create } from "../tools/project-create.mjs";
 import { main as charAdd } from "../tools/character-add.mjs";
 import { main as placeAdd } from "../tools/place-add.mjs";
+import { addCharacterFiles } from "../tools/bible.mjs";
 import { RULES } from "../tools/qa-rules.mjs";
 import { validateCharacter, validatePlace } from "../tools/bible.mjs";
 import { goodBible } from "./fixtures/bible.mjs";
@@ -107,6 +108,7 @@ test("character add เพิ่มแถวในตาราง PROJECT.md โ
   fs.writeFileSync(mdFile, fs.readFileSync(mdFile, "utf8").replace("## โลก", "ข้อความที่คนเขียนเอง-ห้ามหาย\n\n## โลก"));
   const before = fs.readFileSync(mdFile, "utf8");
   const costBefore = summarize(readCosts(path.join(dir, ".vf"))).totalUsd;
+  const nRowsBefore = readCosts(path.join(dir, ".vf")).length;
 
   const r = await add();
   assert.equal(r.character.id, "heron");
@@ -129,7 +131,7 @@ test("character add เพิ่มแถวในตาราง PROJECT.md โ
   for (const c of imageCalls()) assert.equal(c.body.input.images.length, 2);
   const llm = asText(llmCalls()[0]);
   assert.ok(llm.includes("นกกระยางที่ปรึกษา") && llm.includes("ข้อความที่คนเขียนเอง") && llm.includes("cat") && llm.includes("dog"));
-  assert.ok(llm.includes("th"));
+  assert.ok(llmCalls()[0].body.input.systemInstruction.parts[0].text.includes("ภาษา en ยกเว้น look"));
 
   const lib = libLoad(dir).entries.filter((e) => e.characters.includes("heron"));
   assert.equal(lib.length, 3);
@@ -139,6 +141,8 @@ test("character add เพิ่มแถวในตาราง PROJECT.md โ
   const all = summarize(readCosts(path.join(dir, ".vf"))).totalUsd;
   assert.ok(r.cost.usd > 0);
   assert.ok(Math.abs(r.cost.usd - (all - costBefore)) < 1e-9);
+  const rows = readCosts(path.join(dir, ".vf")).slice(nRowsBefore);
+  assert.ok(rows.length >= 4 && rows.every((x) => typeof x.run === "string" && x.run === rows[0].run));
   assert.ok(!JSON.stringify(r).includes("tok-secret"));
 });
 
@@ -316,4 +320,73 @@ test("place add เพิ่มสถานที่ใน project.json, PROJECT
   llmPlace = { ...llmPlace, id: "yard" };
   const r2 = await placeAdd(["demo", "--prompt", "ลานบ้าน", "--id", "orchard", "--foreground"]);
   assert.equal(r2.place.id, "orchard");
+});
+
+test("--replace ที่สร้างภาพล้มเหลว: ภาพเก่ายังอยู่และ project.json ยังสอดคล้อง", async () => {
+  await add();
+  const ref = path.join(dir, "characters/heron/ref");
+  const oldBytes = fs.readFileSync(path.join(ref, "main.png"));
+  const oldMd = fs.readFileSync(path.join(dir, "characters/heron/CHARACTER.md"), "utf8");
+  const pjBefore = fs.readFileSync(path.join(dir, "project.json"), "utf8");
+  llmChar = heron({ role: "ครู" });
+  failMatch = HERON.slice(0, 40);
+  await assert.rejects(add(["--id", "heron", "--replace"]), (e) => e.code === "PROVIDER" && /--replace/.test(e.details.resume));
+  assert.deepEqual(fs.readFileSync(path.join(ref, "main.png")), oldBytes);
+  assert.deepEqual(fs.readdirSync(ref).filter((n) => n.startsWith("old-")), []);
+  assert.equal(fs.readFileSync(path.join(dir, "project.json"), "utf8"), pjBefore);
+  assert.equal(fs.readFileSync(path.join(dir, "characters/heron/CHARACTER.md"), "utf8"), oldMd);
+  const sel = libLoad(dir).entries.filter((e) => e.characters.includes("heron") && e.status === "selected");
+  assert.equal(sel.length, 1);
+  failMatch = null;
+  const r = await add(["--id", "heron", "--replace"]);
+  assert.equal(r.character.id, "heron");
+  assert.equal(pj().characters.find((c) => c.id === "heron").role, "ครู");
+  assert.equal(fs.readdirSync(ref).filter((n) => n.startsWith("old-")).length, 1);
+  assert.ok(fs.readdirSync(ref).every((n) => !n.startsWith(".new-")));
+});
+
+test("--replace ไม่มี --image: seed ใหม่ (ไม่ได้ภาพเดิมจาก cache)", async () => {
+  await add();
+  const before = imageCalls().length;
+  await add(["--id", "heron", "--replace"]);
+  assert.equal(imageCalls().length - before, 3);
+  const seeds = libLoad(dir).entries.filter((e) => e.characters.includes("heron") && e.kind === "character-ref").map((e) => e.seed);
+  assert.equal(new Set(seeds).size, 6);
+});
+
+test("foreground ตอนมี job รันอยู่ใน project → USAGE ไม่ยิง fetch ไม่แตะ state", async () => {
+  const jd = path.join(dir, ".jobs", "20260101-000000-aaaa");
+  fs.mkdirSync(jd, { recursive: true });
+  fs.writeFileSync(path.join(jd, "job.json"), JSON.stringify({ id: "20260101-000000-aaaa", status: "running", started_at: new Date().toISOString() }));
+  fs.writeFileSync(path.join(jd, "job.pid"), String(process.pid));
+  await assert.rejects(add(), (e) => e.code === "USAGE" && e.message.includes("job กำลังรัน"));
+  await assert.rejects(placeAdd(["demo", "--prompt", "สวน", "--foreground"]), (e) => e.code === "USAGE");
+  assert.equal(calls.length, 0);
+  assert.ok(!fs.existsSync(path.join(dir, ".vf/character-hf-state.json")));
+  fs.rmSync(jd, { recursive: true });
+  const nJobs = fs.readdirSync(path.join(dir, ".jobs")).length;
+  assert.equal((await add()).character.id, "heron");
+  const jobs = fs.readdirSync(path.join(dir, ".jobs"));
+  assert.equal(jobs.length, nJobs + 1);
+  assert.ok(!fs.existsSync(path.join(dir, ".jobs/.lock")));
+});
+
+test("addCharacterFiles: id ถูกจองก่อนย้ายไฟล์ → USAGE ไม่เรียก commit · entry เดิมเหมือนกัน → no-op", () => {
+  let n = 0;
+  const commit = () => { n++; };
+  addCharacterFiles(dir, heron(), { commit });
+  assert.equal(n, 1);
+  addCharacterFiles(dir, heron(), { commit });
+  assert.equal(n, 1);
+  assert.equal(pj().characters.filter((c) => c.id === "heron").length, 1);
+  assert.throws(() => addCharacterFiles(dir, heron({ role: "อื่น" }), { commit }), (e) => e.code === "USAGE");
+  assert.throws(() => addCharacterFiles(dir, heron({ id: "kitchen" }), { commit }), (e) => e.code === "USAGE");
+  assert.equal(n, 1);
+  addCharacterFiles(dir, heron({ role: "อื่น" }), { commit, replace: true });
+  assert.equal(n, 2);
+});
+
+test("--image เป็นโฟลเดอร์ → USAGE", async () => {
+  await assert.rejects(add(["--image", root]), (e) => e.code === "USAGE");
+  assert.equal(calls.length, 0);
 });

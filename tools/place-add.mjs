@@ -1,13 +1,12 @@
-import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { parse, VfError, log } from "./out.mjs";
 import { resolveProject } from "./paths.mjs";
 import { llmJson } from "./llm.mjs";
 import { openState, step } from "./state.mjs";
 import { PLACE_SCHEMA, validatePlace, placeAddSystemPrompt, addPlaceFiles, ID_RE } from "./bible.mjs";
-import { makePlate } from "./project-create.mjs";
-import { pinInput, costSince, loadProject, planRows, llmRow, imageRow, qaRow, runEntity } from "./entities.mjs";
+import { makePlate, sha } from "./project-create.mjs";
+import { pinInput, costSince, contextMessage, loadProject, planRows, llmRow, imageRow, qaRow, runEntity } from "./entities.mjs";
 
 const OPTIONS = {
   prompt: { type: "string" },
@@ -16,7 +15,6 @@ const OPTIONS = {
   foreground: { type: "boolean" },
   "dry-run": { type: "boolean" },
 };
-const sha = (b) => createHash("sha256").update(b).digest("hex");
 
 function dryRun() {
   return {
@@ -29,33 +27,25 @@ function dryRun() {
   };
 }
 
-async function work({ dir, ctx, state, key, prompt, id, maxRerolls, startedAt }) {
+async function work({ dir, ctx, state, key, prompt, id, maxRerolls, run }) {
   const { pj, slug, lang, characters, places } = ctx;
   const costDir = join(dir, ".vf");
   const taken = new Set([...characters, ...places].map((x) => x.id));
 
   const place = await step(state, "design", async () => {
     log("ขั้น design");
-    const mdFile = join(dir, "PROJECT.md");
-    const md = existsSync(mdFile) ? readFileSync(mdFile, "utf8") : "(ไม่มี PROJECT.md)";
-    const user = [
-      "[PROJECT.md]", md, "",
-      `id ตัวละครที่มีอยู่แล้ว (ห้ามซ้ำ): ${characters.map((c) => c.id).join(", ") || "(ไม่มี)"}`,
-      `id สถานที่ที่มีอยู่แล้ว (ห้ามซ้ำ): ${places.map((p) => p.id).join(", ") || "(ไม่มี)"}`,
-      ...(id ? [`ต้องใช้ id นี้เท่านั้น: ${id}`] : []),
-      "", "คำขอของผู้ใช้:", prompt,
-    ].join("\n");
+    const user = contextMessage({ dir, characters, places, prompt, id });
     const { data } = await llmJson({
       system: placeAddSystemPrompt(lang), user, schema: PLACE_SCHEMA,
       validate: (p) => validatePlace(id && p && typeof p === "object" ? { ...p, id } : p, taken),
-      meta: { project: slug, step: `place:${key}` }, costDir,
+      meta: { project: slug, step: `place:${key}`, run }, costDir,
     });
     return id ? { ...data, id } : data;
   });
 
   const { plate, warning } = await step(state, `plate:${place.id}`, async () => {
     log(`ขั้น plate:${place.id}`);
-    return await makePlate(dir, slug, { style_prompt: pj.style_prompt }, place, pj.aspect ?? "9:16", maxRerolls, costDir);
+    return await makePlate(dir, slug, { style_prompt: pj.style_prompt }, place, pj.aspect ?? "9:16", maxRerolls, costDir, { run });
   });
 
   await step(state, "files", async () => {
@@ -66,7 +56,7 @@ async function work({ dir, ctx, state, key, prompt, id, maxRerolls, startedAt })
 
   return {
     place: { id: place.id, plate, ...(warning ? { warning } : {}) },
-    cost: { usd: costSince(costDir, startedAt) },
+    cost: { usd: costSince(costDir, run) },
     next: [`vf project show ${slug}`],
   };
 }
@@ -89,15 +79,18 @@ export async function main(argv) {
   const promptSha = sha(prompt);
   const key = id ?? `h${promptSha.slice(0, 8)}`;
   const stateDir = join(dir, ".vf");
-  const state = openState(stateDir, `place-${key}-state.json`);
-  if (state.get("files")?.status === "done") throw new VfError("USAGE", `เพิ่มสถานที่นี้เสร็จแล้ว: ${state.get("files").output.id}`);
-  mkdirSync(stateDir, { recursive: true });
-  pinInput(state, { prompt_sha: promptSha, id: id ?? null, max_rerolls: maxRerolls }, ["prompt_sha", "id", "max_rerolls"],
-    "ของคำสั่งนี้ที่ทำค้างไว้ ให้ใช้ input เดิมเพื่อทำต่อ หรือเปลี่ยน --id เพื่อเริ่มใหม่");
+  const openRun = () => {
+    const state = openState(stateDir, `place-${key}-state.json`);
+    if (state.get("files")?.status === "done") throw new VfError("USAGE", `เพิ่มสถานที่นี้เสร็จแล้ว: ${state.get("files").output.id}`);
+    mkdirSync(stateDir, { recursive: true });
+    pinInput(state, { prompt_sha: promptSha, id: id ?? null, max_rerolls: maxRerolls }, ["prompt_sha", "id", "max_rerolls"],
+      "ของคำสั่งนี้ที่ทำค้างไว้ ให้ใช้ input เดิมเพื่อทำต่อ หรือเปลี่ยน --id เพื่อเริ่มใหม่");
+    return state;
+  };
 
   const command = ["place", "add", dir, `--prompt=${prompt}`, `--max-rerolls=${maxRerolls}`, ...(id ? [`--id=${id}`] : [])];
   return await runEntity({
     dir, projectRef: positionals[0], slug: ctx.slug, command, label: `place add ${key}`, foreground: values.foreground,
-    work: (startedAt) => work({ dir, ctx, state, key, prompt, id, maxRerolls, startedAt }),
+    work: ({ run }) => work({ dir, ctx, state: openRun(), key, prompt, id, maxRerolls, run }),
   });
 }

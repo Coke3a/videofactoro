@@ -1,8 +1,9 @@
-import { existsSync, mkdirSync, readdirSync, renameSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { VfError } from "./out.mjs";
 import { readJson } from "./state.mjs";
-import { startJob, jobRootOf } from "./jobs.mjs";
+import { startJob, registerJob, finishJob, isWorker, jobRootOf } from "./jobs.mjs";
 import { estimate } from "./pricing.mjs";
 import { MODELS } from "./models.mjs";
 import { readCosts, summarize } from "./cost.mjs";
@@ -25,33 +26,63 @@ export function pinInput(state, input, keys, hint) {
   }
 }
 
-// ต้นทุนของคำสั่งนี้เท่านั้น: แถวที่เขียนหลัง startedAt
-export function costSince(costDir, startedAt) {
-  return summarize(readCosts(costDir).filter((r) => r.at >= startedAt)).totalUsd;
+// ต้นทุนของคำสั่งนี้เท่านั้น: แถวที่มี run id ของรอบนี้
+export function costSince(costDir, runId) {
+  return summarize(readCosts(costDir).filter((r) => r.run === runId)).totalUsd;
 }
 
-// ย้ายทุกอย่างใน ref/ (ยกเว้น old-*) ไป ref/<dirName>/ แล้วเปลี่ยนสถานะ selected → replaced; ไม่ลบอะไร
+const STAGE = ".new-";
+export const stagedName = (name) => `${STAGE}${name}`;
+
+export function clearStaged(projectDir, charId) {
+  const refDir = join(projectDir, "characters", charId, "ref");
+  if (!existsSync(refDir)) return;
+  for (const n of readdirSync(refDir)) if (n.startsWith(STAGE)) rmSync(join(refDir, n), { force: true });
+}
+
 export function pickArchiveName(refDir, stamp) {
   let name = `old-${stamp}`;
   for (let n = 2; existsSync(join(refDir, name)); n++) name = `old-${stamp}-${n}`;
   return name;
 }
 
-export function archiveCharacterRefs(projectDir, charId, dirName) {
+// ย้ายภาพที่ stage ไว้เข้าที่ (ถ้า replace: เก็บของเดิมไว้ใน ref/<archiveName>/ ก่อน) แล้วตั้งสถานะในคลัง
+// ทำซ้ำได้: ถ้าไม่มีไฟล์ stage เหลือ ก็ไม่ย้ายอะไรอีก (ไม่แตะภาพใหม่ที่เข้าที่แล้ว)
+export function commitStagedRefs(projectDir, charId, { entryId, archiveName, demoteTo }) {
   const refDir = join(projectDir, "characters", charId, "ref");
-  const moved = [];
-  if (existsSync(refDir)) {
-    const names = readdirSync(refDir).filter((n) => !n.startsWith("old-"));
-    if (names.length) mkdirSync(join(refDir, dirName), { recursive: true });
-    for (const n of names) {
-      renameSync(join(refDir, n), join(refDir, dirName, n));
-      moved.push(n);
+  const staged = existsSync(refDir) ? readdirSync(refDir).filter((n) => n.startsWith(STAGE)) : [];
+  if (staged.length) {
+    if (archiveName) {
+      const keep = readdirSync(refDir).filter((n) => !n.startsWith("old-") && !n.startsWith(STAGE));
+      if (keep.length) mkdirSync(join(refDir, archiveName), { recursive: true });
+      for (const n of keep) renameSync(join(refDir, n), join(refDir, archiveName, n));
     }
+    for (const n of staged) renameSync(join(refDir, n), join(refDir, n.slice(STAGE.length)));
   }
   for (const e of libLoad(projectDir).entries) {
-    if (e.status === "selected" && (e.characters ?? []).includes(charId)) libUpdate(projectDir, e.id, { status: "replaced" });
+    if (e.id !== entryId && e.status === "selected" && (e.characters ?? []).includes(charId)) libUpdate(projectDir, e.id, { status: demoteTo });
   }
-  return moved;
+  libUpdate(projectDir, entryId, { status: "selected" });
+}
+
+export function readProjectMd(dir) {
+  const f = join(dir, "PROJECT.md");
+  return existsSync(f) ? readFileSync(f, "utf8") : "(ไม่มี PROJECT.md)";
+}
+
+export function contextMessage({ dir, characters, places, id, prompt, notes = [] }) {
+  return [
+    "[PROJECT.md]",
+    readProjectMd(dir),
+    "",
+    `id ตัวละครที่มีอยู่แล้ว (ห้ามซ้ำ): ${characters.map((c) => c.id).join(", ") || "(ไม่มี)"}`,
+    `id สถานที่ที่มีอยู่แล้ว (ห้ามซ้ำ): ${places.map((p) => p.id).join(", ") || "(ไม่มี)"}`,
+    ...(id ? [`ต้องใช้ id นี้เท่านั้น: ${id}`] : []),
+    ...notes,
+    "",
+    "คำขอของผู้ใช้:",
+    prompt,
+  ].join("\n");
 }
 
 export function loadProject(dir) {
@@ -74,7 +105,11 @@ export function loadProject(dir) {
 export function parseImagePaths(list = [], max = 4) {
   if (list.length > max) throw new VfError("USAGE", `--image ใส่ได้ไม่เกิน ${max} ภาพ (ส่งมา ${list.length})`);
   return list.map((p) => {
-    if (!existsSync(p)) throw new VfError("USAGE", `ไม่พบไฟล์ภาพ: ${p}`);
+    let ok = false;
+    try {
+      ok = statSync(p).isFile();
+    } catch {}
+    if (!ok) throw new VfError("USAGE", `ไม่พบไฟล์ภาพ (ต้องเป็นไฟล์): ${p}`);
     return resolve(p);
   });
 }
@@ -90,18 +125,32 @@ export const llmRow = (tokensIn, tokensOut) => ({ step: "design", model: MODELS.
 export const imageRow = (step, n) => ({ step, model: MODELS.image, count: n, usd: estimate(MODELS.image, { images: n, mp: 1 }) });
 export const qaRow = (n) => ({ step: "qa", model: MODELS.qa, count: n, usd: estimate(MODELS.qa, { tokensIn: 1500 * n, tokensOut: 0 }) });
 
-// ไม่มี --foreground → job; มี → รัน work ในโปรเซสนี้ พร้อมแนบ details.resume เมื่อพัง
-export async function runEntity({ dir, projectRef, slug, command, label, foreground, work }) {
+// ไม่มี --foreground → job; มี → รัน work ในโปรเซสนี้ โดยลงทะเบียนเป็น job ใต้ lock เดียวกับ startJob
+// (worker ที่ถูก spawn มี job ของตัวเองอยู่แล้ว จึงไม่ลงทะเบียนซ้ำ) แนบ details.resume เมื่อพัง
+export async function runEntity({ dir, projectRef, slug, command, label, foreground, work, jobExtra = {} }) {
   if (!foreground) {
     mkdirSync(join(dir, ".jobs"), { recursive: true });
     const job = startJob({ jobRoot: jobRootOf(dir), command, label });
-    return { project: slug, job: { id: job.id, dir: job.dir, status: job.status }, next: [`vf wait ${projectRef} ${job.id}`] };
+    return { project: slug, ...jobExtra, job: { id: job.id, dir: job.dir, status: job.status }, next: [`vf wait ${projectRef} ${job.id}`] };
   }
-  const startedAt = new Date().toISOString();
+  let reg = null;
+  if (!isWorker()) {
+    mkdirSync(join(dir, ".jobs"), { recursive: true });
+    reg = registerJob({ jobRoot: jobRootOf(dir), command, label, pid: process.pid });
+  }
+  const end = (outcome) => {
+    if (!reg) return;
+    try {
+      finishJob(reg.dir, outcome);
+    } catch {}
+  };
   try {
-    return await work(startedAt);
+    const out = await work({ run: randomBytes(4).toString("hex") });
+    end({ result: out });
+    return out;
   } catch (e) {
     if (e instanceof VfError) e.details = { ...e.details, project: slug, resume: `vf ${command.map(shq).join(" ")}` };
+    end({ error: { code: e instanceof VfError ? e.code : "INTERNAL", message: e?.message ?? String(e), details: e?.details } });
     throw e;
   }
 }

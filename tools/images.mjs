@@ -64,7 +64,7 @@ export async function generateImage({
   if (!kind) throw new VfError("USAGE", "generateImage ต้องระบุ kind");
   if (refs.length > MAX_REFS) throw new VfError("INTERNAL", `klein รับภาพอ้างอิงได้ไม่เกิน ${MAX_REFS} ภาพ (ส่งมา ${refs.length})`);
   const costDir = join(projectDir, ".vf");
-  const row = { project: meta.project, clip: meta.clip, step: meta.step ?? "image", model: MODELS.image };
+  const row = { project: meta.project, clip: meta.clip, run: meta.run, step: meta.step ?? "image", model: MODELS.image };
   const finalPrompt = prompt + SUFFIX;
   const key = cacheKey({ model: MODELS.image, prompt: finalPrompt, refs, aspect, resolution, seed });
 

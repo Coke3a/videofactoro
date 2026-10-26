@@ -38,7 +38,7 @@ export async function clef({ state, questions, images = [], videos, audio, meta 
   };
   if (videos?.length) input.videos = videos;
   if (audio?.length) input.audio = audio;
-  const row = { project: meta.project, clip: meta.clip, step: meta.step, model: MODELS.qa };
+  const row = { project: meta.project, clip: meta.clip, run: meta.run, step: meta.step, model: MODELS.qa };
   let result;
   try {
     ({ result } = await withRetry(() => run(MODELS.qa, input, { meta })));

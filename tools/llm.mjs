@@ -98,7 +98,7 @@ export async function llmJson({ system, user, schema, validate, images, maxToken
         const { result } = await withRetry(() => run(model, input, { meta }));
         ({ text, usage } = readText(model, result));
       } catch (err) {
-        logCost(costDir, { project: meta.project, clip: meta.clip, step: meta.step, model, outcome: "error", units: {}, usd: null });
+        logCost(costDir, { project: meta.project, clip: meta.clip, step: meta.step, run: meta.run, model, outcome: "error", units: {}, usd: null });
         if (err instanceof VfError && err.code === "PROVIDER") {
           lastErr = err;
           allIssues.push(`${model} รอบ ${round}: ${err.message}`);
@@ -117,7 +117,7 @@ export async function llmJson({ system, user, schema, validate, images, maxToken
       if (usage.out !== null) units.tokensOut = usage.out;
       const usd = usage.in !== null && usage.out !== null ? estimate(model, units) : null;
       logCost(costDir, {
-        project: meta.project, clip: meta.clip, step: meta.step, model,
+        project: meta.project, clip: meta.clip, step: meta.step, run: meta.run, model,
         outcome: issues.length ? "invalid" : "ok", units, usd,
       });
       if (!issues.length) return { data: parsed.value, model, usage };

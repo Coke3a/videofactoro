@@ -2,7 +2,7 @@
 import { existsSync } from "node:fs";
 import { loadEnv } from "../tools/env.mjs";
 import { emit, fail, VfError, EXIT } from "../tools/out.mjs";
-import { finishJob } from "../tools/jobs.mjs";
+import { finishJob, setWorkerJob } from "../tools/jobs.mjs";
 
 const COMMANDS = {
   setup: "setup",
@@ -51,6 +51,7 @@ async function run(argv) {
 }
 
 const { argv: args, jobDir, bad } = takeJobDir(process.argv.slice(2));
+if (jobDir) setWorkerJob(jobDir);
 const safeFinish = (outcome) => {
   if (!jobDir) return;
   try {
