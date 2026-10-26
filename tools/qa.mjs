@@ -29,6 +29,7 @@ export async function clef({ state, questions, images = [], videos, audio, meta 
   for (const [k, list] of [["images", images], ["videos", videos], ["audio", audio]]) {
     if (list && list.length > MAX[k]) throw new VfError("INTERNAL", `clef-omni รับ ${k} ได้ไม่เกิน ${MAX[k]} (ส่งมา ${list.length})`);
   }
+  if (!costDir) throw new VfError("INTERNAL", "clef ต้องระบุ costDir");
   const input = {
     model: "clef-omni",
     state: typeof state === "string" ? state : JSON.stringify(state),
@@ -54,22 +55,47 @@ export async function clef({ state, questions, images = [], videos, audio, meta 
   return answers;
 }
 
+const DEFAULT_STATE = "An image to check.";
+const isolated = (err, codes) => err instanceof VfError && codes.includes(err.code);
+const errVerdict = (code) => ({ pass: false, score: -Infinity, reasons: [`QA error: ${code}`] });
+
 export async function pickBest(candidates, rule, ctx, { meta = {}, costDir } = {}) {
+  if (!candidates?.length) throw new VfError("INTERNAL", "pickBest ต้องมี candidates อย่างน้อย 1 ภาพ");
+  if (!costDir) throw new VfError("INTERNAL", "pickBest ต้องระบุ costDir");
   const ranked = [];
-  for (const [i, c] of candidates.entries()) {
+  let errors = 0;
+  for (const [i, candidate] of candidates.entries()) {
     log(`QA ภาพ ${i + 1}/${candidates.length}`);
-    const answers = await clef({
-      state: rule.state ? rule.state(ctx) : "",
-      questions: rule.questions(ctx),
-      images: [await toQaImage(c.file)],
-      meta,
-      costDir,
-    });
-    ranked.push({ ...c, verdict: rule.judge(answers) });
+    // ข้ามเฉพาะความผิดพลาดของภาพเดียว; CONFIG/USAGE/BLOCKED ต้องหยุดทันที
+    let image;
+    try {
+      image = await toQaImage(candidate.file);
+    } catch (err) {
+      if (!isolated(err, ["INTERNAL"])) throw err;
+      errors++;
+      ranked.push({ candidate, verdict: errVerdict(err.code) });
+      continue;
+    }
+    try {
+      const answers = await clef({
+        state: rule.state ? rule.state(ctx) : DEFAULT_STATE,
+        questions: rule.questions(ctx),
+        images: [image],
+        meta,
+        costDir,
+      });
+      ranked.push({ candidate, verdict: rule.judge(answers) });
+    } catch (err) {
+      if (!isolated(err, ["PROVIDER"])) throw err;
+      errors++;
+      ranked.push({ candidate, verdict: errVerdict(err.code) });
+    }
   }
+  if (errors === candidates.length) throw new VfError("PROVIDER", "QA ล้มเหลวทุกภาพ");
   ranked.sort((a, b) => Number(b.verdict.pass) - Number(a.verdict.pass) || b.verdict.score - a.verdict.score);
-  if (ranked.length && !ranked[0].verdict.pass) ranked[0] = { ...ranked[0], warning: NO_PASS_WARNING };
-  return { best: ranked[0], ranked };
+  const best = { ...ranked[0].candidate };
+  if (!ranked[0].verdict.pass) best.warning = NO_PASS_WARNING;
+  return { best, ranked };
 }
 
 export async function generateWithQa({ generate, check, maxRerolls = 2 }) {

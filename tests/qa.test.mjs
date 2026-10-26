@@ -50,21 +50,36 @@ test("toQaImage คืน data URI ของ JPEG กว้าง 640", async ()
 test("clef body ใช้ model clef-omni และ images เป็น data URI", async () => {
   fake(ok({ a: n(0.9) }));
   const images = [await toQaImage(TINY)];
-  const answers = await clef({ state: { x: 1 }, questions: { a: { type: "noul", instructions: "q" } }, images, meta: { step: "qa" }, costDir: dir });
+  const answers = await clef({ state: { x: 1 }, questions: { a: { type: "noul", instructions: "q" } }, images, videos: ["v1"], audio: ["a1"], meta: { step: "qa" }, costDir: dir });
   assert.deepEqual(answers, { a: n(0.9) });
   assert.match(calls[0].url, /\/ai\/run\/@cf\/cloudflare\/clef-omni$/);
   const b = bodyOf(0);
   assert.equal(b.model, "clef-omni");
   assert.equal(typeof b.state, "string");
   assert.ok(b.images[0].startsWith("data:image/jpeg;base64,"));
-  assert.equal("videos" in b, false);
-  assert.equal("audio" in b, false);
+  assert.equal(b.state, '{"x":1}');
+  assert.deepEqual(b.videos, ["v1"]);
+  assert.deepEqual(b.audio, ["a1"]);
+  assert.equal(b.questions.a.instructions, "q");
   const rows = readCosts(dir);
   assert.equal(rows.length, 1);
   assert.equal(rows[0].outcome, "ok");
   assert.equal(rows[0].step, "qa");
   assert.equal(rows[0].units.tokensIn, 1000);
   assert.ok(Math.abs(rows[0].usd - 0.00015) < 1e-9);
+});
+
+test("clef ไม่ส่ง videos/audio เมื่อไม่ได้ให้", async () => {
+  fake(ok({}));
+  await clef({ state: "s", questions: {}, meta: {}, costDir: dir });
+  assert.equal("videos" in bodyOf(0), false);
+  assert.equal("audio" in bodyOf(0), false);
+});
+
+test("clef ไม่มี costDir -> INTERNAL ก่อนเรียกเครือข่าย", async () => {
+  fake(ok({}));
+  await assert.rejects(clef({ state: "s", questions: {}, meta: {} }), (e) => e.code === "INTERNAL");
+  assert.equal(calls.length, 0);
 });
 
 test("clef จำกัดจำนวน images/videos/audio", async () => {
@@ -127,11 +142,12 @@ test("pickBest เลือกภาพที่ score สูงสุดใน�
   const cands = files();
   const r = await pickBest(cands, RULES.placePlate, ctx, { meta: { step: "qa" }, costDir: dir });
   assert.equal(r.best.id, "c");
-  assert.deepEqual(r.ranked.map((x) => x.id), ["c", "a", "b"]);
+  assert.deepEqual(r.ranked.map((x) => x.candidate.id), ["c", "a", "b"]);
   assert.equal(r.ranked[0].verdict.pass, true);
   assert.equal(r.ranked[2].verdict.pass, false);
   assert.equal(r.best.warning, undefined);
   assert.equal("verdict" in cands[0], false);
+  assert.equal("verdict" in r.best, false);
   assert.equal(calls.length, 3);
   assert.equal(bodyOf(0).images.length, 1);
   assert.equal(readCosts(dir).length, 3);
@@ -143,7 +159,44 @@ test("pickBest ไม่มีภาพผ่าน คืนภาพคะแ�
   const r = await pickBest(cands, RULES.placePlate, ctx, { meta: { step: "qa" }, costDir: dir });
   assert.equal(r.best.id, "b");
   assert.equal(r.best.warning, "ไม่มีภาพผ่านเกณฑ์ QA — ใช้ภาพคะแนนสูงสุด");
+  assert.equal(r.ranked[0].candidate.warning, undefined);
   assert.equal("warning" in cands[1], false);
+});
+
+test("pickBest ส่ง state และ look ใน body; default state เมื่อ rule ไม่มี", async () => {
+  fake(ok({ matches_look: n(1) }), ok({ x: n(1) }));
+  await pickBest([files()[0]], RULES.characterRef, { look: "red fox", style: "anime" }, { meta: {}, costDir: dir });
+  assert.match(bodyOf(0).state, /anime/);
+  assert.match(bodyOf(0).questions.matches_look.instructions, /red fox/);
+  const rule = { questions: () => ({ x: { type: "noul", instructions: "q" } }), judge: () => V(true, 1) };
+  await pickBest([files()[0]], rule, {}, { meta: {}, costDir: dir });
+  assert.equal(bodyOf(1).state, "An image to check.");
+});
+
+test("pickBest ข้ามภาพที่ provider error แล้วทำต่อ", async () => {
+  fake(ok(place(0.6)), reply("boom", 500), reply("boom", 500), reply("boom", 500), reply("boom", 500), ok(place(0.8)));
+  const r = await pickBest(files(), RULES.placePlate, ctx, { meta: {}, costDir: dir });
+  assert.equal(r.best.id, "c");
+  const bad = r.ranked.find((x) => x.candidate.id === "b");
+  assert.equal(bad.verdict.pass, false);
+  assert.equal(bad.verdict.score, -Infinity);
+  assert.deepEqual(bad.verdict.reasons, ["QA error: PROVIDER"]);
+});
+
+test("pickBest ทุกภาพ error -> PROVIDER; CONFIG throw ทันที; ไม่มี candidates -> INTERNAL", async () => {
+  fake(reply("boom", 500));
+  await assert.rejects(pickBest(files(), RULES.placePlate, ctx, { meta: {}, costDir: dir }), (e) => e.code === "PROVIDER");
+  fake(reply("not found", 404));
+  await assert.rejects(pickBest(files(), RULES.placePlate, ctx, { meta: {}, costDir: dir }), (e) => e.code === "CONFIG");
+  assert.equal(calls.length, 1);
+  await assert.rejects(pickBest([], RULES.placePlate, ctx, { meta: {}, costDir: dir }), (e) => e.code === "INTERNAL");
+});
+
+test("pickBest ไฟล์ภาพเสีย (toQaImage INTERNAL) ถูกข้าม", async () => {
+  fake(ok(place(0.8)));
+  const r = await pickBest([{ file: path.join(dir, "missing.png"), id: "x" }, files()[0]], RULES.placePlate, ctx, { meta: {}, costDir: dir });
+  assert.equal(r.best.id, "a");
+  assert.deepEqual(r.ranked[1].verdict.reasons, ["QA error: INTERNAL"]);
 });
 
 const V = (pass, score) => ({ pass, score, reasons: [] });
