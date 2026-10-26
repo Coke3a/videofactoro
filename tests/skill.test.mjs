@@ -47,3 +47,16 @@ test("symlink .claude/skills/videofactoro ชี้ถึง skills/videofactoro
   assert.ok(existsSync(join(link, "SKILL.md")));
   assert.equal(realpathSync(link), realpathSync(join(root, "skills/videofactoro")));
 });
+
+test("SKILL.md: failed job = exit 0 + status failed, ใช้ error.code, ลองซ้ำสูงสุด 2 ครั้ง, CONFIG/USAGE ห้ามลองซ้ำ", () => {
+  const sec = skill.slice(skill.indexOf("## งานยาว"), skill.indexOf("## โหมดวิดีโอ"));
+  assert.match(sec, /exit 0/);
+  assert.match(sec, /status:\s*"failed"/);
+  assert.match(sec, /error\.code/);
+  assert.match(sec, /`resume`/);
+  assert.match(sec, /สูงสุด 2 ครั้ง/);
+  assert.ok((sec.match(/สูงสุด 2 ครั้ง/g) ?? []).length >= 2, "ทั้ง BLOCKED และ PROVIDER/INTERNAL ต้องมีเพดาน 2 ครั้ง");
+  assert.match(sec, /\| 3 \| CONFIG \|[^\n]*ห้ามลองซ้ำ[^\n]*vf setup/);
+  assert.match(sec, /\| 2 \| USAGE \|[^\n]*ห้ามลองซ้ำแบบไม่ดู/);
+  assert.match(sec, /worker หยุดกลางทาง/);
+});

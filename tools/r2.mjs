@@ -86,17 +86,30 @@ function checkStatus(res, what, key) {
   if (!res.ok) throw new VfError("PROVIDER", `R2 ${what}${key ? ` ${key}` : ""} ล้มเหลว (HTTP ${res.status})`);
 }
 
+const NOT_READY = "bucket ยังไม่พร้อม — รัน vf setup";
+
+// งานกับไฟล์ใน bucket: 403 หรือ 404 NoSuchBucket = bucket ยังไม่ได้ตั้ง → CONFIG ให้ผู้ใช้รัน vf setup
+async function checkObjectStatus(res, what, key) {
+  if (res.status === 403) throw new VfError("CONFIG", `${NOT_READY} (R2 ${what} ${key}, HTTP 403)`);
+  if (res.status === 404) {
+    let body = "";
+    try { body = await res.text(); } catch { /* no body */ }
+    if (/NoSuchBucket/.test(body)) throw new VfError("CONFIG", `${NOT_READY} (R2 ${what} ${key}, NoSuchBucket)`);
+  }
+  checkStatus(res, what, key);
+}
+
 export async function putObject(key, bytes, contentType) {
   const cfg = await r2Config();
   const res = await send(cfg, "PUT", `/${cfg.bucket}/${key}`, { key, body: bytes, headers: { "content-type": contentType }, what: "อัปโหลด" });
-  checkStatus(res, "อัปโหลด", key);
+  await checkObjectStatus(res, "อัปโหลด", key);
 }
 
 export async function headObject(key) {
   const cfg = await r2Config();
   const res = await send(cfg, "HEAD", `/${cfg.bucket}/${key}`, { key, what: "ตรวจสอบไฟล์" });
   if (res.status === 404) return false;
-  checkStatus(res, "ตรวจสอบไฟล์", key);
+  await checkObjectStatus(res, "ตรวจสอบไฟล์", key);
   return true;
 }
 

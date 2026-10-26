@@ -42,22 +42,24 @@ vf place add <slug> --prompt "..."          # เพิ่มสถานที�
 `project create`, `character add`, `place add` คืน `{job, next}` ทันที (ยกเว้นใส่ `--foreground`) แล้วงานรันเบื้องหลัง
 
 1. `vf wait <slug> [job-id]` บล็อกได้สูงสุด 540 วินาที (ปรับด้วย `--timeout`)
-2. หมดเวลาแต่ยังไม่เสร็จ = เรียก `vf wait` ซ้ำ **วนจน status เป็น `done` หรือ `failed`**
+2. หมดเวลาแต่ยังไม่เสร็จ (`status:"running"`) = เรียก `vf wait` ซ้ำ **วนจน status เป็น `done` หรือ `failed`**
 3. หนึ่ง project รันได้ทีละ job ถ้าสั่งซ้อนจะได้ USAGE (exit 2) ให้ `vf wait` ของเดิมให้จบก่อน
-4. `failed` หรือ error: ดู `details.resume` (create, character add, place add) เป็นคำสั่งเดิมที่ต้องรันซ้ำ จะทำต่อจากจุดค้างโดยไม่จ่ายซ้ำ
+4. **job ที่ล้ม `vf wait` ยังจบด้วย exit 0** แต่ JSON มี `status:"failed"` และ `error:{code,message}` ให้เอา `error.code` ไปเปิดตารางด้านล่างเหมือน exit code (อย่าดูแค่ exit)
+5. job ที่ `failed` มี `resume` (คำสั่งเดิมที่ quote แล้ว พร้อมรัน) ส่วนคำสั่งที่ `--foreground` ล้มมี `error.details.resume` แบบเดียวกัน รันซ้ำแล้วทำต่อจากจุดค้างโดยไม่จ่ายซ้ำ
+6. ถ้า `error.message` เป็น "worker หยุดกลางทาง" (code INTERNAL) แปลว่า worker ตาย (เครื่องดับ/ถูก kill) ให้ทำตามแถว INTERNAL
 
 ## ผลลัพธ์และ exit code
 
-stdout มี JSON ก้อนเดียวเสมอ (`{ok:true,...}` หรือ `{ok:false,error:{code,message,details}}`) log ไปที่ stderr
+stdout มี JSON ก้อนเดียวเสมอ (`{ok:true,...}` หรือ `{ok:false,error:{code,message,details}}`) log ไปที่ stderr · ใช้ตารางนี้กับทั้ง exit code ของคำสั่ง และ `error.code` ของ job ที่ `failed`
 
 | exit | code | ทำอย่างไร |
 |---|---|---|
-| 0 | ok | ไปขั้นถัดไป (`next` แนะนำคำสั่งต่อ) |
-| 2 | USAGE | แก้ argument / project ไม่มี / job ยังรันอยู่ แล้วเรียกใหม่ |
-| 3 | CONFIG | env, token หรือเครดิตมีปัญหา **หยุด ห้ามลองซ้ำ** รายงานผู้ใช้ให้รัน `bash tools/set-env.sh` แล้ว `node bin/vf.mjs setup` |
-| 4 | BLOCKED | ติด content filter เขียน prompt ใหม่ให้ทั่วไปและอ่อนลง (ไม่มีชื่อลิขสิทธิ์) แล้วลองใหม่ |
-| 5 | PROVIDER | ผู้ให้บริการล่ม/timeout รันคำสั่งเดิมซ้ำ (ใช้ `details.resume`) |
-| 1 | INTERNAL | บั๊กของ tool รายงานข้อความ error ตามจริง |
+| 0 | ok | ไปขั้นถัดไป (`next` แนะนำคำสั่งต่อ) · ถ้าเป็นผลของ `vf wait` ให้ดู `status` ด้วย |
+| 2 | USAGE | อ่าน `error.message` ก่อนแล้วแก้ตามนั้น (argument ผิด, ไม่มี project, job ยังรันอยู่ → `vf wait` ให้จบ) **ห้ามลองซ้ำแบบไม่ดูข้อความ** |
+| 3 | CONFIG | env, token, bucket หรือเครดิตมีปัญหา **หยุดและรายงานผู้ใช้ ห้ามลองซ้ำ** ให้ผู้ใช้รันเองใน Terminal: `bash tools/set-env.sh` แล้ว `node bin/vf.mjs setup` (คือ `vf setup` ผู้ใช้เป็นคนรัน agent ห้ามรันแทน) |
+| 4 | BLOCKED | ติด content filter เขียน prompt ใหม่ให้ทั่วไปและอ่อนลง (ไม่มีชื่อลิขสิทธิ์) แล้วลองใหม่ **สูงสุด 2 ครั้ง** ยังติดอยู่ = หยุดและรายงาน |
+| 5 | PROVIDER | ผู้ให้บริการล่ม/timeout รัน `resume` (หรือ `error.details.resume`) **สูงสุด 2 ครั้ง** ยังล้ม = หยุดและรายงาน |
+| 1 | INTERNAL | บั๊กของ tool หรือ worker ตาย: รัน `resume` (หรือ `error.details.resume`) **สูงสุด 2 ครั้ง** ยังล้ม = หยุดและรายงานข้อความ error ตามจริง |
 
 ## โหมดวิดีโอ
 

@@ -127,3 +127,18 @@ test("headObject/putObject: 403 -> CONFIG, 500 -> PROVIDER, 404 head -> false", 
   recorder(() => 404);
   assert.equal(await headObject("k"), false);
 });
+
+test("putObject 404 NoSuchBucket และ head/put 403 -> CONFIG 'bucket ยังไม่พร้อม — รัน vf setup'; 401/500 เหมือนเดิม", async () => {
+  const READY = "bucket ยังไม่พร้อม — รัน vf setup";
+  setFetch(async (url, init = {}) => (init.method === "HEAD"
+    ? new Response(null, { status: 404 })
+    : new Response("<Error><Code>NoSuchBucket</Code></Error>", { status: 404 })));
+  await assert.rejects(putObject("k", Buffer.from("a"), "text/plain"), (e) => e.code === "CONFIG" && e.message.includes(READY));
+  recorder(() => 403);
+  await assert.rejects(headObject("k"), (e) => e.code === "CONFIG" && e.message.includes(READY));
+  await assert.rejects(putObject("k", Buffer.from("a"), "text/plain"), (e) => e.code === "CONFIG" && e.message.includes(READY));
+  recorder(() => 401);
+  await assert.rejects(putObject("k", Buffer.from("a"), "text/plain"), (e) => e.code === "CONFIG" && !e.message.includes(READY));
+  setFetch(async () => new Response("<Error><Code>NoSuchKey</Code></Error>", { status: 404 }));
+  await assert.rejects(putObject("k", Buffer.from("a"), "text/plain"), (e) => e.code === "PROVIDER");
+});
