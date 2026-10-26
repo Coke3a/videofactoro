@@ -32,7 +32,8 @@ Script: a scratch file calling tools/ directly (token, llmJson for each model, g
   - Visual check against the cat ref: the same character (colours, stripes, belly patch, ears, tail), with the pose changed to sitting and smiling as the prompt asked. The output is good.
   - It is neuron-billed; the exact cost is still to be read from the gateway log.
 - So images and character refs can work with no R2 through flux-2-klein-9b.
-- Later the same day, every flux-2 call (9b and 4b) failed with 500 or 408 for a while, while flux-1-schnell kept working. The seed field is therefore still unconfirmed.
+- Later the same day, every flux-2 call (9b and 4b) failed with 500 or 408 for about an hour, while flux-1-schnell kept working. After that, some calls still returned 500 intermittently; `withRetry` already retries 500 errors (PROVIDER_DOWN).
+- `seed` (sent as a string) is accepted. Two runs with the same seed and prompt at 768x1360 gave byte-identical output (sha e780c2214eb2, 117850 bytes, about 2.1–2.7 s), so the output is deterministic, unlike flux-3-image-klein.
 
 ## a - klein-9b (768x1360, refs 1..4 inline multipart)
 
