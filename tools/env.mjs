@@ -5,6 +5,8 @@ import { VfError } from "./out.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
+export const envPath = (root = REPO_ROOT) => path.join(root, ".env");
+
 function parseInto(file) {
   for (const line of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
     const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/);
@@ -14,17 +16,11 @@ function parseInto(file) {
   }
 }
 
-// Walk up from startDir to find .env, then fall back to the repo-root .env. Never overrides existing env.
-export function loadEnv(startDir = process.cwd()) {
+// spec §12: env ของ process ก่อน แล้วจึง .env ที่ root ของ repo เท่านั้น (ไม่ไล่หาจาก cwd) · ไม่ทับค่าที่มีอยู่
+export function loadEnv(root = REPO_ROOT) {
   if (process.env.VF_NO_DOTENV === "1") return null;
-  const candidates = [];
-  for (let d = path.resolve(startDir); ; d = path.dirname(d)) {
-    candidates.push(path.join(d, ".env"));
-    if (path.dirname(d) === d) break;
-  }
-  candidates.push(path.join(REPO_ROOT, ".env"));
-  const f = candidates.find((c) => fs.existsSync(c));
-  if (!f) return null;
+  const f = envPath(root);
+  if (!fs.existsSync(f)) return null;
   parseInto(f);
   return f;
 }

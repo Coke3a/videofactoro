@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { loadEnv, requireEnv, secretValues } from "../tools/env.mjs";
+import { fileURLToPath } from "node:url";
+import { loadEnv, envPath, requireEnv, secretValues } from "../tools/env.mjs";
 
 function tmpEnv(content) {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), "vf-env-"));
@@ -63,4 +64,24 @@ test("VF_NO_DOTENV=1 ไม่โหลดไฟล์ใดเลย", () => {
     assert.equal(loadEnv(d), null);
     assert.equal(process.env.NODOT_TEST, undefined);
   } finally { clean("VF_NO_DOTENV", "NODOT_TEST"); fs.rmSync(d, { recursive: true }); }
+});
+
+test("loadEnv อ่านเฉพาะ .env ที่ root (repo) ไม่ไล่หา .env ใน cwd หรือโฟลเดอร์แม่", () => {
+  const outer = tmpEnv("CWD_TEST=from-cwd\n");
+  const root = path.join(outer, "repo");
+  fs.mkdirSync(root);
+  const prev = process.cwd();
+  process.chdir(outer);
+  try {
+    assert.equal(loadEnv(root), null);
+    assert.equal(process.env.CWD_TEST, undefined);
+    fs.writeFileSync(path.join(root, ".env"), "CWD_TEST=from-root\n");
+    assert.equal(loadEnv(root), path.join(root, ".env"));
+    assert.equal(process.env.CWD_TEST, "from-root");
+  } finally { process.chdir(prev); clean("CWD_TEST"); fs.rmSync(outer, { recursive: true }); }
+});
+
+test("ค่าเริ่มต้นของไฟล์ .env คือ <repo>/.env (ไม่เปิดไฟล์)", () => {
+  const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  assert.equal(envPath(), path.join(repo, ".env"));
 });
