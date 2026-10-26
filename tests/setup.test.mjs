@@ -30,6 +30,7 @@ afterEach(() => {
   setFetch((...a) => globalThis.fetch(...a));
 });
 
+const runBodies = [];
 function fakeCloudflare({ bucketExists = false, corrupt = false } = {}) {
   const objects = new Map();
   const seen = [];
@@ -39,6 +40,7 @@ function fakeCloudflare({ bucketExists = false, corrupt = false } = {}) {
     seen.push(`${method} ${u.hostname}${u.pathname}`);
     if (u.hostname === "api.cloudflare.com" && u.pathname.endsWith("/ai/models/search")) return new Response("{}", { status: 200 });
     if (u.pathname.includes("/ai/run")) {
+      runBodies.push(JSON.parse(init.body));
       const text = '{"ok":true}';
       return new Response(JSON.stringify({ success: true, result: { candidates: [{ content: { parts: [{ text }] } }], usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 3 } } }), { status: 200 });
     }
@@ -65,6 +67,7 @@ test("setup: ทุก check ผ่านด้วย Cloudflare ปลอม �
   const by = Object.fromEntries(checks.map((c) => [c.name, c]));
   for (const n of ["cf:token", "r2:bucket", "r2:presign", "cf:credits"]) assert.equal(by[n].ok, true, n + " " + by[n].detail);
   assert.ok(seen.some((s) => s.startsWith("PUT") && s.endsWith("/bkt")));
+  assert.equal(runBodies.at(-1).input.generationConfig.maxOutputTokens, 2112);
   const text = JSON.stringify(checks) + errLog.join("");
   for (const v of ["SECRETSECRET", "tok-secret-123456", "X-Amz", "AKID"]) assert.ok(!text.includes(v), v);
 });

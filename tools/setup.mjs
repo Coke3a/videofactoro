@@ -17,7 +17,7 @@ const creditsCheck = (costDir) =>
       system: "Reply with JSON only.",
       user: 'Return {"ok":true}.',
       schema: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
-      maxTokens: 16,
+      maxTokens: 64,
       meta: { step: "setup", item: null },
       costDir,
     });

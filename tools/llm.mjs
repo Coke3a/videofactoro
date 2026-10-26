@@ -23,13 +23,26 @@ function strip(node, drop, isNameMap = false) {
 export const geminiStrip = (schema) =>
   strip(schema, (k, n) => k === "additionalProperties" || (k === "enum" && n.type === "integer"));
 
-export const anthropicStrip = (schema) => strip(schema, (k) => k === "minItems" || k === "maxItems");
+function closeObjects(node, isNameMap = false) {
+  if (Array.isArray(node)) return node.map((n) => closeObjects(n));
+  if (node === null || typeof node !== "object") return node;
+  const out = {};
+  for (const [k, v] of Object.entries(node)) out[k] = closeObjects(v, !isNameMap && k === "properties");
+  if (!isNameMap && out.type === "object") out.additionalProperties = false;
+  return out;
+}
+
+export const anthropicStrip = (schema) =>
+  closeObjects(strip(schema, (k) => k === "minItems" || k === "maxItems"));
 
 function splitDataUri(uri) {
   const m = /^data:([^;,]+);base64,(.*)$/s.exec(uri);
   if (!m) throw new VfError("USAGE", "ภาพต้องเป็น data URI แบบ data:<mime>;base64,<data>");
   return { mime: m[1], data: m[2] };
 }
+
+// วัดจริง: maxOutputTokens 64 -> thinking กิน 61 จน MAX_TOKENS และ parts ว่าง; thinking นับรวมใน maxOutputTokens
+const THINKING_HEADROOM = 2048;
 
 export function buildInput(model, { system, messages, schema, maxTokens, images = [] }) {
   const firstUser = messages.findIndex((m) => m.role === "user");
@@ -56,25 +69,29 @@ export function buildInput(model, { system, messages, schema, maxTokens, images 
     generationConfig: {
       responseMimeType: "application/json",
       responseSchema: geminiStrip(schema),
-      maxOutputTokens: maxTokens,
+      maxOutputTokens: maxTokens + THINKING_HEADROOM,
     },
   };
 }
 
 export function readText(model, result) {
   const r = obj(result);
-  const empty = { text: "", usage: { in: null, out: null } };
+  const empty = { text: "", usage: { in: null, out: null }, truncated: false };
   if (!r) return empty;
   if (family(model) === "anthropic") {
     if (!Array.isArray(r.content)) return empty;
     const text = r.content.map((b) => (obj(b)?.type === "text" && typeof b.text === "string" ? b.text : "")).join("");
     const u = obj(r.usage);
-    return { text, usage: { in: num(u?.input_tokens), out: num(u?.output_tokens) } };
+    return { text, usage: { in: num(u?.input_tokens), out: num(u?.output_tokens) }, truncated: r.stop_reason === "max_tokens" };
   }
-  const parts = obj(Array.isArray(r.candidates) ? r.candidates[0] : null)?.content?.parts;
+  const cand = obj(Array.isArray(r.candidates) ? r.candidates[0] : null);
+  const parts = cand?.content?.parts;
   const text = (Array.isArray(parts) ? parts : []).map((p) => (typeof obj(p)?.text === "string" ? p.text : "")).join("");
   const u = obj(r.usageMetadata);
-  return { text, usage: { in: num(u?.promptTokenCount), out: num(u?.candidatesTokenCount) } };
+  const cOut = num(u?.candidatesTokenCount);
+  const tOut = num(u?.thoughtsTokenCount);
+  const out = cOut === null && tOut === null ? null : (cOut ?? 0) + (tOut ?? 0);
+  return { text, usage: { in: num(u?.promptTokenCount), out }, truncated: cand?.finishReason === "MAX_TOKENS" };
 }
 
 function parseJson(text) {
@@ -82,6 +99,7 @@ function parseJson(text) {
   try { return { value: JSON.parse(t) }; } catch { return null; }
 }
 
+const TRUNCATED_ISSUE = "คำตอบถูกตัดเพราะ maxTokens ไม่พอ";
 const PARSE_ISSUE = "ตอบไม่ใช่ JSON ที่ parse ได้";
 const feedback = (issues) => `แก้ปัญหาเหล่านี้แล้วตอบ JSON ใหม่ทั้งก้อน:\n${issues.map((i) => `- ${i}`).join("\n")}`;
 
@@ -93,10 +111,10 @@ export async function llmJson({ system, user, schema, validate, images, maxToken
     for (let round = 1; round <= 2; round++) {
       log(`LLM ${model} รอบ ${round}`);
       const input = buildInput(model, { system, messages, schema, maxTokens, images });
-      let text, usage;
+      let text, usage, truncated;
       try {
         const { result } = await withRetry(() => run(model, input, { meta }));
-        ({ text, usage } = readText(model, result));
+        ({ text, usage, truncated } = readText(model, result));
       } catch (err) {
         logCost(costDir, { ...costRow(meta, model), outcome: failOutcome(err), units: {}, usd: null });
         if (err instanceof VfError && err.code === "PROVIDER") {
@@ -108,7 +126,7 @@ export async function llmJson({ system, user, schema, validate, images, maxToken
       }
       lastErr = null;
       const parsed = parseJson(text);
-      let issues = [PARSE_ISSUE];
+      let issues = [truncated ? TRUNCATED_ISSUE : PARSE_ISSUE];
       if (parsed) {
         try { issues = validate ? validate(parsed.value) : []; } catch (e) { issues = ["validator error: " + e.message]; }
       }

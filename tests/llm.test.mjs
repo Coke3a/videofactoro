@@ -51,7 +51,7 @@ test("gemini input ไม่มี additionalProperties และ enum ของ
   const s = JSON.stringify(input);
   assert.ok(!s.includes("additionalProperties"));
   assert.equal(input.generationConfig.responseMimeType, "application/json");
-  assert.equal(input.generationConfig.maxOutputTokens, 100);
+  assert.equal(input.generationConfig.maxOutputTokens, 100 + 2048);
   assert.equal(input.generationConfig.responseSchema.properties.n.enum, undefined);
   assert.equal(input.generationConfig.responseSchema.properties.list.minItems, 1);
   assert.deepEqual(input.systemInstruction, { parts: [{ text: "sys" }] });
@@ -84,10 +84,10 @@ test("strip ไม่แก้ schema ต้นฉบับ และ readText �
   assert.equal(SCHEMA.additionalProperties, false);
   assert.equal(SCHEMA.properties.list.minItems, 1);
   const g = readText(G, JSON.parse(gem("ab", 7, 3)).result);
-  assert.deepEqual(g, { text: "ab", usage: { in: 7, out: 3 } });
+  assert.deepEqual(g, { text: "ab", usage: { in: 7, out: 3 }, truncated: false });
   const a = readText(A, JSON.parse(ant("cd", 8, 4)).result);
-  assert.deepEqual(a, { text: "cd", usage: { in: 8, out: 4 } });
-  assert.deepEqual(readText(G, null), { text: "", usage: { in: null, out: null } });
+  assert.deepEqual(a, { text: "cd", usage: { in: 8, out: 4 }, truncated: false });
+  assert.deepEqual(readText(G, null), { text: "", usage: { in: null, out: null }, truncated: false });
 });
 
 test("llmJson ส่ง issues กลับไปรอบสอง", async () => {
@@ -214,4 +214,53 @@ test("แถว cost ของ llm มี step/item/run; content filter → outc
   await assert.rejects(llmJson({ system: "s", user: "u", schema: SCHEMA, meta: { project: "p", step: "character", item: "heron", run: "r1" }, costDir: dir }), (e) => e.code === "BLOCKED");
   const rows = readCosts(dir);
   assert.deepEqual(rows.map((r) => [r.step, r.item, r.run, r.outcome]), [["character", "heron", "r1", "ok"], ["character", "heron", "r1", "blocked"]]);
+});
+
+test("anthropicStrip ตั้ง additionalProperties:false ทุก object ทุกความลึก และไม่แก้ต้นฉบับ", () => {
+  const schema = {
+    type: "object",
+    properties: {
+      additionalProperties: { type: "string" },
+      type: { type: "string" },
+      list: { type: "array", minItems: 1, items: { type: "object", properties: { x: { type: "string" } } } },
+      u: { anyOf: [{ type: "object", properties: {} }, { type: "null" }] },
+    },
+  };
+  const copy = JSON.stringify(schema);
+  const a = anthropicStrip(schema);
+  assert.equal(a.additionalProperties, false);
+  assert.equal(a.properties.list.items.additionalProperties, false);
+  assert.equal(a.properties.u.anyOf[0].additionalProperties, false);
+  assert.equal(a.properties.u.anyOf[1].additionalProperties, undefined);
+  assert.deepEqual(a.properties.additionalProperties, { type: "string" });
+  assert.deepEqual(a.properties.type, { type: "string" });
+  assert.equal(a.properties.list.additionalProperties, undefined);
+  assert.equal(JSON.stringify(schema), copy);
+});
+
+test("gemini usage.out รวม thoughtsTokenCount และเป็น null เมื่อขาดทั้งคู่", () => {
+  const r = (u) => ({ candidates: [{ content: { parts: [{ text: "x" }] } }], usageMetadata: u });
+  assert.deepEqual(readText(G, r({ promptTokenCount: 4, candidatesTokenCount: 5, thoughtsTokenCount: 114 })).usage, { in: 4, out: 119 });
+  assert.deepEqual(readText(G, r({ promptTokenCount: 4, thoughtsTokenCount: 61 })).usage, { in: 4, out: 61 });
+  assert.deepEqual(readText(G, r({ promptTokenCount: 4, candidatesTokenCount: 5 })).usage, { in: 4, out: 5 });
+  assert.deepEqual(readText(G, r({ promptTokenCount: 4 })).usage, { in: 4, out: null });
+});
+
+test("gemini ถูกตัด MAX_TOKENS: ได้ issue ข้อความตัด และ cost row มีราคา", async () => {
+  const cut = JSON.stringify({ success: true, result: { candidates: [{ content: { parts: [] }, finishReason: "MAX_TOKENS" }], usageMetadata: { promptTokenCount: 10, thoughtsTokenCount: 61, totalTokenCount: 71 } } });
+  fake(reply(cut), reply(gem('{"b":2}')));
+  await llmJson({ system: "s", user: "u", schema: SCHEMA, meta: { step: "x" }, costDir: dir });
+  assert.match(bodyOf(1).input.contents[2].parts[0].text, /- คำตอบถูกตัดเพราะ maxTokens ไม่พอ/);
+  assert.ok(!bodyOf(1).input.contents[2].parts[0].text.includes("ตอบไม่ใช่ JSON"));
+  const [row] = readCosts(dir);
+  assert.deepEqual(row.units, { tokensIn: 10, tokensOut: 61 });
+  assert.equal(typeof row.usd, "number");
+});
+
+test("anthropic stop_reason max_tokens ที่ parse ไม่ได้ -> issue ข้อความตัด", async () => {
+  const cutA = JSON.stringify({ success: true, result: { content: [{ type: "text", text: '{"a":' }], stop_reason: "max_tokens", usage: { input_tokens: 1, output_tokens: 2 } } });
+  fake(reply(gem("x", 1, 1)), reply(gem("x", 1, 1)), reply(cutA), reply(ant('{"b":2}')));
+  await llmJson({ system: "s", user: "u", schema: SCHEMA, meta: { step: "x" }, costDir: dir });
+  const msgs = bodyOf(3).input.messages;
+  assert.match(msgs[2].content, /- คำตอบถูกตัดเพราะ maxTokens ไม่พอ/);
 });
