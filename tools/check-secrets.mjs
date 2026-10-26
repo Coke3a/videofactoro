@@ -22,7 +22,7 @@ const BIN = /\.(mp4|mp3|wav|pcm|png|jpe?g|webp|gif|woff2?|ttf|otf|pdf)$/i;
 
 const bad = [];
 for (const f of files) {
-  if (BIN.test(f) || !fs.existsSync(f) || fs.statSync(f).size > 20e6) continue;
+  if (BIN.test(f) || !fs.existsSync(f) || fs.statSync(f).size > 20e6 || !fs.statSync(f).isFile()) continue;
   if (/^\.env($|\.)/.test(path.basename(f)) && path.basename(f) !== ".env.example") { bad.push(`${f}: env file`); continue; }
   const s = fs.readFileSync(f, "utf8");
   for (const [k, v] of envVals) if (s.includes(v)) bad.push(`${f}: มีค่าของ ${k}`);
