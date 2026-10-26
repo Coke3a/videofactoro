@@ -4,6 +4,7 @@ import { run, withRetry } from "./cf.mjs";
 import { MODELS } from "./models.mjs";
 import { estimate } from "./pricing.mjs";
 import { logCost, costRow, failOutcome } from "./cost.mjs";
+import { libUpdate } from "./cache.mjs";
 import { VfError, log } from "./out.mjs";
 
 const execFileP = promisify(execFile);
@@ -74,7 +75,7 @@ export async function pickBest(candidates, rule, ctx, { meta = {}, costDir } = {
     } catch (err) {
       if (!isolated(err, ["INTERNAL"])) throw err;
       errors++;
-      ranked.push({ candidate, verdict: errVerdict(err.code) });
+      ranked.push({ candidate, verdict: errVerdict(err.code), answers: null });
       continue;
     }
     try {
@@ -85,11 +86,11 @@ export async function pickBest(candidates, rule, ctx, { meta = {}, costDir } = {
         meta,
         costDir,
       });
-      ranked.push({ candidate, verdict: rule.judge(answers) });
+      ranked.push({ candidate, verdict: rule.judge(answers), answers });
     } catch (err) {
       if (!isolated(err, ["PROVIDER"])) throw err;
       errors++;
-      ranked.push({ candidate, verdict: errVerdict(err.code) });
+      ranked.push({ candidate, verdict: errVerdict(err.code), answers: null });
     }
   }
   if (errors === candidates.length) throw new VfError("PROVIDER", "QA ล้มเหลวทุกภาพ");
@@ -97,6 +98,20 @@ export async function pickBest(candidates, rule, ctx, { meta = {}, costDir } = {
   const best = { ...ranked[0].candidate };
   if (!ranked[0].verdict.pass) best.warning = NO_PASS_WARNING;
   return { best, ranked };
+}
+
+export const qaRecord = (verdict, answers) => ({
+  pass: verdict.pass,
+  score: Number.isFinite(verdict.score) ? verdict.score : null,
+  reasons: verdict.reasons,
+  answers: answers ?? null,
+});
+
+// spec §10: เก็บผล QA ของทุกภาพลงคลัง (ช่อง qa ใน index) ไว้ปรับเกณฑ์ภายหลัง
+export function saveVerdicts(projectDir, ranked) {
+  for (const r of ranked) {
+    if (r.candidate?.entry?.id) libUpdate(projectDir, r.candidate.entry.id, { qa: qaRecord(r.verdict, r.answers) });
+  }
 }
 
 export async function generateWithQa({ generate, check, maxRerolls = 2 }) {

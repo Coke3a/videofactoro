@@ -7,10 +7,11 @@ import { parse, VfError, log } from "./out.mjs";
 import { projectsRoot, slugify, NAME_RE } from "./paths.mjs";
 import { llmJson } from "./llm.mjs";
 import { generateImage } from "./images.mjs";
-import { pickBest, generateWithQa, NO_PASS_WARNING } from "./qa.mjs";
+import { pickBest, generateWithQa, saveVerdicts, NO_PASS_WARNING } from "./qa.mjs";
 import { RULES } from "./qa-rules.mjs";
 import { openState, step } from "./state.mjs";
 import { libAdd, libLoad, libUpdate } from "./cache.mjs";
+import { logCost, costRow } from "./cost.mjs";
 import { estimate } from "./pricing.mjs";
 import { MODELS } from "./models.mjs";
 import { pinInput, pinRun, costSince, runEntity } from "./entities.mjs";
@@ -153,7 +154,8 @@ export async function makeRef(dir, slug, bible, c, costDir, { refs = [], dest, r
       kind: "character-ref", characters: [c.id], meta,
     }));
   }
-  const { best } = await pickBest(cands, RULES.characterRef, { look: c.look, style: bible.style_prompt }, { meta, costDir });
+  const { best, ranked } = await pickBest(cands, RULES.characterRef, { look: c.look, style: bible.style_prompt }, { meta, costDir });
+  saveVerdicts(dir, ranked);
   const rel = `characters/${c.id}/ref/main.png`;
   await toPng(best.file, join(dir, dest ?? rel));
   if (dest) return { ref: rel, staged: dest, entryId: best.entry.id, ...(best.warning ? { warning: best.warning } : {}) };
@@ -178,8 +180,17 @@ export async function makePlate(dir, slug, bible, p, aspect, maxRerolls, costDir
       projectDir: dir, prompt, aspect, seed: seedAt(base, attempt), need: `plate:${p.id}`,
       kind: "place-plate", place: p.id, meta,
     }),
-    check: async (c) => (await pickBest([c], RULES.placePlate, ctx, { meta, costDir })).ranked[0].verdict,
+    check: async (c) => {
+      const [r] = (await pickBest([c], RULES.placePlate, ctx, { meta, costDir })).ranked;
+      saveVerdicts(dir, [r]);
+      return r.verdict;
+    },
   });
+  // ภาพที่ QA ไม่ผ่านแล้วถูกทิ้ง (สร้างใหม่แทน): แถว qa_reject ชี้ไปที่แถวสร้างภาพเดิม usd 0 จึงไม่นับเงินซ้ำ
+  for (const a of res.attempts) {
+    if (a.verdict.pass || a.candidate === res.best) continue;
+    logCost(costDir, { ...costRow(meta, MODELS.image), outcome: "qa_reject", units: {}, usd: 0, reject_of: a.candidate.entry.id });
+  }
   const rel = `places/${p.id}/plates/main.jpg`;
   await convert(res.best.file, join(dir, rel), ["-q:v", "3"], "jpg");
   libUpdate(dir, res.best.entry.id, { status: "selected" });

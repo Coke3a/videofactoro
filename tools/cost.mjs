@@ -41,6 +41,12 @@ export function summarize(entries) {
     const key = `${e.step}\u0000${e.model}`;
     let r = map.get(key);
     if (!r) map.set(key, (r = { step: e.step, model: e.model, calls: 0, ok: 0, rerolls: 0, units: {}, usd: null }));
+    // แถว reject_of = ภาพที่สร้างแล้ว (นับไปแล้ว) แต่ QA ไม่ผ่านและถูกสร้างใหม่: ย้ายจาก ok ไปเป็น reroll ไม่นับครั้ง/เงินซ้ำ
+    if (e.reject_of !== undefined) {
+      r.rerolls++;
+      if (r.ok > 0) r.ok--;
+      continue;
+    }
     r.calls++;
     if (e.outcome === "ok") r.ok++;
     if (e.outcome === "qa_reject") r.rerolls++;

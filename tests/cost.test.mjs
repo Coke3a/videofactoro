@@ -111,3 +111,13 @@ test("renderCostTable แถวที่ usd เป็น null ทุกรา�
   assert.ok(md.includes("| ? |"));
   assert.ok(!md.includes("| $0.00 |"));
 });
+
+test("summarize: แถว qa_reject ที่ชี้ reject_of ย้าย ok → reroll ไม่นับครั้งและเงินซ้ำ", () => {
+  const s = summarize([
+    { step: "plate", model: "m", units: { images: 1 }, usd: 0.01, outcome: "ok" },
+    { step: "plate", model: "m", units: {}, usd: 0, outcome: "qa_reject", reject_of: "e1" },
+    { step: "plate", model: "m", units: { images: 1 }, usd: 0.01, outcome: "ok" },
+  ]);
+  assert.deepEqual(s.rows, [{ step: "plate", model: "m", calls: 2, ok: 1, rerolls: 1, units: { images: 2 }, usd: 0.02 }]);
+  assert.equal(s.totalUsd, 0.02);
+});

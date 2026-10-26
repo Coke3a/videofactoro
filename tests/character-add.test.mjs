@@ -434,3 +434,11 @@ test("R13: character add / place add ที่พังแล้วรันซ�
   assert.ok(rows.some((x) => x.step === "place" && x.item === "garden" && x.usd > 0));
   assert.ok(rows.filter((x) => x.step === "plate" || x.step === "qa").every((x) => x.item === "garden"));
 });
+
+test("I4: character add บันทึกผล QA ของทุก candidate ลงคลัง", async () => {
+  await add();
+  const refs = libLoad(dir).entries.filter((e) => e.characters.includes("heron"));
+  assert.equal(refs.length, 3);
+  for (const e of refs) assert.ok(e.qa && e.qa.pass === true && e.qa.answers.single_character.noul === 0.9);
+  assert.deepEqual(refs.map((e) => e.status).sort(), ["candidate", "candidate", "selected"]);
+});

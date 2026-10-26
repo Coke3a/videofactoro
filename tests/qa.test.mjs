@@ -235,3 +235,11 @@ test("แถว cost ของ clef: step = qa, item/run จาก meta; content
   const rows = readCosts(dir);
   assert.deepEqual(rows.map((r) => [r.step, r.item, r.run, r.outcome]), [["qa", "mochi", "r1", "ok"], ["qa", "kitchen", "r1", "blocked"]]);
 });
+
+test("pickBest: ranked มี answers ดิบของ clef ต่อภาพ (error = null)", async () => {
+  fake(ok(place(0.6)), reply("bad input", 400), ok(place(0.8)));
+  const r = await pickBest(files(), RULES.placePlate, ctx, { meta: {}, costDir: dir });
+  assert.deepEqual(r.ranked.find((x) => x.candidate.id === "c").answers, place(0.8));
+  assert.deepEqual(r.ranked.find((x) => x.candidate.id === "a").answers, place(0.6));
+  assert.equal(r.ranked.find((x) => x.candidate.id === "b").answers, null);
+});

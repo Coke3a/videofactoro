@@ -8,7 +8,7 @@ import { execFileSync } from "node:child_process";
 import * as cf from "../tools/cf.mjs";
 import { MODELS } from "../tools/models.mjs";
 import { libLoad } from "../tools/cache.mjs";
-import { readCosts } from "../tools/cost.mjs";
+import { readCosts, summarize } from "../tools/cost.mjs";
 import { waitJob } from "../tools/jobs.mjs";
 import { main as waitMain } from "../tools/wait.mjs";
 import { main as statusMain } from "../tools/status.mjs";
@@ -20,7 +20,7 @@ const TINY = fileURLToPath(new URL("./fixtures/tiny.png", import.meta.url));
 const B64 = fs.readFileSync(TINY).toString("base64");
 const ENV_KEYS = ["CLOUDFLARE_AI_ACCOUNT_ID", "CLOUDFLARE_AI_API_TOKEN", "VF_PROJECTS"];
 
-let root, saved, calls, origWrite, failMatch, bible;
+let root, saved, calls, origWrite, failMatch, bible, fitsSeq;
 const reply = (result) => ({ ok: true, status: 200, text: async () => JSON.stringify({ success: true, result }) });
 const imageCalls = (m) => calls.filter((c) => c.body?.model === MODELS.image && (!m || c.body.input.prompt.includes(m)));
 const CAT = () => bible.characters[0].look;
@@ -33,7 +33,7 @@ function install() {
     calls.push({ url: String(url), body });
     if (String(url).includes("clef-omni")) {
       const answers = Object.fromEntries(
-        Object.keys(body.questions).map((k) => [k, { noul: k === "has_text" || k === "has_people_or_animals" ? 0 : 0.9 }]),
+        Object.keys(body.questions).map((k) => [k, { noul: k === "has_text" || k === "has_people_or_animals" ? 0 : k === "fits" && fitsSeq.length ? fitsSeq.shift() : 0.9 }]),
       );
       return reply({ answers, usage: { prompt_tokens: 1500 } });
     }
@@ -58,6 +58,7 @@ beforeEach(() => {
   cf.setSleep(async () => {});
   bible = goodBible();
   failMatch = null;
+  fitsSeq = [];
   install();
   origWrite = process.stderr.write;
   process.stderr.write = () => true;
@@ -286,4 +287,44 @@ test("R13: แถว cost มี step ตามชนิด + item + run เด�
   const md = fs.readFileSync(path.join(root, "demo", "PROJECT.md"), "utf8");
   assert.equal(md.split("\n").filter((l) => l.startsWith(`| ref | ${MODELS.image} |`)).length, 1);
   assert.ok(!/\| ref:/.test(md));
+});
+
+// --- final fix (I4) ---
+test("I4: บันทึกผล QA ของทุก candidate ลงคลัง; ตัวที่แพ้ยังเป็น candidate", async () => {
+  await create();
+  const lib = libLoad(path.join(root, "demo")).entries;
+  const refs = lib.filter((e) => e.kind === "character-ref" && e.characters.includes("cat"));
+  assert.equal(refs.length, 3);
+  for (const e of refs) {
+    assert.equal(e.qa.pass, true);
+    assert.equal(typeof e.qa.score, "number");
+    assert.deepEqual(e.qa.reasons, []);
+    assert.equal(e.qa.answers.matches_look.noul, 0.9);
+  }
+  assert.deepEqual(refs.map((e) => e.status).sort(), ["candidate", "candidate", "selected"]);
+  const plate = lib.find((e) => e.kind === "place-plate");
+  assert.equal(plate.qa.pass, true);
+  assert.equal(plate.qa.answers.fits.noul, 0.9);
+});
+
+test("I4: ภาพฉากที่ QA ไม่ผ่าน → แถว qa_reject, summarize นับ reroll, usd ไม่นับซ้ำ, verdict ลงคลัง", async () => {
+  fitsSeq = [0.1];
+  const r = await create();
+  const vf = path.join(root, "demo", ".vf");
+  const rows = readCosts(vf).filter((x) => x.step === "plate");
+  const s = summarize(rows).rows.find((x) => x.step === "plate");
+  assert.equal(s.calls, 2);
+  assert.equal(s.rerolls, 1);
+  assert.equal(s.ok, 1);
+  assert.ok(Math.abs(s.usd - rows.filter((x) => x.outcome !== "qa_reject").reduce((a, x) => a + x.usd, 0)) < 1e-12);
+  assert.ok(Math.abs(s.usd - 2 * rows.find((x) => x.outcome === "ok").usd) < 1e-12);
+  assert.equal(r.places[0].warning, undefined);
+  const plates = libLoad(path.join(root, "demo")).entries.filter((e) => e.kind === "place-plate");
+  assert.equal(plates.length, 2);
+  const bad = plates.find((e) => e.qa.pass === false);
+  assert.equal(bad.status, "candidate");
+  assert.ok(bad.qa.reasons.length > 0);
+  assert.equal(bad.qa.answers.fits.noul, 0.1);
+  assert.equal(plates.find((e) => e.qa.pass).status, "selected");
+  assert.ok(fs.readFileSync(path.join(root, "demo", "PROJECT.md"), "utf8").includes("2 (reroll 1)"));
 });
