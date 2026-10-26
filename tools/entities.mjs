@@ -51,16 +51,20 @@ export function pickArchiveName(refDir, stamp) {
 export function commitStagedRefs(projectDir, charId, { entryId, archiveName, demoteTo }) {
   const refDir = join(projectDir, "characters", charId, "ref");
   const staged = existsSync(refDir) ? readdirSync(refDir).filter((n) => n.startsWith(STAGE)) : [];
-  if (staged.length) {
-    if (archiveName) {
-      const keep = readdirSync(refDir).filter((n) => !n.startsWith("old-") && !n.startsWith(STAGE));
-      if (keep.length) mkdirSync(join(refDir, archiveName), { recursive: true });
-      for (const n of keep) renameSync(join(refDir, n), join(refDir, archiveName, n));
-    }
-    for (const n of staged) renameSync(join(refDir, n), join(refDir, n.slice(STAGE.length)));
+  const mainStaged = stagedName("main.png");
+  // main.png ใหม่ย้ายเข้าที่เป็นอันสุดท้าย: ถ้ายังมี .new-main.png แปลว่ายังไม่เสร็จ
+  // เก็บของเดิมเฉพาะตอนที่ main.png เดิมยังอยู่ (เก็บแล้วจะไม่เก็บซ้ำ จึงไม่ไปเก็บ extra ใหม่ที่ย้ายเข้าที่แล้ว)
+  if (archiveName && staged.includes(mainStaged) && existsSync(join(refDir, "main.png"))) {
+    const keep = readdirSync(refDir).filter((n) => !n.startsWith("old-") && !n.startsWith(STAGE));
+    mkdirSync(join(refDir, archiveName), { recursive: true });
+    for (const n of keep) renameSync(join(refDir, n), join(refDir, archiveName, n));
   }
+  for (const n of staged.filter((x) => x !== mainStaged)) renameSync(join(refDir, n), join(refDir, n.slice(STAGE.length)));
+  if (staged.includes(mainStaged)) renameSync(join(refDir, mainStaged), join(refDir, "main.png"));
   for (const e of libLoad(projectDir).entries) {
-    if (e.id !== entryId && e.status === "selected" && (e.characters ?? []).includes(charId)) libUpdate(projectDir, e.id, { status: demoteTo });
+    if (e.id !== entryId && e.kind === "character-ref" && e.status === "selected" && (e.characters ?? []).includes(charId)) {
+      libUpdate(projectDir, e.id, { status: demoteTo });
+    }
   }
   libUpdate(projectDir, entryId, { status: "selected" });
 }

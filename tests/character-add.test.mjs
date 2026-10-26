@@ -14,6 +14,7 @@ import { main as create } from "../tools/project-create.mjs";
 import { main as charAdd } from "../tools/character-add.mjs";
 import { main as placeAdd } from "../tools/place-add.mjs";
 import { addCharacterFiles } from "../tools/bible.mjs";
+import { commitStagedRefs } from "../tools/entities.mjs";
 import { RULES } from "../tools/qa-rules.mjs";
 import { validateCharacter, validatePlace } from "../tools/bible.mjs";
 import { goodBible } from "./fixtures/bible.mjs";
@@ -389,4 +390,20 @@ test("addCharacterFiles: id ถูกจองก่อนย้ายไฟล�
 test("--image เป็นโฟลเดอร์ → USAGE", async () => {
   await assert.rejects(add(["--image", root]), (e) => e.code === "USAGE");
   assert.equal(calls.length, 0);
+});
+
+test("commitStagedRefs: crash หลังย้าย extra แต่ก่อน main → รันซ้ำแล้ว main.png เป็นภาพใหม่ และ extra ใหม่ไม่ถูกเก็บเข้า old", () => {
+  const d = path.join(dir, "characters/heron/ref");
+  fs.mkdirSync(d, { recursive: true });
+  fs.writeFileSync(path.join(d, ".new-main.png"), "NEW-MAIN");
+  fs.writeFileSync(path.join(d, "extra-1.png"), "NEW-EXTRA");
+  fs.mkdirSync(path.join(d, "old-X"));
+  fs.writeFileSync(path.join(d, "old-X", "main.png"), "OLD-MAIN");
+  const lib = libLoad(dir);
+  const entry = lib.entries.find((e) => e.kind === "character-ref");
+  commitStagedRefs(dir, "heron", { entryId: entry.id, archiveName: "old-X", demoteTo: "replaced" });
+  assert.equal(fs.readFileSync(path.join(d, "main.png"), "utf8"), "NEW-MAIN");
+  assert.equal(fs.readFileSync(path.join(d, "extra-1.png"), "utf8"), "NEW-EXTRA");
+  assert.equal(fs.readFileSync(path.join(d, "old-X", "main.png"), "utf8"), "OLD-MAIN");
+  assert.ok(fs.readdirSync(d).every((n) => !n.startsWith(".new-")));
 });
