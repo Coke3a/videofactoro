@@ -1,5 +1,5 @@
 import { randomInt } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cacheKey, libLoad, libFindByKey, libAdd, libUpdate } from "./cache.mjs";
@@ -8,6 +8,7 @@ import { run, withRetry, extractMedia, download } from "./cf.mjs";
 import { MODELS } from "./models.mjs";
 import { estimate } from "./pricing.mjs";
 import { logCost } from "./cost.mjs";
+import { writeJsonAtomic } from "./state.mjs";
 import { VfError, log } from "./out.mjs";
 
 const SUFFIX = " No text, no letters, no logos, no watermark.";
@@ -39,6 +40,23 @@ function megapixels(bytes, resolution) {
   return { "1k": 1, "2k": 4 }[resolution] ?? null;
 }
 
+const PRESIGNED = /https?:\/\/[^\s"'<>\\]*X-Amz-[^\s"'<>\\]*/gi;
+
+function scrubUrls(err, urls) {
+  const clean = (t) => {
+    let out = String(t).replace(PRESIGNED, "<ref-url>");
+    for (const u of urls) out = out.split(u).join("<ref-url>");
+    return out;
+  };
+  const fix = (v) => (v === undefined ? v : typeof v === "string" ? clean(v) : JSON.parse(clean(JSON.stringify(v))));
+  try {
+    err.message = clean(err.message);
+    if ("body" in err) err.body = fix(err.body);
+    if (err.details !== undefined) err.details = fix(err.details);
+  } catch { /* leave as is */ }
+  return err;
+}
+
 export async function generateImage({
   projectDir, prompt, refs = [], aspect = "9:16", resolution = "1k", seed, need, kind,
   characters = [], place = null, tags = [], meta = {}, status = "candidate",
@@ -51,30 +69,34 @@ export async function generateImage({
   const key = cacheKey({ model: MODELS.image, prompt: finalPrompt, refs, aspect, resolution, seed });
 
   const hit = libFindByKey(libLoad(projectDir), key);
-  if (hit) {
+  if (hit && existsSync(join(projectDir, hit.blob))) {
     logCost(costDir, { ...row, outcome: "cached", units: { images: 1 }, usd: 0, cached: true });
     return { file: join(projectDir, hit.blob), entry: hit, cached: true, usd: 0 };
   }
 
+  if (hit) {
+    const lib = libLoad(projectDir);
+    lib.entries = lib.entries.filter((e) => e.id !== hit.id);
+    writeJsonAtomic(join(projectDir, "library", "index.json"), lib);
+  }
   const usedSeed = seed ?? randomInt(0, 2 ** 32);
   const tmp = mkdtempSync(join(tmpdir(), "vf-img-"));
+  const urls = [];
   let bytes;
   try {
-    const urls = [];
     for (const r of refs) urls.push(await uploadTemp(r));
     const input = { prompt: finalPrompt, aspect_ratio: aspect, resolution, seed: usedSeed };
     if (urls.length) input.images = urls;
     log(`klein: refs=${urls.length} model=${MODELS.image}`);
-    let result;
     try {
-      ({ result } = await withRetry(() => run(MODELS.image, input, { meta })));
+      const { result } = await withRetry(() => run(MODELS.image, input, { meta }));
+      const out = join(tmp, "out");
+      await download(extractMedia(result), out);
+      bytes = readFileSync(out);
     } catch (err) {
       logCost(costDir, { ...row, outcome: "error", units: { images: 1 }, usd: null });
-      throw err;
+      throw scrubUrls(err, urls);
     }
-    const out = join(tmp, "out");
-    await download(extractMedia(result), out);
-    bytes = readFileSync(out);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

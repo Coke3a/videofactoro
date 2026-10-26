@@ -107,3 +107,54 @@ test("run ล้มเหลว: log cost error แล้ว rethrow", async () 
   assert.equal(rows[0].outcome, "error");
   assert.equal(rows[0].usd, null);
 });
+
+// --- fix round 1 ---
+const URLBODY = "https://bkt.acc1.r2.cloudflarestorage.com/bkt/tmp/x.png?X-Amz-Signature=deadbeef";
+const urlFree = (e) => !JSON.stringify({ m: e.message, b: e.body, d: e.details }).includes("X-Amz-Signature");
+
+test("run ล้มเหลวพร้อม presigned URL ใน body: error ไม่มี URL", async () => {
+  cf.setFetch(async (url, init = {}) => {
+    if (String(url).includes("r2.cloudflarestorage.com")) return new Response(null, { status: init.method === "HEAD" ? 404 : 200 });
+    return { ok: false, status: 400, text: async () => `bad image ${URLBODY}` };
+  });
+  await assert.rejects(generateImage({ ...base(), refs: [TINY] }), (e) => {
+    assert.ok(urlFree(e), "URL leaked");
+    return true;
+  });
+});
+
+test("download ล้มเหลว: ลง cost error, ลบ temp dir, ไม่มี URL รั่ว", async () => {
+  const before = fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith("vf-img-") && n !== path.basename(dir));
+  cf.setFetch(async (url, init = {}) => {
+    if (String(url).includes("r2.cloudflarestorage.com")) return new Response(null, { status: init.method === "HEAD" ? 404 : 200 });
+    if (String(url).includes("/ai/run")) return { ok: true, status: 200, text: async () => JSON.stringify({ success: true, result: { image: "https://cdn.example/a.png" } }) };
+    throw Object.assign(new Error(`fetch failed ${URLBODY}`), { body: URLBODY });
+  });
+  await assert.rejects(generateImage({ ...base(), refs: [TINY] }), (e) => urlFree(e));
+  const rows = readCosts(path.join(dir, ".vf"));
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].outcome, "error");
+  const after = fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith("vf-img-") && n !== path.basename(dir));
+  assert.deepEqual(after.sort(), before.sort());
+});
+
+test("cache hit แต่ blob หาย: ถือเป็น miss แล้วสร้างใหม่", async () => {
+  const a = await generateImage(base());
+  fs.rmSync(a.file);
+  const n = aiCalls().length;
+  const b = await generateImage(base());
+  assert.equal(b.cached, false);
+  assert.equal(aiCalls().length, n + 1);
+  assert.ok(fs.existsSync(b.file));
+  assert.equal(libLoad(dir).entries.length, 1);
+});
+
+test("seed 0 ถูกส่งเป็น seed:0 และ key ต่างจากไม่มี seed", async () => {
+  const z = await generateImage({ ...base(), seed: 0 });
+  assert.equal(JSON.parse(aiCalls()[0].init.body).input.seed, 0);
+  assert.equal(z.entry.seed, 0);
+  const p = base();
+  delete p.seed;
+  const u = await generateImage(p);
+  assert.notEqual(z.entry.key, u.entry.key);
+});
