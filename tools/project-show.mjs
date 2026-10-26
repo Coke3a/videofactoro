@@ -2,16 +2,24 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "./out.mjs";
 import { resolveProject } from "./paths.mjs";
+import { ID_RE } from "./bible.mjs";
 import { loadProject } from "./entities.mjs";
 import { readCosts, summarize } from "./cost.mjs";
 
 const listFiles = (d) => (existsSync(d) ? readdirSync(d, { withFileTypes: true }).filter((e) => e.isFile()).map((e) => join(d, e.name)).sort() : []);
-const cells = (line) => line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+const cells = (line) =>
+  line.trim().replace(/^\|/, "").replace(/(?<!\\)\|$/, "").split(/(?<!\\)\|/).map((c) => c.replace(/\\\|/g, "|").trim());
 
 export function readEpisodes(file) {
   if (!existsSync(file)) return [];
-  const lines = readFileSync(file, "utf8").split("\n").filter((l) => l.trim().startsWith("|"));
-  if (!lines.length) return [];
+  const all = readFileSync(file, "utf8").split(/\r?\n/);
+  const start = all.findIndex((l) => l.trim().startsWith("|"));
+  if (start < 0) return [];
+  const lines = [];
+  for (const l of all.slice(start)) {
+    if (!l.trim().startsWith("|")) break;
+    lines.push(l);
+  }
   const head = cells(lines[0]);
   return lines
     .slice(1)
@@ -34,11 +42,11 @@ export async function main(argv) {
     lang,
     aspect: pj.aspect ?? "9:16",
     narrator: pj.narrator === true,
-    characters: characters.map((c) => {
+    characters: characters.filter((c) => ID_RE.test(String(c?.id))).map((c) => {
       const ref = join(dir, "characters", c.id, "ref", "main.png");
       return { id: c.id, name: c.name, role: c.role, ref: existsSync(ref) ? ref : null, poses: listFiles(join(dir, "characters", c.id, "poses")) };
     }),
-    places: places.map((p) => ({ id: p.id, name: p.name, plates: listFiles(join(dir, "places", p.id, "plates")) })),
+    places: places.filter((p) => ID_RE.test(String(p?.id))).map((p) => ({ id: p.id, name: p.name, plates: listFiles(join(dir, "places", p.id, "plates")) })),
     episodes: rows.length,
     last_episodes: rows.slice(-5),
     cost_total_usd: summarize(readCosts(join(dir, ".vf"))).totalUsd,

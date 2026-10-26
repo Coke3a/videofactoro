@@ -29,12 +29,12 @@ beforeEach(() => {
   w("project.json", JSON.stringify({
     slug: "demo", title: "แมวผจญภัย", logline: "แมวกับห้องครัว", lang: "th", aspect: "9:16", narrator: true,
     characters: [{ id: "cat", name: "แมว", role: "พระเอก" }, { id: "dog", name: "หมา", role: "คู่หู" }],
-    places: [{ id: "x", name: "ครัว" }],
+    places: [{ id: "kitchen", name: "ครัว" }],
   }));
   w("characters/cat/ref/main.png");
   w("characters/cat/poses/b.png");
   w("characters/cat/poses/a.png");
-  w("places/x/plates/main.jpg");
+  w("places/kitchen/plates/main.jpg");
   w("library/blobs/a.png");
   w("library/blobs/b.png");
   w("library/blobs/c.png");
@@ -68,7 +68,7 @@ test("show อ่าน project จาก fixture ได้ครบ", async () 
   });
   assert.equal(r.characters[1].ref, null);
   assert.deepEqual(r.characters[1].poses, []);
-  assert.deepEqual(r.places, [{ id: "x", name: "ครัว", plates: [path.join(dir, "places/x/plates/main.jpg")] }]);
+  assert.deepEqual(r.places, [{ id: "kitchen", name: "ครัว", plates: [path.join(dir, "places/kitchen/plates/main.jpg")] }]);
   assert.equal(r.episodes, 7);
   assert.equal(r.last_episodes.length, 5);
   assert.equal(r.last_episodes[4]["ชื่อ"], "ตอน 7");
@@ -114,4 +114,54 @@ test("bin/vf.mjs project show พิมพ์ JSON", () => {
   assert.equal(j.project, "demo");
   assert.equal(j.characters.length, 2);
   assert.equal(j.cost_total_usd, 0.25);
+});
+
+test("fix1: blob นอก project / absolute path ถูกข้าม", async () => {
+  fs.writeFileSync(path.join(root, "outside.png"), "x");
+  const idx = JSON.parse(fs.readFileSync(path.join(dir, "library/index.json"), "utf8"));
+  idx.entries.push(
+    { id: "o1", kind: "pose", blob: "../outside.png", tags: ["jump", "jump2"], status: "selected" },
+    { id: "o2", kind: "pose", blob: path.join(root, "outside.png"), tags: ["jump"], status: "selected" },
+    { id: "o3", kind: "pose", blob: "", tags: ["jump"], status: "selected" },
+    { id: "o4", kind: "pose", tags: ["jump"], status: "selected" },
+  );
+  w("library/index.json", JSON.stringify(idx));
+  const ids = (await find(["demo", "jump"])).results.map((x) => x.id);
+  assert.deepEqual(ids.sort(), ["e1", "e2", "e4"]);
+});
+
+test("fix2: ไม่มี entries array → ผลว่าง", async () => {
+  w("library/index.json", JSON.stringify({ entries: "bad" }));
+  assert.deepEqual((await find(["demo", "jump"])).results, []);
+  w("library/index.json", JSON.stringify({}));
+  assert.deepEqual((await find(["demo", "jump"])).results, []);
+});
+
+test("fix3: entry ที่ไม่มีไฟล์อันดับหนึ่งไม่กินโควตา --limit", async () => {
+  const idx = JSON.parse(fs.readFileSync(path.join(dir, "library/index.json"), "utf8"));
+  idx.entries.push({ id: "top", kind: "pose", blob: "library/blobs/none.png", tags: ["jump", "jump"], need: "jump", status: "selected", tag_p: { jump: 1 } });
+  w("library/index.json", JSON.stringify(idx));
+  const r = await find(["demo", "jump", "--limit", "1"]);
+  assert.equal(r.results.length, 1);
+  assert.equal(r.results[0].id, "e1");
+});
+
+test("fix4: ตาราง EPISODES — escaped pipe, CRLF, หยุดที่บล็อกแรก", async () => {
+  w("EPISODES.md", ["# t", "", "| ชื่อ | โน้ต |", "|---|---|", "| a | x \\| y |", "| b | z |", "", "ย่อหน้า", "", "| ชื่อ | โน้ต |", "|---|---|", "| c | w |", ""].join("\r\n"));
+  const r = await show(["demo"]);
+  assert.equal(r.episodes, 2);
+  assert.deepEqual(r.last_episodes[0], { "ชื่อ": "a", "โน้ต": "x | y" });
+});
+
+test("fix5: id ที่ผิดรูปไม่ถูกใช้สร้าง path · project.json ไม่มี characters/places", async () => {
+  const pj = JSON.parse(fs.readFileSync(path.join(dir, "project.json"), "utf8"));
+  pj.characters.push({ id: "../..", name: "bad", role: "r" });
+  pj.places.push({ id: "../x", name: "bad" });
+  w("project.json", JSON.stringify(pj));
+  const r = await show(["demo"]);
+  assert.deepEqual(r.characters.map((c) => c.id), ["cat", "dog"]);
+  assert.deepEqual(r.places.map((c) => c.id), ["kitchen"]);
+  w("project.json", JSON.stringify({ slug: "demo" }));
+  const e = await show(["demo"]);
+  assert.deepEqual([e.characters, e.places], [[], []]);
 });
