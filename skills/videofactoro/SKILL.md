@@ -45,7 +45,7 @@ vf place add <slug> --prompt "..."          # เพิ่มสถานที�
 2. หมดเวลาแต่ยังไม่เสร็จ (`status:"running"`) = เรียก `vf wait` ซ้ำ **วนจน status เป็น `done` หรือ `failed`**
 3. หนึ่ง project รันได้ทีละ job ถ้าสั่งซ้อนจะได้ USAGE (exit 2) ให้ `vf wait` ของเดิมให้จบก่อน
 4. **job ที่ล้ม `vf wait` ยังจบด้วย exit 0** แต่ JSON มี `status:"failed"` และ `error:{code,message}` ให้เอา `error.code` ไปเปิดตารางด้านล่างเหมือน exit code (อย่าดูแค่ exit)
-5. job ที่ `failed` มี `resume` (คำสั่งเดิมที่ quote แล้ว พร้อมรัน) ส่วนคำสั่งที่ `--foreground` ล้มมี `error.details.resume` แบบเดียวกัน รันซ้ำแล้วทำต่อจากจุดค้างโดยไม่จ่ายซ้ำ
+5. job ที่ `failed` มี `resume` (คำสั่งเดิมที่ quote แล้ว) ส่วนคำสั่งที่ `--foreground` ล้มมี `error.details.resume` แบบเดียวกัน รันซ้ำแล้วทำต่อจากจุดค้างโดยไม่จ่ายซ้ำ · `resume` ขึ้นต้นด้วย `vf` ตอนรันให้แทน `vf` ด้วย `node bin/vf.mjs` (ส่วนอื่นคงเดิม)
 6. ถ้า `error.message` เป็น "worker หยุดกลางทาง" (code INTERNAL) แปลว่า worker ตาย (เครื่องดับ/ถูก kill) ให้ทำตามแถว INTERNAL
 
 ## ผลลัพธ์และ exit code

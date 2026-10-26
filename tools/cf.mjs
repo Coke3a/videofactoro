@@ -50,7 +50,9 @@ function providerError(status, body) {
 
 function headers(env, opts) {
   const h = { Authorization: `Bearer ${env.CLOUDFLARE_AI_API_TOKEN}` };
-  if (opts.meta && Object.keys(opts.meta).length) h["cf-aig-metadata"] = JSON.stringify(opts.meta);
+  // AI Gateway metadata values must be string/number/boolean, so null/undefined keys are dropped.
+  const meta = Object.fromEntries(Object.entries(opts.meta ?? {}).filter(([, v]) => v !== null && v !== undefined));
+  if (Object.keys(meta).length) h["cf-aig-metadata"] = JSON.stringify(meta);
   if (process.env.VF_AIG_GATEWAY_ID) h["cf-aig-gateway-id"] = process.env.VF_AIG_GATEWAY_ID;
   return h;
 }
