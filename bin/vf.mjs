@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { loadEnv } from "../tools/env.mjs";
 import { emit, fail, VfError, EXIT } from "../tools/out.mjs";
-import { finishJob, setWorkerJob } from "../tools/jobs.mjs";
+import { finishJob, setWorkerJob, startHeartbeat } from "../tools/jobs.mjs";
 
 const COMMANDS = {
   setup: "setup",
@@ -49,7 +49,10 @@ async function run(argv) {
 }
 
 const { argv: args, jobDir, bad } = takeJobDir(process.argv.slice(2));
-if (jobDir) setWorkerJob(jobDir);
+if (jobDir) {
+  setWorkerJob(jobDir);
+  startHeartbeat(jobDir);
+}
 const safeFinish = (outcome) => {
   if (!jobDir) return;
   try {

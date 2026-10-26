@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { openSync, closeSync, mkdirSync, readdirSync, readFileSync, existsSync, writeFileSync, statSync, rmSync } from "node:fs";
+import { openSync, closeSync, mkdirSync, readdirSync, readFileSync, existsSync, writeFileSync, statSync, rmSync, renameSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { readJson, writeJsonAtomic } from "./state.mjs";
@@ -7,9 +7,18 @@ import { VfError, redact } from "./out.mjs";
 
 const DEFAULT_ENTRY = new URL("../bin/vf.mjs", import.meta.url).pathname;
 const NO_PID_GRACE_MS = 10_000;
-const MAX_AGE_MS = 6 * 3600 * 1000;
+const HEARTBEAT_MS = 30_000;
+const HEARTBEAT_STALE_MS = 120_000;
 const LOCK_STALE_MS = 30_000;
 const DEAD_MSG = "worker หยุดกลางทาง — รันคำสั่งเดิมซ้ำเพื่อทำต่อ";
+
+let nowFn = () => Date.now();
+export const setNow = (fn) => {
+  nowFn = fn;
+};
+
+export const shq = (a) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(a) ? a : `'${a.replace(/'/g, "'\\''")}'`);
+export const resumeCommand = (command) => `vf ${command.map(shq).join(" ")}`;
 
 const pidAlive = (pid) => {
   try {
@@ -29,12 +38,40 @@ function readPid(dir) {
   }
 }
 
+function heartbeatAt(dir) {
+  try {
+    return statSync(join(dir, "heartbeat")).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
+// ตาย = pid ตาย หรือ heartbeat (ถ้าไม่มี ใช้ started_at) เก่ากว่า 120 วิ และไม่ใช่โปรเซสนี้เอง
 function isAlive(dir, j) {
-  const age = Date.now() - Date.parse(j.started_at);
-  if (!(age < MAX_AGE_MS)) return false;
+  const now = nowFn();
+  const started = Date.parse(j.started_at);
   const pid = readPid(dir);
-  if (pid === null) return age <= NO_PID_GRACE_MS;
-  return pidAlive(pid);
+  if (pid === null) return now - started <= NO_PID_GRACE_MS;
+  if (!pidAlive(pid)) return false;
+  if (pid === process.pid) return true;
+  const beat = heartbeatAt(dir) ?? started;
+  return now - beat <= HEARTBEAT_STALE_MS;
+}
+
+// แตะ <dir>/heartbeat ทันทีและทุก 30 วิ (interval แบบ unref ไม่ค้าง process) · คืนฟังก์ชันหยุด
+export function startHeartbeat(dir) {
+  const file = join(dir, "heartbeat");
+  const touch = () => {
+    try {
+      const t = new Date();
+      if (existsSync(file)) utimesSync(file, t, t);
+      else if (existsSync(dir)) writeFileSync(file, "");
+    } catch {}
+  };
+  touch();
+  const timer = setInterval(touch, HEARTBEAT_MS);
+  timer.unref();
+  return () => clearInterval(timer);
 }
 
 export function jobRootOf(project) {
@@ -121,12 +158,14 @@ export const isWorker = () => workerJobDir !== null;
 
 export function startJob({ jobRoot, command, label, entry = DEFAULT_ENTRY, execPath = process.execPath }) {
   const { id, dir } = registerJob({ jobRoot, command, label });
+  let failed = null;
   const fail = (e) => {
+    if (failed) return failed;
     const error = { code: "INTERNAL", message: `เริ่ม worker ไม่สำเร็จ: ${e?.message ?? e}` };
     try {
       finishJob(dir, { error });
     } catch {}
-    return new VfError("INTERNAL", error.message);
+    return (failed = new VfError("INTERNAL", error.message));
   };
   const fd = openSync(join(dir, "job.log"), "a");
   let child;
@@ -147,8 +186,10 @@ export function startJob({ jobRoot, command, label, entry = DEFAULT_ENTRY, execP
   return { id, dir, status: "running", pid: child.pid };
 }
 
+// ไม่สร้างโฟลเดอร์ job: ถ้าโฟลเดอร์หายไปแล้ว (เช่น ถูกลบ) ข้ามเงียบๆ
 export function finishJob(dir, outcome) {
   const file = join(dir, "job.json");
+  if (!existsSync(dir)) return;
   const cur = readJson(file, {});
   const next = {
     ...cur,
@@ -156,7 +197,14 @@ export function finishJob(dir, outcome) {
     ...(outcome.error ? { error: outcome.error } : { result: outcome.result }),
     finished_at: new Date().toISOString(),
   };
-  writeJsonAtomic(file, JSON.parse(redact(JSON.stringify(next))));
+  const tmp = `${file}.tmp-${process.pid}`;
+  try {
+    writeFileSync(tmp, JSON.stringify(JSON.parse(redact(JSON.stringify(next))), null, 2) + "\n");
+    renameSync(tmp, file);
+  } catch (e) {
+    rmSync(tmp, { force: true });
+    if (e.code !== "ENOENT") throw e;
+  }
 }
 
 export function jobStatus(dir) {
@@ -166,13 +214,14 @@ export function jobStatus(dir) {
     log_tail = readFileSync(join(dir, "job.log"), "utf8").split("\n").filter(Boolean).slice(-20);
   } catch {}
   log_tail = log_tail.map(redact);
-  const out = { id: j.id, status: j.status, log_tail };
+  const out = { id: j.id, status: j.status, command: j.command, label: j.label, log_tail };
   if (j.result !== undefined) out.result = j.result;
   if (j.error !== undefined) out.error = j.error;
   if (j.status === "running" && !isAlive(dir, j)) {
     out.status = "failed";
     out.error = { code: "INTERNAL", message: DEAD_MSG };
   }
+  if (out.status === "failed" && Array.isArray(j.command)) out.resume = resumeCommand(j.command);
   return out;
 }
 

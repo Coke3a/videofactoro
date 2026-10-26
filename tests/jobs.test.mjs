@@ -1,11 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { openState, step, writeJsonAtomic } from "../tools/state.mjs";
-import { startJob, jobStatus, waitJob } from "../tools/jobs.mjs";
+import { startJob, jobStatus, waitJob, finishJob, setNow, resumeCommand } from "../tools/jobs.mjs";
 
 const VF = new URL("../bin/vf.mjs", import.meta.url).pathname;
 const kill = (pid) => {
@@ -110,12 +110,91 @@ test("job id เรียงตามเวลาได้ ระดับ ms", 
   }
 });
 
-test("spawn ล้มเหลว -> job เป็น failed และ throw", () => {
-  const root = join(tmp(), ".jobs");
+test("spawn ล้มเหลว -> job เป็น failed และ throw; หลังลบ temp แล้วไม่มีอะไรสร้างโฟลเดอร์กลับมา", async () => {
+  const top = tmp();
+  const root = join(top, ".jobs");
   try {
     assert.throws(() => startJob({ jobRoot: root, command: ["fake"], label: "t", entry: FAKE, execPath: "/nonexistent/node" }));
   } finally {
-    rmSync(join(root, ".."), { recursive: true, force: true });
+    rmSync(top, { recursive: true, force: true });
+  }
+  await new Promise((r) => setTimeout(r, 200));
+  assert.equal(existsSync(top), false);
+});
+
+test("finishJob ไม่สร้างโฟลเดอร์ job ถ้าโฟลเดอร์หายไปแล้ว", () => {
+  const d = join(tmp(), "gone");
+  try {
+    finishJob(d, { result: {} });
+    assert.equal(existsSync(d), false);
+  } finally {
+    rmSync(join(d, ".."), { recursive: true, force: true });
+  }
+});
+
+const liveJob = (d, startedAgoMs) => {
+  writeJsonAtomic(join(d, "job.json"), { id: "j", status: "running", command: ["x"], label: "l", started_at: new Date(Date.now() - startedAgoMs).toISOString() });
+  writeFileSync(join(d, "job.pid"), String(process.ppid));
+  writeFileSync(join(d, "heartbeat"), "");
+};
+
+test("heartbeat เก่ากว่า 120 วิ แม้ pid ยังอยู่ -> ถือว่าตาย (mtime ย้อนหลัง)", () => {
+  const d = tmp();
+  try {
+    liveJob(d, 1000);
+    const old = (Date.now() - 200_000) / 1000;
+    utimesSync(join(d, "heartbeat"), old, old);
+    const s = jobStatus(d);
+    assert.equal(s.status, "failed");
+    assert.match(s.error.message, /worker หยุดกลางทาง/);
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test("heartbeat เก่ากว่า 120 วิ (เลื่อนนาฬิกา) -> ตาย; heartbeat สด + started_at เก่า 7 ชม. -> ยังรัน", () => {
+  const d = tmp();
+  try {
+    liveJob(d, 7 * 3600 * 1000);
+    assert.equal(jobStatus(d).status, "running");
+    setNow(() => Date.now() + 121_000);
+    assert.equal(jobStatus(d).status, "failed");
+  } finally {
+    setNow(() => Date.now());
+    rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test("worker (--job-dir) เขียนไฟล์ heartbeat", () => {
+  const d = tmp();
+  try {
+    writeJsonAtomic(join(d, "job.json"), { id: "j", status: "running" });
+    spawnSync(process.execPath, [VF, "help", "--job-dir", d], { encoding: "utf8" });
+    assert.ok(existsSync(join(d, "heartbeat")));
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test("jobStatus คืน command และ label ทุก job; failed/ตาย มี resume ที่ quote แล้ว", () => {
+  const d = tmp();
+  try {
+    const command = ["project", "create", "--prompt=แมว กับ 'หมา'", "--name", "demo"];
+    writeJsonAtomic(join(d, "job.json"), { id: "j", status: "done", command, label: "project create demo", result: {} });
+    let s = jobStatus(d);
+    assert.deepEqual(s.command, command);
+    assert.equal(s.label, "project create demo");
+    assert.equal(s.resume, undefined);
+    finishJob(d, { error: { code: "PROVIDER", message: "x" } });
+    s = jobStatus(d);
+    assert.equal(s.resume, "vf project create '--prompt=แมว กับ '\\''หมา'\\''' --name demo");
+    assert.equal(s.resume, resumeCommand(command));
+    writeJsonAtomic(join(d, "job.json"), { id: "j", status: "running", command, label: "l", started_at: new Date(Date.now() - 60000).toISOString() });
+    s = jobStatus(d);
+    assert.equal(s.status, "failed");
+    assert.equal(s.resume, resumeCommand(command));
+  } finally {
+    rmSync(d, { recursive: true, force: true });
   }
 });
 

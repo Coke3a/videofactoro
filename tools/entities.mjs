@@ -3,13 +3,12 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, s
 import { basename, join, resolve } from "node:path";
 import { VfError } from "./out.mjs";
 import { readJson } from "./state.mjs";
-import { startJob, registerJob, finishJob, isWorker, jobRootOf } from "./jobs.mjs";
+import { startJob, registerJob, finishJob, isWorker, jobRootOf, startHeartbeat, resumeCommand } from "./jobs.mjs";
 import { estimate } from "./pricing.mjs";
 import { MODELS } from "./models.mjs";
 import { readCosts, summarize } from "./cost.mjs";
 import { libLoad, libUpdate } from "./cache.mjs";
 
-export const shq = (a) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(a) ? a : `'${a.replace(/'/g, "'\\''")}'`);
 
 // บันทึก input ครั้งแรกไว้ใน state แล้วเทียบกับครั้งต่อไป; ต่างกัน → USAGE ระบุฟิลด์
 export function pinInput(state, input, keys, hint) {
@@ -141,9 +140,11 @@ export async function runEntity({ dir, projectRef, slug, command, label, foregro
   if (!isWorker()) {
     mkdirSync(join(dir, ".jobs"), { recursive: true });
     reg = registerJob({ jobRoot: jobRootOf(dir), command, label, pid: process.pid });
+    reg.stopBeat = startHeartbeat(reg.dir);
   }
   const end = (outcome) => {
     if (!reg) return;
+    reg.stopBeat();
     try {
       finishJob(reg.dir, outcome);
     } catch {}
@@ -153,7 +154,7 @@ export async function runEntity({ dir, projectRef, slug, command, label, foregro
     end({ result: out });
     return out;
   } catch (e) {
-    if (e instanceof VfError) e.details = { ...e.details, project: slug, resume: `vf ${command.map(shq).join(" ")}` };
+    if (e instanceof VfError) e.details = { ...e.details, project: slug, resume: resumeCommand(command) };
     end({ error: { code: e instanceof VfError ? e.code : "INTERNAL", message: e?.message ?? String(e), details: e?.details } });
     throw e;
   }
