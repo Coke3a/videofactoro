@@ -6,6 +6,7 @@ import { VfError, log } from "./out.mjs";
 let fetchFn = (...a) => globalThis.fetch(...a);
 let sleepFn = (ms) => new Promise((r) => setTimeout(r, ms));
 export const setFetch = (fn) => { fetchFn = fn; };
+export const getFetch = () => fetchFn;
 export const setSleep = (fn) => { sleepFn = fn; };
 let nowFn = () => Date.now();
 export const setNow = (fn) => { nowFn = fn; };
