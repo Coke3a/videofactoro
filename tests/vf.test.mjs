@@ -19,9 +19,3 @@ test("vf nope exit 2 พร้อมรายชื่อคำสั่ง", ()
   assert.equal(j.error.code, "USAGE");
   assert.ok(j.error.details.commands.includes("setup"));
 });
-
-test("คำสั่งที่ยังไม่มีโมดูล → USAGE", () => {
-  const r = vf("wait");
-  assert.equal(r.status, 2);
-  assert.match(JSON.parse(r.stdout).error.message, /ยังไม่มีคำสั่งนี้: wait/);
-});

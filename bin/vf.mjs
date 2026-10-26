@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { existsSync } from "node:fs";
 import { loadEnv } from "../tools/env.mjs";
-import { emit, fail, VfError } from "../tools/out.mjs";
+import { emit, fail, VfError, EXIT } from "../tools/out.mjs";
+import { finishJob } from "../tools/jobs.mjs";
 
 const COMMANDS = {
   setup: "setup",
@@ -15,6 +16,17 @@ const COMMANDS = {
   status: "status",
   help: null,
 };
+
+function takeJobDir(argv) {
+  const out = [];
+  let jobDir;
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === "--job-dir") jobDir = argv[++i];
+    else if (argv[i].startsWith("--job-dir=")) jobDir = argv[i].slice(10);
+    else out.push(argv[i]);
+  }
+  return { argv: out, jobDir };
+}
 
 async function run(argv) {
   loadEnv();
@@ -35,8 +47,22 @@ async function run(argv) {
   return await mod.main(rest);
 }
 
+const { argv: args, jobDir } = takeJobDir(process.argv.slice(2));
+let result;
+let failure;
 try {
-  emit(await run(process.argv.slice(2)));
+  result = await run(args);
 } catch (e) {
-  fail(e);
+  failure = e;
+}
+if (!failure) {
+  emit(result);
+  if (jobDir) finishJob(jobDir, { result });
+} else {
+  if (jobDir) {
+    const v = failure instanceof VfError ? failure : new VfError("INTERNAL", failure?.message ?? String(failure));
+    const code = v.code in EXIT ? v.code : "INTERNAL";
+    finishJob(jobDir, { error: { code, message: v.message, details: v.details } });
+  }
+  fail(failure);
 }
