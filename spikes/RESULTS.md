@@ -31,13 +31,19 @@ Script: a scratch file calling tools/ directly (token, llmJson for each model, g
 - `@cf/black-forest-labs/flux-2-klein-9b` takes multipart input: `prompt`, `input_image_0` (a file part), and `width`/`height` as strings. The response is `{image: base64}`, a JPEG of 261 KB at 768x1024, in 4.6 s.
   - Visual check against the cat ref: the same character (colours, stripes, belly patch, ears, tail), with the pose changed to sitting and smiling as the prompt asked. The output is good.
   - It is neuron-billed; the exact cost is still to be read from the gateway log.
-- So images and character refs can work with no R2 through flux-2-klein-9b. Video (flux-3-video keyframes) still needs URLs.
+- So images and character refs can work with no R2 through flux-2-klein-9b.
+- Later the same day, every flux-2 call (9b and 4b) failed with 500 or 408 for a while, while flux-1-schnell kept working. The seed field is therefore still unconfirmed.
 
-## a - klein (9:16 1k, refs via R2 URL)
+## a - klein-9b (768x1360, refs 1..4 inline multipart)
 
-## b - VF_R2_TOKEN to S3 key conversion
+## b - (dropped: R2 removed from the project 2026-10-27)
 
-## c - flux-3-video i2v (R2 URL vs raw base64, audio)
+## c - flux-3-video i2v with a raw base64 keyframe (2026-10-27)
+
+- Input: `{mode:"i2v", prompt, keyframes:"<raw base64 jpeg, no data: prefix>", aspect_ratio:"3:4", duration:5, resolution:"hd", draft:true, generate_audio:false}`.
+- Result: OK in 60.5 s, returning `{state, result}` with a video URL. The mp4 is 800x1088 at 24 fps, 5.04 s, 1.45 MB, with no audio stream, so `generate_audio:false` is honoured.
+- Frame 0 matches the keyframe exactly. The cat waves and blinks as the prompt asked.
+- Conclusion: video needs no hosted URL. R2 has been removed from the whole project. The price still has to be read from the gateway log (spike d).
 
 ## d - flux-3-video price units (gateway log)
 

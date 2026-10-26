@@ -8,7 +8,6 @@ import { join } from "node:path";
 const script = new URL("../tools/set-env.sh", import.meta.url).pathname;
 const ACCT = "0123456789abcdef0123456789abcdef";
 const TOK = "a".repeat(40);
-const R2 = "b".repeat(40);
 
 function runScript(lines, existing) {
   const dir = mkdtempSync(join(tmpdir(), "vf-setenv-"));
@@ -19,22 +18,22 @@ function runScript(lines, existing) {
 }
 
 test("set-env.sh เขียน .env chmod 600, เก็บบรรทัดอื่น, พิมพ์แค่ความยาว", () => {
-  const { r, file, dir } = runScript([ACCT, TOK, "", R2, "", ""], "OTHER=keep\nVF_R2_BUCKET=old\n");
+  const { r, file, dir } = runScript([ACCT, TOK], "OTHER=keep\nCLOUDFLARE_AI_API_TOKEN=old\n");
   try {
     assert.equal(r.status, 0, r.stderr);
     const text = readFileSync(file, "utf8");
     assert.ok(text.includes("OTHER=keep"));
-    assert.ok(text.includes("VF_R2_BUCKET=videofactoro") && !text.includes("=old"));
+    assert.ok(!text.includes("=old"));
     assert.ok(text.includes(`CLOUDFLARE_AI_API_TOKEN=${TOK}`));
     assert.equal(statSync(file).mode & 0o777, 0o600);
-    for (const v of [ACCT, TOK, R2]) assert.ok(!r.stdout.includes(v) && !r.stderr.includes(v));
+    for (const v of [ACCT, TOK]) assert.ok(!r.stdout.includes(v) && !r.stderr.includes(v));
     assert.match(r.stdout, /CLOUDFLARE_AI_API_TOKEN\s+ยาว 40/);
     assert.ok(r.stdout.includes("node bin/vf.mjs setup"));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("set-env.sh ปฏิเสธรูปแบบผิดโดยไม่แตะไฟล์", () => {
-  const { r, file, dir } = runScript(["nothex", TOK, "", R2, "", ""], "KEEP=1\n");
+  const { r, file, dir } = runScript(["nothex", TOK], "KEEP=1\n");
   try {
     assert.notEqual(r.status, 0);
     assert.equal(readFileSync(file, "utf8"), "KEEP=1\n");
@@ -44,12 +43,12 @@ test("set-env.sh ปฏิเสธรูปแบบผิดโดยไม่
 const lines = (file) => readFileSync(file, "utf8").split("\n").filter(Boolean);
 
 test("set-env.sh รันซ้ำไม่มีบรรทัดซ้ำ และ export NAME= ถูกแทนที่", () => {
-  const { file, dir } = runScript([ACCT, TOK, "", R2, "", ""], `export CLOUDFLARE_AI_API_TOKEN=old\n  VF_R2_BUCKET = old\nKEEP=1\n`);
+  const { file, dir } = runScript([ACCT, TOK], `export CLOUDFLARE_AI_API_TOKEN=old\n  CLOUDFLARE_AI_ACCOUNT_ID = old\nKEEP=1\n`);
   try {
-    const again = spawnSync("bash", [script], { input: [ACCT, TOK, "", R2, "", ""].join("\n") + "\n", encoding: "utf8", env: { PATH: process.env.PATH, HOME: dir, ENV_FILE: file } });
+    const again = spawnSync("bash", [script], { input: [ACCT, TOK].join("\n") + "\n", encoding: "utf8", env: { PATH: process.env.PATH, HOME: dir, ENV_FILE: file } });
     assert.equal(again.status, 0, again.stderr);
     const l = lines(file);
-    for (const n of ["CLOUDFLARE_AI_ACCOUNT_ID", "CLOUDFLARE_AI_API_TOKEN", "VF_R2_BUCKET", "VF_R2_TOKEN"]) {
+    for (const n of ["CLOUDFLARE_AI_ACCOUNT_ID", "CLOUDFLARE_AI_API_TOKEN"]) {
       assert.equal(l.filter((x) => new RegExp(`^(export\\s+)?${n}\\s*=`).test(x)).length, 1, n);
     }
     assert.ok(!readFileSync(file, "utf8").includes("old"));
@@ -57,28 +56,17 @@ test("set-env.sh รันซ้ำไม่มีบรรทัดซ้ำ �
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("set-env.sh เปลี่ยนจาก access key เป็น token แล้วลบ key เก่า", () => {
-  const { file, dir } = runScript([ACCT, TOK, "", R2, "", ""], "VF_R2_ACCESS_KEY_ID=OLDKEYID\nVF_R2_SECRET_ACCESS_KEY=OLDSECRET\n");
-  try {
-    const t = readFileSync(file, "utf8");
-    assert.ok(!t.includes("OLDKEYID") && !t.includes("OLDSECRET"));
-    assert.ok(t.includes(`VF_R2_TOKEN=${R2}`));
-  } finally { rmSync(dir, { recursive: true, force: true }); }
-});
-
-test("set-env.sh ข้าม R2 ทั้งหมดได้ และค่า R2 เดิมยังอยู่", () => {
-  const { r, file, dir } = runScript([ACCT, TOK, "", "", "", ""], "VF_R2_BUCKET=mine\nVF_R2_TOKEN=keepme\n");
+test("set-env.sh ไม่ถาม R2 และไม่แตะบรรทัดอื่นที่มีอยู่", () => {
+  const { r, file, dir } = runScript([ACCT, TOK], "VF_R2_BUCKET=mine\n");
   try {
     assert.equal(r.status, 0, r.stderr);
-    const t = readFileSync(file, "utf8");
-    assert.ok(t.includes("VF_R2_BUCKET=mine") && t.includes("VF_R2_TOKEN=keepme"));
-    assert.ok(t.includes(`CLOUDFLARE_AI_API_TOKEN=${TOK}`));
-    assert.ok(!r.stdout.includes("VF_R2"));
+    assert.ok(!r.stderr.includes("R2"));
+    assert.ok(readFileSync(file, "utf8").includes("VF_R2_BUCKET=mine"));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("set-env.sh ตรวจไม่ผ่าน -> ไม่สร้างไฟล์ และไม่มี temp ค้าง", () => {
-  const { r, file, dir } = runScript(["nothex", TOK, "", R2, "", ""]);
+  const { r, file, dir } = runScript(["nothex", TOK]);
   try {
     assert.notEqual(r.status, 0);
     assert.deepEqual(readdirSync(dir), []);

@@ -1,14 +1,13 @@
-// Spike c: flux-3-video i2v, one keyframe, 5 s, draft:true. Compare R2 URL vs raw base64 keyframe; check audio.
-// Spend: 2 draft clips (about $0.06 each per genhaha notes) + 1 klein image if spikes/out/a-plain.png is missing.
+// Spike c: flux-3-video i2v, one raw base64 keyframe, 5 s, draft:true; check audio.
+// Answered 2026-10-27: raw base64 works (see RESULTS.md c). Spend: 1 draft clip (about $0.06 each per genhaha notes) + 1 klein image if spikes/out/a-plain.png is missing.
 // Run (after spike a): node spikes/c-video.mjs
 import fs from "node:fs";
 import { execFileSync } from "node:child_process";
 import { run, extractMedia, download } from "../tools/cf.mjs";
-import { uploadTemp } from "../tools/r2.mjs";
 import { MODELS } from "../tools/models.mjs";
 import { out, facts, timed, shape } from "./_lib.mjs";
 
-const key = out("a-plain.png");
+const key = out("a-plain.jpg");
 if (!fs.existsSync(key)) throw new Error("run spikes/a-klein.mjs first");
 const base = { mode: "i2v", duration: 5, aspect_ratio: "9:16", draft: true, generate_audio: true, prompt: "The cat waves and smiles. No background music." };
 const result = {};
@@ -30,6 +29,5 @@ async function attempt(name, keyframes) {
   }
 }
 
-await attempt("r2url", await uploadTemp(key));
 await attempt("base64", fs.readFileSync(key).toString("base64"));
 facts("c-video", result);

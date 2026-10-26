@@ -8,7 +8,7 @@ CLI `vf` (Node 22, ไม่มี dependency) ให้ LLM agent สั่ง�
 
 ```sh
 bash tools/set-env.sh         # ถามค่าแบบซ่อนตัวอักษร แล้วเขียน .env (chmod 600, git-ignored)
-node bin/vf.mjs setup         # ทดสอบ token (และเตรียม R2 bucket ถ้าตั้งไว้ — R2 ใช้แค่ตอนทำวิดีโอ)
+node bin/vf.mjs setup         # ทดสอบ token และเครดิต
 node tools/install-hooks.mjs  # ติดตั้ง pre-commit กันคีย์หลุด
 node bin/vf.mjs doctor        # ตรวจซ้ำได้ทุกเมื่อ (อ่านอย่างเดียว)
 ```

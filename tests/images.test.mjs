@@ -12,7 +12,7 @@ import { bodyOf } from "./fixtures/body.mjs";
 
 const TINY = fileURLToPath(new URL("./fixtures/tiny.png", import.meta.url));
 const B64 = fs.readFileSync(TINY).toString("base64");
-const ENV = { CLOUDFLARE_AI_ACCOUNT_ID: "acc1", CLOUDFLARE_AI_API_TOKEN: "tok-secret-123456", VF_R2_BUCKET: "bkt", VF_R2_ACCESS_KEY_ID: "AKID", VF_R2_SECRET_ACCESS_KEY: "SECRETSECRET" };
+const ENV = { CLOUDFLARE_AI_ACCOUNT_ID: "acc1", CLOUDFLARE_AI_API_TOKEN: "tok-secret-123456" };
 
 let calls, dir, origWrite, saved;
 const aiCalls = () => calls.filter((c) => c.url.includes("/ai/run"));
@@ -20,12 +20,10 @@ const aiBody = (i = 0) => bodyOf(aiCalls()[i].url, aiCalls()[i].init);
 beforeEach(() => {
   saved = Object.fromEntries(Object.keys(ENV).map((k) => [k, process.env[k]]));
   Object.assign(process.env, ENV);
-  delete process.env.VF_R2_TOKEN;
   calls = [];
   cf.setSleep(async () => {});
   cf.setFetch(async (url, init = {}) => {
     calls.push({ url: String(url), method: init.method ?? "GET", init });
-    if (String(url).includes("r2.cloudflarestorage.com")) return new Response(null, { status: init.method === "HEAD" ? 404 : 200 });
     return { ok: true, status: 200, text: async () => JSON.stringify({ success: true, result: { image: B64 } }) };
   });
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "vf-img-"));
@@ -69,7 +67,7 @@ test("ไม่ระบุ seed: สุ่มตอน miss แล้วเร�
   assert.equal((await generateImage(p)).cached, true);
 });
 
-test("ส่ง refs เป็นไฟล์แนบ multipart ตรงๆ ไม่ผ่าน R2", async () => {
+test("ส่ง refs เป็นไฟล์แนบ multipart ตรงๆ", async () => {
   const a = await generateImage({ ...base(), refs: [TINY, TINY] });
   const body = aiBody();
   assert.equal(body.model, "@cf/black-forest-labs/flux-2-klein-9b");
@@ -77,12 +75,10 @@ test("ส่ง refs เป็นไฟล์แนบ multipart ตรงๆ �
   assert.deepEqual(body.input.input_image_1, { bytes: fs.statSync(TINY).size });
   assert.equal(body.input.width, "768");
   assert.equal(body.input.height, "1360");
-  assert.ok(!calls.some((c) => c.url.includes("r2.cloudflarestorage.com")));
   assert.deepEqual(a.entry.refs, [TINY, TINY]);
 });
 
-test("ไม่มี refs: ไม่ใส่ input_image และไม่ต้องตั้ง R2", async () => {
-  for (const k of ["VF_R2_BUCKET", "VF_R2_ACCESS_KEY_ID", "VF_R2_SECRET_ACCESS_KEY"]) delete process.env[k];
+test("ไม่มี refs: ไม่ใส่ input_image", async () => {
   await generateImage(base());
   assert.ok(!Object.keys(aiBody().input).some((k) => k.startsWith("input_image_")));
 });
@@ -127,7 +123,6 @@ const urlFree = (e) => !JSON.stringify({ m: e.message, b: e.body, d: e.details }
 
 test("run ล้มเหลวพร้อม presigned URL ใน body: error ไม่มี URL", async () => {
   cf.setFetch(async (url, init = {}) => {
-    if (String(url).includes("r2.cloudflarestorage.com")) return new Response(null, { status: init.method === "HEAD" ? 404 : 200 });
     return { ok: false, status: 400, text: async () => `bad image ${URLBODY}` };
   });
   await assert.rejects(generateImage({ ...base(), refs: [TINY] }), (e) => {
@@ -139,7 +134,6 @@ test("run ล้มเหลวพร้อม presigned URL ใน body: error 
 test("download ล้มเหลว: ลง cost error, ลบ temp dir, ไม่มี URL รั่ว", async () => {
   const before = fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith("vf-img-") && n !== path.basename(dir));
   cf.setFetch(async (url, init = {}) => {
-    if (String(url).includes("r2.cloudflarestorage.com")) return new Response(null, { status: init.method === "HEAD" ? 404 : 200 });
     if (String(url).includes("/ai/run")) return { ok: true, status: 200, text: async () => JSON.stringify({ success: true, result: { image: "https://cdn.example/a.png" } }) };
     throw Object.assign(new Error(`fetch failed ${URLBODY}`), { body: URLBODY });
   });

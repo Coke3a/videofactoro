@@ -5,7 +5,7 @@
 ## ตั้งค่า
 
 1. รัน `bash tools/set-env.sh` ใน Terminal ของคุณเอง (ค่าคีย์ไม่แสดงบนจอ เขียนลง `.env` แบบ chmod 600)
-2. รัน `node bin/vf.mjs setup` เพื่อทดสอบ token และเตรียม R2 bucket
+2. รัน `node bin/vf.mjs setup` เพื่อทดสอบ token และเครดิต
 3. ตรวจซ้ำได้ทุกเมื่อด้วย `node bin/vf.mjs doctor` (อ่านอย่างเดียว)
 
 ไม่ต้องคัดลอก `.env.example` หรือพิมพ์คีย์เอง (`.env.example` เป็นแค่รายชื่อตัวแปร) · ห้ามนำ `.env` ไปไว้ใน git (มี pre-commit hook ช่วยกัน: `node tools/install-hooks.mjs`) · `.env` ที่ใช้คือไฟล์ที่ root ของ repo เท่านั้น (env ของ process มาก่อนเสมอ)

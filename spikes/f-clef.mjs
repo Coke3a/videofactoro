@@ -1,20 +1,19 @@
 // Spike f: calibrate clef-omni thresholds. Same-character vs different-character pairs (5 each), text vs no-text images (3 each).
-// Spend: about 12 klein images (~$0.12) + 5 R2 uploads + about 16 clef-omni calls (cheap).
+// Spend: about 12 klein images (~$0.12) + about 16 clef-omni calls (cheap).
 // Run: node spikes/f-clef.mjs   (prints same_character and has_text distributions + a suggested threshold)
 import fs from "node:fs";
 import { run, withRetry, extractMedia, download } from "../tools/cf.mjs";
-import { uploadTemp } from "../tools/r2.mjs";
 import { clef, toQaImage } from "../tools/qa.mjs";
 import { MODELS } from "../tools/models.mjs";
 import { out, facts } from "./_lib.mjs";
 
 const costDir = out("f-costs");
-const klein = async (name, prompt, images, seed) => {
-  const file = out(`f-${name}.png`);
+const klein = async (name, prompt, refs, seed) => {
+  const file = out(`f-${name}.jpg`);
   if (!fs.existsSync(file)) {
-    const input = { prompt, aspect_ratio: "9:16", resolution: "1k", seed };
-    if (images) input.images = images;
-    const { result } = await withRetry(() => run(MODELS.image, input));
+    const input = { prompt, width: "768", height: "1360", seed: String(seed) };
+    (refs ?? []).forEach((b, i) => { input[`input_image_${i}`] = b; });
+    const { result } = await withRetry(() => run(MODELS.image, input, { multipart: true }));
     await download(extractMedia(result), file);
   }
   return file;
@@ -24,11 +23,11 @@ const scene = ["eating a sandwich", "jumping happily", "sleeping", "reading a bo
 const kinds = ["a blue robot with round eyes", "a green frog wearing a red scarf", "a purple dragon with tiny wings", "a yellow duck in a raincoat", "a grey wolf with a backpack"];
 
 const baseFile = await klein("base", "An orange cat mascot with a white belly, full body, flat cartoon style." + SUFFIX, null, 7);
-const baseUrl = await uploadTemp(baseFile);
+const baseBytes = fs.readFileSync(baseFile);
 
 const same = [], diff = [];
 for (let i = 0; i < 5; i++) {
-  same.push(await klein(`same${i}`, `The same orange cat mascot ${scene[i]}, flat cartoon style.` + SUFFIX, [baseUrl], 100 + i));
+  same.push(await klein(`same${i}`, `The same orange cat mascot ${scene[i]}, flat cartoon style.` + SUFFIX, [baseBytes], 100 + i));
   diff.push(await klein(`diff${i}`, `${kinds[i]}, full body, flat cartoon style.` + SUFFIX, null, 200 + i));
 }
 const withText = [], noText = [];

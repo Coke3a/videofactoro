@@ -1,17 +1,11 @@
 import { spawnSync } from "node:child_process";
 import { VfError, parse, redact } from "./out.mjs";
 import { getFetch } from "./cf.mjs";
-import { presignUrl, r2Config } from "./r2.mjs";
 
 export const CORE = ["CLOUDFLARE_AI_ACCOUNT_ID", "CLOUDFLARE_AI_API_TOKEN"];
-// R2 is only needed for video keyframes (flux-3-video takes URLs); images send refs inline.
-const OPTIONAL = ["VF_R2_BUCKET", "VF_R2_TOKEN", "VF_R2_ACCESS_KEY_ID", "VF_R2_SECRET_ACCESS_KEY", "VF_AIG_GATEWAY_ID"];
+const OPTIONAL = ["VF_AIG_GATEWAY_ID"];
 
 const isSet = (n) => Boolean(process.env[n]);
-export const hasR2Credential = () =>
-  isSet("VF_R2_TOKEN") || (isSet("VF_R2_ACCESS_KEY_ID") && isSet("VF_R2_SECRET_ACCESS_KEY"));
-export const hasR2 = () => isSet("VF_R2_BUCKET") && hasR2Credential();
-export const R2_SKIP = "ข้าม (ยังไม่ตั้ง R2 — ต้องใช้ตอนทำวิดีโอเท่านั้น)";
 
 function envCheck(name, required) {
   const v = process.env[name];
@@ -34,9 +28,6 @@ export function localChecks() {
     binaryCheck("ffprobe"),
     ...CORE.map((n) => envCheck(n, true)),
     ...OPTIONAL.map((n) => envCheck(n, false)),
-    hasR2Credential()
-      ? { name: "env:R2_CREDENTIAL", ok: true, detail: isSet("VF_R2_TOKEN") ? "VF_R2_TOKEN" : "access key pair" }
-      : { name: "env:R2_CREDENTIAL", ok: true, detail: "ยังไม่ตั้ง (ต้องใช้ตอนทำวิดีโอเท่านั้น)" },
   ];
 }
 
@@ -69,31 +60,10 @@ export const cfTokenCheck = () =>
     return `HTTP ${res.status}`;
   });
 
-export const r2BucketCheck = () =>
-  attempt("r2:bucket", async () => {
-    const cfg = await r2Config();
-    const url = presignUrl({
-      method: "HEAD", host: cfg.host, path: `/${cfg.bucket}`, region: "auto",
-      accessKeyId: cfg.accessKeyId, secretAccessKey: cfg.secretAccessKey, expiresSec: 60, now: new Date(),
-    });
-    let res;
-    try {
-      res = await getFetch()(url, { method: "HEAD" });
-    } catch {
-      throw new Error("เรียก R2 ไม่ได้");
-    }
-    if (res.status === 404) throw new Error("ไม่พบ bucket (vf setup จะสร้างให้)");
-    if (res.status === 401 || res.status === 403) throw new Error(`R2 ปฏิเสธสิทธิ์ (HTTP ${res.status})`);
-    if (!res.ok) throw new Error(`R2 ตอบ HTTP ${res.status}`);
-    return "มี bucket";
-  });
-
 export async function main(argv) {
   const { values } = parse(argv, { online: { type: "boolean" } });
   const checks = localChecks();
   assertCore(checks);
-  if (values.online) {
-    checks.push(await cfTokenCheck(), hasR2() ? await r2BucketCheck() : { name: "r2:bucket", ok: true, detail: R2_SKIP });
-  }
+  if (values.online) checks.push(await cfTokenCheck());
   return { checks };
 }

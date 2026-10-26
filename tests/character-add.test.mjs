@@ -25,9 +25,8 @@ const TINY = fileURLToPath(new URL("./fixtures/tiny.png", import.meta.url));
 const B64 = fs.readFileSync(TINY).toString("base64");
 const ENV = {
   CLOUDFLARE_AI_ACCOUNT_ID: "acc1", CLOUDFLARE_AI_API_TOKEN: "tok-secret-123456",
-  VF_R2_BUCKET: "bkt", VF_R2_ACCESS_KEY_ID: "AKID", VF_R2_SECRET_ACCESS_KEY: "SECRETSECRET",
 };
-const ENV_KEYS = [...Object.keys(ENV), "VF_PROJECTS", "VF_R2_TOKEN"];
+const ENV_KEYS = [...Object.keys(ENV), "VF_PROJECTS"];
 const HERON = "A tall slender grey heron with a long yellow beak, white chest feathers, thin dark legs, and a small green satchel across the body; always the same proportions.";
 const heron = (o = {}) => ({
   id: "heron", name: "นกกระยาง", role: "ที่ปรึกษา", look: HERON, personality: "สุขุม",
@@ -44,10 +43,6 @@ const asText = (c) => JSON.stringify(c.body);
 function install() {
   calls = [];
   cf.setFetch(async (url, init = {}) => {
-    if (String(url).includes("r2.cloudflarestorage.com")) {
-      calls.push({ url: String(url), body: null });
-      return new Response(null, { status: init.method === "HEAD" ? 404 : 200 });
-    }
     const body = bodyOf(url, init);
     calls.push({ url: String(url), body });
     if (String(url).includes("clef-omni")) {
@@ -76,7 +71,6 @@ beforeEach(async () => {
   saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
   root = fs.mkdtempSync(path.join(os.tmpdir(), "vf-cadd-"));
   Object.assign(process.env, ENV, { VF_PROJECTS: root });
-  delete process.env.VF_R2_TOKEN;
   cf.setSleep(async () => {});
   bible = goodBible();
   llmChar = heron();

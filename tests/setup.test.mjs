@@ -6,16 +6,14 @@ import assert from "node:assert/strict";
 import { setFetch, setSleep } from "../tools/cf.mjs";
 import { main } from "../tools/setup.mjs";
 
-const KEYS = ["CLOUDFLARE_AI_ACCOUNT_ID", "CLOUDFLARE_AI_API_TOKEN", "VF_R2_BUCKET", "VF_R2_ACCESS_KEY_ID", "VF_R2_SECRET_ACCESS_KEY", "VF_R2_TOKEN", "VF_AIG_GATEWAY_ID"];
+const KEYS = ["CLOUDFLARE_AI_ACCOUNT_ID", "CLOUDFLARE_AI_API_TOKEN", "VF_AIG_GATEWAY_ID"];
 process.env.VF_NO_DOTENV = "1";
 let saved, origWrite, errLog, costDir;
 beforeEach(() => {
   saved = Object.fromEntries(KEYS.map((k) => [k, process.env[k]]));
   Object.assign(process.env, {
-    CLOUDFLARE_AI_ACCOUNT_ID: "acc123", CLOUDFLARE_AI_API_TOKEN: "tok-secret-123456", VF_R2_BUCKET: "bkt",
-    VF_R2_ACCESS_KEY_ID: "AKID", VF_R2_SECRET_ACCESS_KEY: "SECRETSECRET",
+    CLOUDFLARE_AI_ACCOUNT_ID: "acc123", CLOUDFLARE_AI_API_TOKEN: "tok-secret-123456",
   });
-  delete process.env.VF_R2_TOKEN;
   delete process.env.VF_AIG_GATEWAY_ID;
   costDir = fs.mkdtempSync(path.join(os.tmpdir(), "vf-setup-cost-"));
   setSleep(async () => {});
@@ -31,8 +29,7 @@ afterEach(() => {
 });
 
 const runBodies = [];
-function fakeCloudflare({ bucketExists = false, corrupt = false } = {}) {
-  const objects = new Map();
+function fakeCloudflare() {
   const seen = [];
   setFetch(async (url, init = {}) => {
     const u = new URL(url);
@@ -44,50 +41,21 @@ function fakeCloudflare({ bucketExists = false, corrupt = false } = {}) {
       const text = '{"ok":true}';
       return new Response(JSON.stringify({ success: true, result: { candidates: [{ content: { parts: [{ text }] } }], usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 3 } } }), { status: 200 });
     }
-    if (u.hostname.endsWith("r2.cloudflarestorage.com")) {
-      if (u.pathname === "/bkt") {
-        if (method === "HEAD") return new Response(null, { status: bucketExists ? 200 : 404 });
-        return new Response(null, { status: 200 });
-      }
-      if (method === "HEAD") return new Response(null, { status: objects.has(u.pathname) ? 200 : 404 });
-      if (method === "PUT") { objects.set(u.pathname, Buffer.from(init.body)); return new Response(null, { status: 200 }); }
-      if (method === "GET") {
-        const b = objects.get(u.pathname);
-        return b ? new Response(corrupt ? Buffer.alloc(16) : b, { status: 200 }) : new Response(null, { status: 404 });
-      }
-    }
     throw new Error("unexpected " + method + " " + url);
   });
   return seen;
 }
 
-test("setup: ทุก check ผ่านด้วย Cloudflare ปลอม และ URL/คีย์ไม่หลุด", async () => {
+test("setup: ทุก check ผ่านด้วย Cloudflare ปลอม ไม่มี R2 และคีย์ไม่หลุด", async () => {
   const seen = fakeCloudflare();
   const { checks } = await main([], { costDir });
   const by = Object.fromEntries(checks.map((c) => [c.name, c]));
-  for (const n of ["cf:token", "r2:bucket", "r2:presign", "cf:credits"]) assert.equal(by[n].ok, true, n + " " + by[n].detail);
-  assert.ok(seen.some((s) => s.startsWith("PUT") && s.endsWith("/bkt")));
+  for (const n of ["cf:token", "cf:credits"]) assert.equal(by[n].ok, true, n + " " + by[n].detail);
+  assert.ok(!checks.some((c) => c.name.startsWith("r2:")));
+  assert.ok(!seen.some((s) => s.includes("r2.cloudflarestorage.com")));
   assert.equal(runBodies.at(-1).input.generationConfig.maxOutputTokens, 2112);
   const text = JSON.stringify(checks) + errLog.join("");
-  for (const v of ["SECRETSECRET", "tok-secret-123456", "X-Amz", "AKID"]) assert.ok(!text.includes(v), v);
-});
-
-test("setup: r2:presign ล้มเมื่อไบต์ที่ได้กลับมาไม่ตรง แต่คำสั่งยังคืน checks", async () => {
-  fakeCloudflare({ corrupt: true });
-  const { checks } = await main([], { costDir });
-  const p = checks.find((c) => c.name === "r2:presign");
-  assert.equal(p.ok, false);
-  assert.ok(!p.detail.includes("X-Amz"));
-});
-
-test("setup: ไม่มี R2 -> ข้าม r2:* (ok) และไม่เรียก R2 เลย", async () => {
-  for (const k of ["VF_R2_BUCKET", "VF_R2_ACCESS_KEY_ID", "VF_R2_SECRET_ACCESS_KEY"]) delete process.env[k];
-  const seen = fakeCloudflare();
-  const { checks } = await main([], { costDir });
-  const by = Object.fromEntries(checks.map((c) => [c.name, c]));
-  for (const n of ["cf:token", "r2:bucket", "r2:presign", "cf:credits"]) assert.equal(by[n].ok, true, n);
-  assert.match(by["r2:bucket"].detail, /ข้าม/);
-  assert.ok(!seen.some((s) => s.includes("r2.cloudflarestorage.com")));
+  assert.ok(!text.includes("tok-secret-123456"));
 });
 
 test("setup: env หลักขาด -> CONFIG พร้อม checks และไม่เรียกเครือข่าย", async () => {

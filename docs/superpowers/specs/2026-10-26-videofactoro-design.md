@@ -72,7 +72,7 @@ Coke ต้องการ "โรงงานผลิตวิดีโอ AI"
 
 1. **บิลสองทาง:** โมเดล `@cf/*` (clef-omni, whisper) ใช้ neurons (ฟรี 10,000/วัน) ส่วน `flux-3-*`, `gemini-*`, `elevenlabs/*`, `bria/*` เป็นโมเดลภายนอก **ต้องเติมเครดิต AI Gateway Unified Billing ไว้ก่อน** (ค่าธรรมเนียม 5% ตอนซื้อเครดิต) ยังเป็นบัญชี Cloudflare เดียว token เดียว
 2. **รูป request สองแบบ:** `@cf/*` → `POST /accounts/{id}/ai/run/@cf/<model>` ส่ง input ที่ชั้นบนสุด · โมเดลภายนอก → `POST /accounts/{id}/ai/run` body `{"model": "...", "input": {...}}` (ใส่ชื่อโมเดลใน path จะได้ "No route for that URI")
-3. **ภาพอ้างอิงต้องเป็น HTTPS URL:** klein ส่ง data URI แล้วได้ error 7003 · flux-3-video ใน genhaha ส่ง data URI แล้วได้ `User Input Error` (schema เขียนว่ารับ "HTTPS URL or base64" — **[ต้องพิสูจน์]** ว่า base64 ดิบแบบไม่มี `data:` ใช้ได้ไหม; ถ้าได้ ก็ยังใช้ R2 เป็นทางหลักเพื่อให้เหมือนกันทั้งระบบ) → ต้องมีที่ฝากไฟล์ชั่วคราว ดู §7.1 **[Coke เลือก R2]**
+3. **ส่งภาพเข้าโมเดลโดยไม่ใช้ที่ฝากไฟล์ (2026-10-27 **[Coke]** ตัด R2 ออกทั้งโปรเจกต์):** `flux-3-image-klein` รับแค่ URL (`images: format uri`, base64 ได้ 400) จึงเปลี่ยนภาพนิ่งไปใช้ `@cf/black-forest-labs/flux-2-klein-9b` ซึ่งแนบภาพอ้างอิงเป็น multipart `input_image_0..3` · `flux-3-video` รับ `keyframes` เป็น base64 ดิบ (ไม่มี `data:`) ได้ — ยิงจริงแล้วผ่าน (spikes/RESULTS.md §c) · ข้อความเดิม (ยกเลิก): ต้องเป็น HTTPS URL → ใช้ R2
 4. **clef-omni รับ base64 เท่านั้น** ไม่รับ URL · สื่อรวม ≤16 MiB → ย่อวิดีโอเป็น 480p ก่อนส่ง
 5. **`/ai/run` รอผลแบบ synchronous** ปกติวิดีโอใช้ 50–175 วิ · บางครั้งคืน request id แทน ต้อง poll `GET /accounts/{id}/ai/requests/{id}` (genhaha ใช้จริง) · ต้องเช็ก `state` แม้ HTTP 200 (`Failed` มากับ 200 ได้) · 500 "Request timed out" คือ timeout
 6. **ห้ามเปิด retry ของ gateway** (`cf-aig-max-attempts`) — retry = สร้างและจ่ายคลิปใหม่
@@ -95,7 +95,7 @@ agent (Claude Code / Hermes)
   ▼
 vf <command> ... --json           ← CLI (Node 22, ESM, ไม่มี build step)
   ├─ core/cf.js        เรียก Cloudflare ทั้งสองรูปแบบ, poll, ดาวน์โหลด, จัดประเภท error, บันทึก cost
-  ├─ core/r2.js        อัปโหลดชั่วคราว + presigned GET (S3 SigV4), lifecycle
+  ├─ (core/r2.js ถูกตัดออก 2026-10-27 — ไม่ใช้ R2 แล้ว)
   ├─ core/cache.js     คลังภาพ/เสียงแบบ content-addressed ต่อ project
   ├─ core/qa.js        ด่านตรวจ clef-omni + วนสร้างใหม่ ≤2 ครั้ง
   ├─ core/state.js     สถานะต่อขั้น/ต่อช็อต → รันซ้ำแล้วทำต่อจากจุดค้าง
@@ -132,7 +132,7 @@ vf <command> ... --json           ← CLI (Node 22, ESM, ไม่มี build s
 
 | คำสั่ง | ทำอะไร |
 |---|---|
-| `vf setup` | ตรวจ env, ทดสอบ token กับ `/ai/run` หนึ่งครั้งราคาถูก, ตรวจเครดิตด้วยการเรียกโมเดลภายนอกที่ถูกที่สุด, สร้าง R2 bucket ถ้ายังไม่มี, ตั้ง lifecycle rule, ตรวจ ffmpeg/Node · ไม่พิมพ์ค่าคีย์ |
+| `vf setup` | ตรวจ env, ทดสอบ token กับ `/ai/run` หนึ่งครั้งราคาถูก, ตรวจเครดิตด้วยการเรียกโมเดลภายนอกที่ถูกที่สุด, ตรวจ ffmpeg/Node · ไม่พิมพ์ค่าคีย์ (ไม่มีขั้น R2 แล้ว) |
 | `vf doctor` | เหมือน setup แต่อ่านอย่างเดียว ไม่สร้างอะไร |
 | `vf project create --prompt "..." [--name slug] [--lang en] [--aspect 9:16]` | สร้าง project ทั้งชุดจาก prompt เดียว (§6.1) |
 | `vf project show <p>` | สรุป project เป็น JSON (ตัวละคร, สถานที่, ท่าที่มี, ตอนที่ทำแล้ว, ยอดเงิน) ให้ agent อ่านเร็ว |
@@ -276,7 +276,7 @@ input: prompt + ความยาวรวม (วินาที, ไม่จ
 
 ## 7. โครงสร้างพื้นฐาน
 
-### 7.1 R2 สำหรับภาพอ้างอิงและ keyframe **[Coke]**
+### 7.1 ~~R2 สำหรับภาพอ้างอิงและ keyframe~~ — ยกเลิก 2026-10-27 **[Coke]**: ภาพนิ่งแนบ multipart, วิดีโอส่ง base64 ดิบ (ดู §3 ข้อ 3) · ข้อความเดิมเก็บไว้อ้างอิง:
 
 - tool อัปโหลดไฟล์ไปที่ `tmp/<sha256>.<ext>` ใน bucket (ชื่อจาก `VF_R2_BUCKET`) แล้วสร้าง **presigned GET URL ที่ตั้งเวลาหมดอายุเองในโค้ด** (ค่าเริ่มต้น 2 ชั่วโมง, งานวิดีโอใช้ deadline ของงาน + 30 นาที) ไม่ต้องตั้งค่าใน console **[Coke ถาม, ยืนยัน]**
 - ไฟล์ชื่อตาม hash → อัปโหลดซ้ำไม่ได้ทำงานซ้ำ (HEAD ก่อน)
@@ -375,8 +375,6 @@ input: prompt + ความยาวรวม (วินาที, ไม่จ
 |---|---|---|
 | `CLOUDFLARE_AI_ACCOUNT_ID` | ใช่ | account id (ชื่อเดียวกับที่ตั้งบน VPS แล้ว) |
 | `CLOUDFLARE_AI_API_TOKEN` | ใช่ | Workers AI Read + Edit |
-| `VF_R2_BUCKET` | ใช่ | ชื่อ bucket |
-| `VF_R2_TOKEN` หรือ `VF_R2_ACCESS_KEY_ID` + `VF_R2_SECRET_ACCESS_KEY` | ใช่ | สิทธิ์ R2 (§7.1) |
 | `VF_AIG_GATEWAY_ID` | ไม่ | ระบุ gateway (ไม่ตั้ง = gateway ค่าเริ่มต้นของบัญชี) |
 | `VF_PROJECTS`, `VF_USD_THB`, `VF_CONCURRENCY` | ไม่ | ค่าทั่วไป |
 

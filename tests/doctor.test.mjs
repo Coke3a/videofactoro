@@ -20,8 +20,7 @@ function vf(envOverrides, ...args) {
 const SECRETS = {
   CLOUDFLARE_AI_ACCOUNT_ID: "0123456789abcdef0123456789abcdef",
   CLOUDFLARE_AI_API_TOKEN: "tok_SECRET_VALUE_aaaaaaaaaaaaaaaa",
-  VF_R2_BUCKET: "bucket-secret-name",
-  VF_R2_TOKEN: "r2tok_SECRET_VALUE_bbbbbbbbbbbbbbbb",
+  VF_AIG_GATEWAY_ID: "gateway-secret-name",
 };
 
 test("doctor ไม่พิมพ์ค่าคีย์", () => {
@@ -35,7 +34,7 @@ test("doctor ไม่พิมพ์ค่าคีย์", () => {
   assert.ok(r.stdout.includes("ยาว"));
   const j = JSON.parse(r.stdout);
   const names = j.checks.map((c) => c.name);
-  for (const n of ["node>=22", "ffmpeg", "ffprobe", "env:CLOUDFLARE_AI_API_TOKEN", "env:VF_R2_TOKEN"]) {
+  for (const n of ["node>=22", "ffmpeg", "ffprobe", "env:CLOUDFLARE_AI_API_TOKEN", "env:VF_AIG_GATEWAY_ID"]) {
     assert.ok(names.includes(n), n);
   }
   assert.ok(!names.includes("cf:token"), "offline doctor must not do network checks");
@@ -58,19 +57,10 @@ test("doctor exit 3 เมื่อ env หลักขาด และยัง
   assert.ok(!r.stdout.includes(SECRETS.CLOUDFLARE_AI_ACCOUNT_ID));
 });
 
-test("doctor ไม่มี R2 เลยก็ผ่าน (R2 ใช้แค่ตอนทำวิดีโอ)", () => {
+test("doctor ไม่ตรวจ R2 อีกแล้ว (ส่งภาพเป็นไฟล์แนบ/base64)", () => {
   const r = vf({ CLOUDFLARE_AI_ACCOUNT_ID: SECRETS.CLOUDFLARE_AI_ACCOUNT_ID, CLOUDFLARE_AI_API_TOKEN: SECRETS.CLOUDFLARE_AI_API_TOKEN }, "doctor");
   assert.equal(r.status, 0, r.stdout);
-  const cred = JSON.parse(r.stdout).checks.find((c) => c.name === "env:R2_CREDENTIAL");
-  assert.equal(cred.ok, true);
-  assert.match(cred.detail, /วิดีโอ/);
-});
-
-test("doctor รับ access key pair แทน VF_R2_TOKEN", () => {
-  const { VF_R2_TOKEN, ...rest } = SECRETS;
-  const r = vf({ ...rest, VF_R2_ACCESS_KEY_ID: "AKIDEXAMPLE0000000000", VF_R2_SECRET_ACCESS_KEY: "secretsecretsecretsecret00" }, "doctor");
-  assert.equal(r.status, 0, r.stdout);
-  assert.ok(!r.stdout.includes("secretsecretsecretsecret00"));
+  assert.ok(!JSON.parse(r.stdout).checks.some((c) => /R2/.test(c.name)));
 });
 
 test("doctor ออฟไลน์ไม่เรียกเครือข่ายเลย (fetch ที่ throw ไม่ถูกเรียก)", async () => {
