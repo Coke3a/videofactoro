@@ -1,8 +1,8 @@
 import { MODELS } from "./models.mjs";
 
 export const PRICES = {
-  asOf: "2026-10-26",
-  [MODELS.image]: { firstMp: 0.009, extraMp: 0.0017, source: "Cloudflare Workers AI pricing" },
+  asOf: "2026-10-27",
+  [MODELS.image]: { firstMp: 0.015, extraMp: 0.002, refMp: 0.002, source: "Cloudflare Workers AI pricing" },
   [MODELS.video]: { hd: 0.17, fhd: 0.29, draft: 0.06, unit: "clip", verified: false, source: "Cloudflare AI Gateway pricing (ยังไม่ยืนยัน)" },
   [MODELS.qa]: { inPerM: 0.15, source: "Cloudflare Workers AI pricing" },
   [MODELS.llm[0]]: { inPerM: 0.75, outPerM: 3.75, source: "Cloudflare AI Gateway pricing" },
@@ -24,8 +24,9 @@ export function estimate(model, units = {}) {
   if (p.firstMp !== undefined) {
     const mp = u.mp ?? 1;
     const images = u.images ?? 1;
-    if (!num(mp) || !num(images)) return null;
-    return (p.firstMp + Math.max(0, mp - 1) * p.extraMp) * images;
+    const refMp = u.refMp ?? 0;
+    if (!num(mp) || !num(images) || !num(refMp)) return null;
+    return (p.firstMp + Math.max(0, mp - 1) * p.extraMp + refMp * (p.refMp ?? 0)) * images;
   }
   if (p.unit === "clip") {
     if (!QUALITIES.includes(u.quality) || !num(p[u.quality]) || !num(u.clips)) return null;

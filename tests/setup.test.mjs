@@ -80,8 +80,18 @@ test("setup: r2:presign ล้มเมื่อไบต์ที่ได้�
   assert.ok(!p.detail.includes("X-Amz"));
 });
 
+test("setup: ไม่มี R2 -> ข้าม r2:* (ok) และไม่เรียก R2 เลย", async () => {
+  for (const k of ["VF_R2_BUCKET", "VF_R2_ACCESS_KEY_ID", "VF_R2_SECRET_ACCESS_KEY"]) delete process.env[k];
+  const seen = fakeCloudflare();
+  const { checks } = await main([], { costDir });
+  const by = Object.fromEntries(checks.map((c) => [c.name, c]));
+  for (const n of ["cf:token", "r2:bucket", "r2:presign", "cf:credits"]) assert.equal(by[n].ok, true, n);
+  assert.match(by["r2:bucket"].detail, /ข้าม/);
+  assert.ok(!seen.some((s) => s.includes("r2.cloudflarestorage.com")));
+});
+
 test("setup: env หลักขาด -> CONFIG พร้อม checks และไม่เรียกเครือข่าย", async () => {
-  delete process.env.VF_R2_BUCKET;
+  delete process.env.CLOUDFLARE_AI_API_TOKEN;
   const seen = fakeCloudflare();
   await assert.rejects(main([], { costDir }), (e) => e.code === "CONFIG" && Array.isArray(e.details.checks));
   assert.equal(seen.length, 0);

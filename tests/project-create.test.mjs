@@ -14,6 +14,7 @@ import { main as waitMain } from "../tools/wait.mjs";
 import { main as statusMain } from "../tools/status.mjs";
 import { main, useUserImage, buildCommand } from "../tools/project-create.mjs";
 import { goodBible } from "./fixtures/bible.mjs";
+import { bodyOf } from "./fixtures/body.mjs";
 
 process.env.VF_NO_DOTENV = "1";
 const TINY = fileURLToPath(new URL("./fixtures/tiny.png", import.meta.url));
@@ -30,7 +31,7 @@ const DOG = () => bible.characters[1].look;
 function install() {
   calls = [];
   cf.setFetch(async (url, init = {}) => {
-    const body = init.body ? JSON.parse(init.body) : null;
+    const body = bodyOf(url, init);
     calls.push({ url: String(url), body });
     if (String(url).includes("clef-omni")) {
       const answers = Object.fromEntries(
@@ -231,7 +232,7 @@ test("--image: QA ภาพผู้ใช้ไม่ผ่าน = warning ข
 
 test("--image: look จากภาพที่สั้นเกิน/มีคำเสี่ยง ไม่ผ่าน validator → PROVIDER, ไม่ไปขั้น ref", async () => {
   cf.setFetch(async (url, init = {}) => {
-    const body = init.body ? JSON.parse(init.body) : null;
+    const body = bodyOf(url, init);
     calls.push({ url: String(url), body });
     const fromImage = body?.input?.systemInstruction?.parts[0].text.includes("ผู้ใช้ให้ภาพของตัวละครนั้นมาแล้ว");
     const data = fromImage ? { ...bible.characters[0], look: "short" } : bible;

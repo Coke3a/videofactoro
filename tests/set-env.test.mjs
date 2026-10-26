@@ -66,6 +66,17 @@ test("set-env.sh เปลี่ยนจาก access key เป็น token �
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test("set-env.sh ข้าม R2 ทั้งหมดได้ และค่า R2 เดิมยังอยู่", () => {
+  const { r, file, dir } = runScript([ACCT, TOK, "", "", "", ""], "VF_R2_BUCKET=mine\nVF_R2_TOKEN=keepme\n");
+  try {
+    assert.equal(r.status, 0, r.stderr);
+    const t = readFileSync(file, "utf8");
+    assert.ok(t.includes("VF_R2_BUCKET=mine") && t.includes("VF_R2_TOKEN=keepme"));
+    assert.ok(t.includes(`CLOUDFLARE_AI_API_TOKEN=${TOK}`));
+    assert.ok(!r.stdout.includes("VF_R2"));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("set-env.sh ตรวจไม่ผ่าน -> ไม่สร้างไฟล์ และไม่มี temp ค้าง", () => {
   const { r, file, dir } = runScript(["nothex", TOK, "", R2, "", ""]);
   try {

@@ -3,12 +3,15 @@ import { VfError, parse, redact } from "./out.mjs";
 import { getFetch } from "./cf.mjs";
 import { presignUrl, r2Config } from "./r2.mjs";
 
-export const CORE = ["CLOUDFLARE_AI_ACCOUNT_ID", "CLOUDFLARE_AI_API_TOKEN", "VF_R2_BUCKET"];
-const OPTIONAL = ["VF_R2_TOKEN", "VF_R2_ACCESS_KEY_ID", "VF_R2_SECRET_ACCESS_KEY", "VF_AIG_GATEWAY_ID"];
+export const CORE = ["CLOUDFLARE_AI_ACCOUNT_ID", "CLOUDFLARE_AI_API_TOKEN"];
+// R2 is only needed for video keyframes (flux-3-video takes URLs); images send refs inline.
+const OPTIONAL = ["VF_R2_BUCKET", "VF_R2_TOKEN", "VF_R2_ACCESS_KEY_ID", "VF_R2_SECRET_ACCESS_KEY", "VF_AIG_GATEWAY_ID"];
 
 const isSet = (n) => Boolean(process.env[n]);
 export const hasR2Credential = () =>
   isSet("VF_R2_TOKEN") || (isSet("VF_R2_ACCESS_KEY_ID") && isSet("VF_R2_SECRET_ACCESS_KEY"));
+export const hasR2 = () => isSet("VF_R2_BUCKET") && hasR2Credential();
+export const R2_SKIP = "ข้าม (ยังไม่ตั้ง R2 — ต้องใช้ตอนทำวิดีโอเท่านั้น)";
 
 function envCheck(name, required) {
   const v = process.env[name];
@@ -33,13 +36,12 @@ export function localChecks() {
     ...OPTIONAL.map((n) => envCheck(n, false)),
     hasR2Credential()
       ? { name: "env:R2_CREDENTIAL", ok: true, detail: isSet("VF_R2_TOKEN") ? "VF_R2_TOKEN" : "access key pair" }
-      : { name: "env:R2_CREDENTIAL", ok: false, detail: "ยังไม่ตั้ง VF_R2_TOKEN หรือ VF_R2_ACCESS_KEY_ID+VF_R2_SECRET_ACCESS_KEY" },
+      : { name: "env:R2_CREDENTIAL", ok: true, detail: "ยังไม่ตั้ง (ต้องใช้ตอนทำวิดีโอเท่านั้น)" },
   ];
 }
 
 export function assertCore(checks) {
   const missing = CORE.filter((n) => !isSet(n));
-  if (!hasR2Credential()) missing.push("VF_R2_TOKEN หรือ VF_R2_ACCESS_KEY_ID+VF_R2_SECRET_ACCESS_KEY");
   if (missing.length) {
     throw new VfError("CONFIG", `ยังไม่ได้ตั้ง: ${missing.join(", ")} — รัน tools/set-env.sh แล้วลองใหม่`, { checks });
   }
@@ -90,6 +92,8 @@ export async function main(argv) {
   const { values } = parse(argv, { online: { type: "boolean" } });
   const checks = localChecks();
   assertCore(checks);
-  if (values.online) checks.push(await cfTokenCheck(), await r2BucketCheck());
+  if (values.online) {
+    checks.push(await cfTokenCheck(), hasR2() ? await r2BucketCheck() : { name: "r2:bucket", ok: true, detail: R2_SKIP });
+  }
   return { checks };
 }

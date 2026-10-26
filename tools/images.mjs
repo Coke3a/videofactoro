@@ -3,7 +3,6 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cacheKey, libLoad, libFindByKey, libAdd, libUpdate } from "./cache.mjs";
-import { uploadTemp } from "./r2.mjs";
 import { run, withRetry, extractMedia, download } from "./cf.mjs";
 import { MODELS } from "./models.mjs";
 import { estimate } from "./pricing.mjs";
@@ -36,25 +35,31 @@ function sniffExt(b) {
 
 const RESOLUTION_MP = { "1k": 1, "2k": 4 };
 
+// klein-9b takes width/height, not aspect_ratio/resolution: keep the area, snap both sides to 16 px.
+export function sizeFor(aspect, resolution) {
+  const m = /^(\d+):(\d+)$/.exec(String(aspect));
+  const mp = RESOLUTION_MP[resolution];
+  if (!m || !mp) throw new VfError("USAGE", `aspect/resolution ไม่รองรับ: ${aspect} ${resolution}`);
+  const ratio = Number(m[1]) / Number(m[2]);
+  const snap = (v) => Math.max(256, Math.round(v / 16) * 16);
+  return { width: snap(Math.sqrt(mp * 2 ** 20 * ratio)), height: snap(Math.sqrt((mp * 2 ** 20) / ratio)) };
+}
+
 function megapixels(bytes, resolution) {
   const d = dimensions(bytes);
   if (d && d.w > 0 && d.h > 0) return Math.round(((d.w * d.h) / 1e6) * 100) / 100;
   return RESOLUTION_MP[resolution] ?? null;
 }
 
-const PRESIGNED = /https?:\/\/[^\s"'<>\\]*X-Amz-[^\s"'<>\\]*/gi;
+// Provider/download errors can echo signed URLs; keep them out of messages and logs.
+const SIGNED = /https?:\/\/[^\s"'<>\\]*X-Amz-[^\s"'<>\\]*/gi;
 
-function scrubUrls(err, urls) {
-  const clean = (t) => {
-    let out = String(t).replace(PRESIGNED, "<ref-url>");
-    for (const u of urls) out = out.split(u).join("<ref-url>");
-    return out;
-  };
-  const fix = (v) => (v === undefined ? v : typeof v === "string" ? clean(v) : JSON.parse(clean(JSON.stringify(v))));
+function scrubUrls(err) {
+  const clean = (t) => String(t).replace(SIGNED, "<signed-url>");
   try {
     err.message = clean(err.message);
-    if ("body" in err) err.body = fix(err.body);
-    if (err.details !== undefined) err.details = fix(err.details);
+    if (typeof err.body === "string") err.body = clean(err.body);
+    if (err.details !== undefined) err.details = JSON.parse(clean(JSON.stringify(err.details)));
   } catch { /* leave as is */ }
   return err;
 }
@@ -83,33 +88,34 @@ export async function generateImage({
   }
   const usedSeed = seed ?? randomInt(0, 2 ** 32);
   const tmp = mkdtempSync(join(tmpdir(), "vf-img-"));
-  const urls = [];
+  const refBytes = refs.map((r) => readFileSync(r));
+  // ภาพอ้างอิงคิดเงินตาม MP ของภาพที่ส่ง (อ่านขนาดไม่ได้ให้นับ 1 MP)
+  const refMp = refBytes.reduce((sum, b) => sum + (megapixels(b, null) ?? 1), 0);
   let bytes;
   try {
-    for (const r of refs) urls.push(await uploadTemp(r));
-    const input = { prompt: finalPrompt, aspect_ratio: aspect, resolution, seed: usedSeed };
-    if (urls.length) input.images = urls;
-    log(`klein: refs=${urls.length} model=${MODELS.image}`);
+    const { width, height } = sizeFor(aspect, resolution);
+    const input = { prompt: finalPrompt, width: String(width), height: String(height), seed: String(usedSeed) };
+    refBytes.forEach((b, i) => { input[`input_image_${i}`] = b; });
+    log(`klein: refs=${refs.length} ${width}x${height} model=${MODELS.image}`);
     let paid = false;
     try {
-      const { result } = await withRetry(() => run(MODELS.image, input, { meta }));
+      const { result } = await withRetry(() => run(MODELS.image, input, { meta, multipart: true }));
       paid = true;
       const out = join(tmp, "out");
       await download(extractMedia(result), out);
       bytes = readFileSync(out);
     } catch (err) {
-      // run สำเร็จแล้ว (จ่ายแล้ว) แต่ได้ไฟล์ไม่ครบ: ลงราคาประเมินจาก resolution ที่ขอ
-      const mp = RESOLUTION_MP[resolution];
-      const usd = paid && mp ? estimate(MODELS.image, { images: 1, mp }) : null;
+      // run สำเร็จแล้ว (จ่ายแล้ว) แต่ได้ไฟล์ไม่ครบ: ลงราคาประเมินจากขนาดที่ขอ
+      const usd = paid ? estimate(MODELS.image, { images: 1, mp: (width * height) / 1e6, refMp }) : null;
       logCost(costDir, { ...row, outcome: failOutcome(err), units: { images: 1 }, usd });
-      throw scrubUrls(err, urls);
+      throw scrubUrls(err);
     }
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
 
   const mp = megapixels(bytes, resolution);
-  const usd = mp === null ? null : estimate(MODELS.image, { images: 1, mp });
+  const usd = mp === null ? null : estimate(MODELS.image, { images: 1, mp, refMp });
   const added = libAdd(projectDir, {
     id: `${kind}-${key.slice(0, 12)}`, kind, key, prompt, need, model: MODELS.image, refs, characters, place, tags,
     tag_p: {}, qa: null, status, used_in: [], cost_usd: usd, seed: usedSeed, aspect, resolution,

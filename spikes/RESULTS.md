@@ -25,6 +25,14 @@ Script: a scratch file calling tools/ directly (token, llmJson for each model, g
 - **clef-omni:** `{model:"clef-omni", state, questions, images:[data URI]}` returns `answers.<k>.noul`, 728 input tokens, in 0.65 s. characterRef passed with a score of 1.14.
 - Still not run: R2 (no bucket or token yet), and klein with refs through R2.
 
+### 0b - refs without R2 (2026-10-27)
+
+- `black-forest-labs/flux-3-image-klein` with raw base64 in `images[0]` returns 400 code 7003 "Must be an HTTP(S) URL". The third-party flux-3 models need hosted URLs.
+- `@cf/black-forest-labs/flux-2-klein-9b` takes multipart input: `prompt`, `input_image_0` (a file part), and `width`/`height` as strings. The response is `{image: base64}`, a JPEG of 261 KB at 768x1024, in 4.6 s.
+  - Visual check against the cat ref: the same character (colours, stripes, belly patch, ears, tail), with the pose changed to sitting and smiling as the prompt asked. The output is good.
+  - It is neuron-billed; the exact cost is still to be read from the gateway log.
+- So images and character refs can work with no R2 through flux-2-klein-9b. Video (flux-3-video keyframes) still needs URLs.
+
 ## a - klein (9:16 1k, refs via R2 URL)
 
 ## b - VF_R2_TOKEN to S3 key conversion

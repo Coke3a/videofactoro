@@ -58,6 +58,14 @@ test("doctor exit 3 เมื่อ env หลักขาด และยัง
   assert.ok(!r.stdout.includes(SECRETS.CLOUDFLARE_AI_ACCOUNT_ID));
 });
 
+test("doctor ไม่มี R2 เลยก็ผ่าน (R2 ใช้แค่ตอนทำวิดีโอ)", () => {
+  const r = vf({ CLOUDFLARE_AI_ACCOUNT_ID: SECRETS.CLOUDFLARE_AI_ACCOUNT_ID, CLOUDFLARE_AI_API_TOKEN: SECRETS.CLOUDFLARE_AI_API_TOKEN }, "doctor");
+  assert.equal(r.status, 0, r.stdout);
+  const cred = JSON.parse(r.stdout).checks.find((c) => c.name === "env:R2_CREDENTIAL");
+  assert.equal(cred.ok, true);
+  assert.match(cred.detail, /วิดีโอ/);
+});
+
 test("doctor รับ access key pair แทน VF_R2_TOKEN", () => {
   const { VF_R2_TOKEN, ...rest } = SECRETS;
   const r = vf({ ...rest, VF_R2_ACCESS_KEY_ID: "AKIDEXAMPLE0000000000", VF_R2_SECRET_ACCESS_KEY: "secretsecretsecretsecret00" }, "doctor");

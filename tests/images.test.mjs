@@ -7,7 +7,8 @@ import { fileURLToPath } from "node:url";
 import * as cf from "../tools/cf.mjs";
 import { readCosts } from "../tools/cost.mjs";
 import { libLoad } from "../tools/cache.mjs";
-import { generateImage } from "../tools/images.mjs";
+import { generateImage, sizeFor } from "../tools/images.mjs";
+import { bodyOf } from "./fixtures/body.mjs";
 
 const TINY = fileURLToPath(new URL("./fixtures/tiny.png", import.meta.url));
 const B64 = fs.readFileSync(TINY).toString("base64");
@@ -15,6 +16,7 @@ const ENV = { CLOUDFLARE_AI_ACCOUNT_ID: "acc1", CLOUDFLARE_AI_API_TOKEN: "tok-se
 
 let calls, dir, origWrite, saved;
 const aiCalls = () => calls.filter((c) => c.url.includes("/ai/run"));
+const aiBody = (i = 0) => bodyOf(aiCalls()[i].url, aiCalls()[i].init);
 beforeEach(() => {
   saved = Object.fromEntries(Object.keys(ENV).map((k) => [k, process.env[k]]));
   Object.assign(process.env, ENV);
@@ -67,25 +69,36 @@ test("ไม่ระบุ seed: สุ่มตอน miss แล้วเร�
   assert.equal((await generateImage(p)).cached, true);
 });
 
-test("ส่ง refs เป็น https URL จาก uploadTemp", async () => {
-  const a = await generateImage({ ...base(), refs: [TINY] });
-  const body = JSON.parse(aiCalls()[0].init.body);
-  assert.equal(body.input.images.length, 1);
-  assert.match(body.input.images[0], /^https:\/\/.*X-Amz-Signature=/);
-  assert.deepEqual(a.entry.refs, [TINY]);
-  assert.ok(!JSON.stringify(a.entry).includes("X-Amz"));
-  assert.equal(body.input.aspect_ratio, "9:16");
-  assert.equal(body.input.resolution, "1k");
+test("ส่ง refs เป็นไฟล์แนบ multipart ตรงๆ ไม่ผ่าน R2", async () => {
+  const a = await generateImage({ ...base(), refs: [TINY, TINY] });
+  const body = aiBody();
+  assert.equal(body.model, "@cf/black-forest-labs/flux-2-klein-9b");
+  assert.deepEqual(body.input.input_image_0, { bytes: fs.statSync(TINY).size });
+  assert.deepEqual(body.input.input_image_1, { bytes: fs.statSync(TINY).size });
+  assert.equal(body.input.width, "768");
+  assert.equal(body.input.height, "1360");
+  assert.ok(!calls.some((c) => c.url.includes("r2.cloudflarestorage.com")));
+  assert.deepEqual(a.entry.refs, [TINY, TINY]);
 });
 
-test("ไม่มี refs: ไม่ใส่ images", async () => {
+test("ไม่มี refs: ไม่ใส่ input_image และไม่ต้องตั้ง R2", async () => {
+  for (const k of ["VF_R2_BUCKET", "VF_R2_ACCESS_KEY_ID", "VF_R2_SECRET_ACCESS_KEY"]) delete process.env[k];
   await generateImage(base());
-  assert.ok(!("images" in JSON.parse(aiCalls()[0].init.body).input));
+  assert.ok(!Object.keys(aiBody().input).some((k) => k.startsWith("input_image_")));
+});
+
+test("sizeFor: คงพื้นที่ตาม resolution และปัดเป็นทวีคูณ 16", () => {
+  assert.deepEqual(sizeFor("9:16", "1k"), { width: 768, height: 1360 });
+  assert.deepEqual(sizeFor("1:1", "1k"), { width: 1024, height: 1024 });
+  assert.deepEqual(sizeFor("16:9", "1k"), { width: 1360, height: 768 });
+  assert.deepEqual(sizeFor("9:16", "2k"), { width: 1536, height: 2736 });
+  assert.throws(() => sizeFor("wide", "1k"), (e) => e.code === "USAGE");
+  assert.throws(() => sizeFor("9:16", "8k"), (e) => e.code === "USAGE");
 });
 
 test("prompt ต่อท้ายด้วย No text", async () => {
   const a = await generateImage(base());
-  assert.equal(JSON.parse(aiCalls()[0].init.body).input.prompt, "a red fox No text, no letters, no logos, no watermark.");
+  assert.equal(aiBody().input.prompt, "a red fox No text, no letters, no logos, no watermark.");
   assert.equal(a.entry.prompt, "a red fox");
 });
 
@@ -149,9 +162,9 @@ test("cache hit แต่ blob หาย: ถือเป็น miss แล้�
   assert.equal(libLoad(dir).entries.length, 1);
 });
 
-test("seed 0 ถูกส่งเป็น seed:0 และ key ต่างจากไม่มี seed", async () => {
+test("seed 0 ถูกส่งเป็น seed \"0\" และ key ต่างจากไม่มี seed", async () => {
   const z = await generateImage({ ...base(), seed: 0 });
-  assert.equal(JSON.parse(aiCalls()[0].init.body).input.seed, 0);
+  assert.equal(aiBody().input.seed, "0");
   assert.equal(z.entry.seed, 0);
   const p = base();
   delete p.seed;
@@ -191,5 +204,6 @@ test("run สำเร็จแต่ download ล้ม: แถว error มี
   await assert.rejects(generateImage({ ...base(), resolution: "2k" }));
   const [r] = readCosts(path.join(dir, ".vf"));
   assert.equal(r.outcome, "error");
-  assert.ok(Math.abs(r.usd - (0.009 + 3 * 0.0017)) < 1e-12);
+  // 2k 9:16 = 1536x2736 = 4.202496 MP
+  assert.ok(Math.abs(r.usd - (0.015 + 3.202496 * 0.002)) < 1e-12);
 });

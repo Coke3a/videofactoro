@@ -7,7 +7,7 @@ import { parse } from "./out.mjs";
 import { getFetch } from "./cf.mjs";
 import { ensureBucket, putLifecycle, uploadTemp } from "./r2.mjs";
 import { llmJson } from "./llm.mjs";
-import { localChecks, assertCore, attempt, cfTokenCheck } from "./doctor.mjs";
+import { localChecks, assertCore, attempt, cfTokenCheck, hasR2, R2_SKIP } from "./doctor.mjs";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -58,9 +58,13 @@ export async function main(argv, { costDir = join(REPO_ROOT, ".vf-setup") } = {}
   const checks = localChecks();
   assertCore(checks);
   checks.push(await cfTokenCheck());
-  const bucket = await bucketCheck();
-  checks.push(bucket);
-  checks.push(bucket.ok ? await presignCheck() : { name: "r2:presign", ok: false, detail: "ข้าม (r2:bucket ไม่ผ่าน)" });
+  if (hasR2()) {
+    const bucket = await bucketCheck();
+    checks.push(bucket);
+    checks.push(bucket.ok ? await presignCheck() : { name: "r2:presign", ok: false, detail: "ข้าม (r2:bucket ไม่ผ่าน)" });
+  } else {
+    checks.push({ name: "r2:bucket", ok: true, detail: R2_SKIP }, { name: "r2:presign", ok: true, detail: R2_SKIP });
+  }
   checks.push(await creditsCheck(costDir));
   return { checks };
 }

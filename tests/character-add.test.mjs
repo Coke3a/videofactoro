@@ -18,6 +18,7 @@ import { commitStagedRefs } from "../tools/entities.mjs";
 import { RULES } from "../tools/qa-rules.mjs";
 import { validateCharacter, validatePlace } from "../tools/bible.mjs";
 import { goodBible } from "./fixtures/bible.mjs";
+import { bodyOf } from "./fixtures/body.mjs";
 
 process.env.VF_NO_DOTENV = "1";
 const TINY = fileURLToPath(new URL("./fixtures/tiny.png", import.meta.url));
@@ -47,7 +48,7 @@ function install() {
       calls.push({ url: String(url), body: null });
       return new Response(null, { status: init.method === "HEAD" ? 404 : 200 });
     }
-    const body = init.body ? JSON.parse(init.body) : null;
+    const body = bodyOf(url, init);
     calls.push({ url: String(url), body });
     if (String(url).includes("clef-omni")) {
       const answers = Object.fromEntries(Object.keys(body.questions).map((k) => [
@@ -129,7 +130,7 @@ test("character add เพิ่มแถวในตาราง PROJECT.md โ
   assert.equal(JSON.parse(fs.readFileSync(path.join(dir, "characters/heron/character.json"), "utf8")).ref, "ref/main.png");
 
   assert.equal(imageCalls().length, 3);
-  for (const c of imageCalls()) assert.equal(c.body.input.images.length, 2);
+  for (const c of imageCalls()) assert.deepEqual(Object.keys(c.body.input).filter((k) => k.startsWith("input_image_")), ["input_image_0", "input_image_1"]);
   const llm = asText(llmCalls()[0]);
   assert.ok(llm.includes("นกกระยางที่ปรึกษา") && llm.includes("ข้อความที่คนเขียนเอง") && llm.includes("cat") && llm.includes("dog"));
   assert.ok(llmCalls()[0].body.input.systemInstruction.parts[0].text.includes("ภาษา en ยกเว้น look"));

@@ -1,5 +1,5 @@
 export const MODELS = {
-  image: "black-forest-labs/flux-3-image-klein",
+  image: "@cf/black-forest-labs/flux-2-klein-9b",
   video: "black-forest-labs/flux-3-video",
   qa: "@cf/cloudflare/clef-omni",
   llm: ["google/gemini-3.8-flash", "anthropic/claude-haiku-5.5"],

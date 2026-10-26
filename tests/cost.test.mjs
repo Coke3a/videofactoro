@@ -9,14 +9,16 @@ import { logCost, readCosts, summarize, renderCostTable } from "../tools/cost.mj
 
 const near = (a, b) => assert.ok(Math.abs(a - b) < 1e-9, `${a} != ${b}`);
 
-test("estimate klein 1MP = 0.009", () => {
-  near(estimate(MODELS.image, { mp: 1 }), 0.009);
-  near(estimate(MODELS.image, { images: 2, mp: 1 }), 0.018);
-  near(estimate(MODELS.image, { images: 3 }), 0.027);
+test("estimate klein-9b 1MP = 0.015", () => {
+  near(estimate(MODELS.image, { mp: 1 }), 0.015);
+  near(estimate(MODELS.image, { images: 2, mp: 1 }), 0.03);
+  near(estimate(MODELS.image, { images: 3 }), 0.045);
 });
 
-test("estimate klein 1.5MP ≈ 0.00985", () => {
-  near(estimate(MODELS.image, { mp: 1.5 }), 0.00985);
+test("estimate klein-9b 1.5MP = 0.016 และภาพอ้างอิงคิด 0.002 ต่อ MP", () => {
+  near(estimate(MODELS.image, { mp: 1.5 }), 0.016);
+  near(estimate(MODELS.image, { mp: 1, refMp: 2 }), 0.019);
+  assert.equal(estimate(MODELS.image, { mp: 1, refMp: "x" }), null);
 });
 
 test("estimate video hd 1 คลิป = 0.17", () => {
@@ -32,7 +34,7 @@ test("estimate llm/tts/asr/music/unknown", () => {
   near(estimate(MODELS.tts, { minutes: 1 }), 0.014);
   assert.equal(estimate(MODELS.rmbg, { images: 1 }), null);
   assert.equal(estimate("nope/model", {}), null);
-  assert.equal(PRICES.asOf, "2026-10-26");
+  assert.equal(PRICES.asOf, "2026-10-27");
 });
 
 test("summarize นับ reroll", () => {
