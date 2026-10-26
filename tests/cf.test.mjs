@@ -8,7 +8,7 @@ import { VfError } from "../tools/out.mjs";
 
 const fx = (n) => fs.readFileSync(new URL(`./fixtures/${n}`, import.meta.url), "utf8");
 const TOKEN = "tok-secret-123456";
-let calls, sleeps;
+let calls, sleeps, clock;
 const reply = (body, status = 200) => ({ ok: status < 400, status, text: async () => body, arrayBuffer: async () => Buffer.from(body) });
 function fake(...replies) {
   calls = [];
@@ -19,7 +19,9 @@ beforeEach(() => {
   process.env.CLOUDFLARE_AI_API_TOKEN = TOKEN;
   delete process.env.VF_AIG_GATEWAY_ID;
   sleeps = [];
-  cf.setSleep(async (ms) => { sleeps.push(ms); });
+  clock = 0;
+  cf.setNow(() => clock);
+  cf.setSleep(async (ms) => { sleeps.push(ms); clock += ms; });
 });
 afterEach(() => { for (const k of ["CLOUDFLARE_AI_ACCOUNT_ID", "CLOUDFLARE_AI_API_TOKEN", "VF_AIG_GATEWAY_ID"]) delete process.env[k]; });
 
@@ -85,13 +87,29 @@ test("queued + request_id → pollRequest จนเสร็จ", async () => {
 
 test("poll หมดเวลา → TIMEOUT", async () => {
   fake(reply(fx("cf-running.json")));
-  await assert.rejects(cf.pollRequest("req-1", { intervalMs: 10, timeoutMs: 30 }), (e) => e.kind === "TIMEOUT");
+  await assert.rejects(cf.pollRequest("req-1", { intervalMs: 10, timeoutMs: 30 }), (e) => e.details.kind === "TIMEOUT" && e.details.request_id === "req-1");
+});
+
+test("503 ระหว่าง poll แล้ว Completed → สำเร็จ ส่งงานครั้งเดียว", async () => {
+  fake(reply(fx("cf-queued.json")), reply("down", 503), reply(fx("cf-completed.json")));
+  const { result } = await cf.withRetry(() => cf.run("black-forest-labs/flux-3-video", {}));
+  assert.equal(result.video, "https://cdn.example/v.mp4");
+  assert.equal(calls.filter((c) => c.init.method === "POST").length, 1);
+});
+
+test("poll เกินเวลา → error มี request_id และ withRetry ไม่ส่งงานซ้ำ", async () => {
+  fake(reply(fx("cf-queued.json")), reply(fx("cf-running.json")));
+  await assert.rejects(
+    cf.withRetry(() => cf.run("black-forest-labs/flux-3-video", {}, { pollTimeoutMs: 20_000 })),
+    (e) => e instanceof VfError && e.code === "PROVIDER" && e.details.request_id === "req-1" && e.details.kind === "TIMEOUT",
+  );
+  assert.equal(calls.filter((c) => c.init.method === "POST").length, 1);
 });
 
 test("classify", () => {
   const c = (status, body = "") => cf.classify({ status, body });
   assert.equal(c(500, "Request timed out"), "TIMEOUT");
-  assert.equal(c(422, "moderation"), "BAD_INPUT");
+  assert.equal(c(422, "moderation"), "CONTENT_BLOCKED");
   assert.equal(c(422, "Content moderation error"), "CONTENT_BLOCKED");
   assert.equal(c(400, "...safety..."), "CONTENT_BLOCKED");
   assert.equal(c(401), "CONFIG_ERROR");

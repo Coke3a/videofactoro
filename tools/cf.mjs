@@ -7,13 +7,15 @@ let fetchFn = (...a) => globalThis.fetch(...a);
 let sleepFn = (ms) => new Promise((r) => setTimeout(r, ms));
 export const setFetch = (fn) => { fetchFn = fn; };
 export const setSleep = (fn) => { sleepFn = fn; };
+let nowFn = () => Date.now();
+export const setNow = (fn) => { nowFn = fn; };
 
 const BASE = "https://api.cloudflare.com/client/v4/accounts";
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 
 export const isCfHosted = (model) => model.startsWith("@cf/");
 
-const MODERATION = [/content[\s_-]*moderat/i, /moderated/i, /safety/i, /nsfw/i, /flagged/i];
+const MODERATION = [/moderation/i, /content[\s_-]*moderat/i, /moderated/i, /safety/i, /nsfw/i, /flagged/i];
 const CONFIG = [/no route for that uri/i, /not found/i, /unauthoriz/i, /invalid.*(token|credential|api key)/i, /authentication/i];
 const TIMEOUT = [/timed?\s*out/i, /timeout/i, /deadline/i, /abort/i];
 
@@ -114,30 +116,49 @@ export async function run(model, input, opts = {}) {
   if ((s === "queued" || s === "running") && !hasMedia(result)) {
     const id = idOf(result);
     if (!id) throw providerError(status, raw);
-    result = await pollRequest(id, { timeoutMs, meta: opts.meta });
+    try {
+      result = await pollRequest(id, { timeoutMs: opts.pollTimeoutMs, meta: opts.meta });
+    } catch (err) {
+      throw tagPollError(err, id);
+    }
   } else if (s && s !== "completed") {
     throw providerError(status, raw);
   }
   return { result, ms: Date.now() - t0 };
 }
 
+// After a request id exists, errors must never trigger a resubmit (double billing).
+function tagPollError(err, id) {
+  const msg = scrub(err?.message);
+  const kind = err?.kind ?? classify({ status: err?.status, body: err?.body ?? err?.message });
+  const details = { kind, request_id: id };
+  if (err instanceof VfError) return new VfError(err.code, err.message, { ...err.details, request_id: id });
+  if (kind === "CONTENT_BLOCKED") return new VfError("BLOCKED", `เนื้อหาถูกบล็อก: ${msg}`, details);
+  if (kind === "CONFIG_ERROR") return new VfError("CONFIG", `ตั้งค่า Cloudflare ไม่ถูกต้อง: ${msg}`, details);
+  return new VfError("PROVIDER", msg, details);
+}
+
+const isTransient = (err) =>
+  err?.kind === "TIMEOUT" || err?.kind === "PROVIDER_DOWN" || err?.status === 429 || err?.status >= 500;
+
 export async function pollRequest(id, { intervalMs = 5000, timeoutMs = 18 * 60 * 1000, meta } = {}) {
   const env = requireEnv(["CLOUDFLARE_AI_ACCOUNT_ID", "CLOUDFLARE_AI_API_TOKEN"]);
   const url = `${BASE}/${env.CLOUDFLARE_AI_ACCOUNT_ID}/ai/requests/${id}`;
   const h = headers(env, { meta });
-  let waited = 0;
+  const deadline = nowFn() + timeoutMs;
   for (;;) {
-    const { result, raw, status } = await call(url, { method: "GET", headers: h }, 60_000);
-    const s = stateOf(result);
-    if (s === null || s === "completed") return result;
-    if (s !== "queued" && s !== "running") throw providerError(status, raw);
-    if (waited >= timeoutMs) {
-      const e = new Error("รอผลจาก Cloudflare นานเกินกำหนด (Request timed out)");
-      e.kind = "TIMEOUT";
-      throw e;
+    try {
+      const { result, raw, status } = await call(url, { method: "GET", headers: h }, 60_000);
+      const s = stateOf(result);
+      if (s === null || s === "completed") return result;
+      if (s !== "queued" && s !== "running") throw providerError(status, raw);
+    } catch (err) {
+      if (!isTransient(err)) throw err;
+    }
+    if (nowFn() >= deadline) {
+      throw new VfError("PROVIDER", "รอผลจาก Cloudflare นานเกินกำหนด (Request timed out)", { kind: "TIMEOUT", request_id: id });
     }
     await sleepFn(intervalMs);
-    waited += intervalMs;
   }
 }
 
