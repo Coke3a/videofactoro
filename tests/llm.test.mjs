@@ -162,3 +162,47 @@ test("request ที่ error บันทึก cost เป็น error usd nul
   assert.deepEqual(rows.map((r) => r.outcome), ["error", "ok"]);
   assert.equal(rows[0].usd, null);
 });
+
+test("strip ไม่ทิ้งชื่อ property ที่ตรงกับ keyword และเข้า anyOf/items", () => {
+  const schema = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      enum: { type: "string" },
+      minItems: { type: "integer" },
+      additionalProperties: { type: "string" },
+      u: { anyOf: [{ type: "array", minItems: 1, items: { type: "object", additionalProperties: false, properties: { k: { type: "integer", enum: [1] } } } }, { type: "null" }] },
+    },
+  };
+  const copy = JSON.stringify(schema);
+  const g = geminiStrip(schema);
+  assert.deepEqual(Object.keys(g.properties), ["enum", "minItems", "additionalProperties", "u"]);
+  assert.equal(g.additionalProperties, undefined);
+  assert.equal(g.properties.u.anyOf[0].items.additionalProperties, undefined);
+  assert.equal(g.properties.u.anyOf[0].items.properties.k.enum, undefined);
+  assert.equal(g.properties.u.anyOf[0].minItems, 1);
+  const a = anthropicStrip(schema);
+  assert.deepEqual(Object.keys(a.properties), ["enum", "minItems", "additionalProperties", "u"]);
+  assert.equal(a.properties.u.anyOf[0].minItems, undefined);
+  assert.equal(a.additionalProperties, false);
+  assert.equal(JSON.stringify(schema), copy);
+});
+
+test("validate ที่ throw นับเป็น issue และยังบันทึก cost", async () => {
+  fake(reply(gem('{"a":1}')), reply(gem('{"a":1}')), reply(ant('{"a":1}')), reply(ant('{"a":1}')));
+  await assert.rejects(
+    llmJson({ system: "s", user: "u", schema: SCHEMA, validate: () => { throw new Error("x"); }, meta: { step: "x" }, costDir: dir }),
+    (e) => e.code === "PROVIDER" && e.details.issues[0].includes("validator error: x"),
+  );
+  assert.match(bodyOf(1).input.contents[2].parts[0].text, /validator error: x/);
+  assert.equal(readCosts(dir).length, 4);
+});
+
+test("usage ขาด -> usd null และเก็บเฉพาะ units ที่ API ส่งมา", async () => {
+  const noOut = JSON.stringify({ success: true, result: { candidates: [{ content: { parts: [{ text: "{}" }] } }], usageMetadata: { promptTokenCount: 9 } } });
+  fake(reply(noOut));
+  await llmJson({ system: "s", user: "u", schema: SCHEMA, meta: { step: "x" }, costDir: dir });
+  const [row] = readCosts(dir);
+  assert.equal(row.usd, null);
+  assert.deepEqual(row.units, { tokensIn: 9 });
+});

@@ -9,13 +9,13 @@ const obj = (v) => (v !== null && typeof v === "object" && !Array.isArray(v) ? v
 
 const family = (model) => (model.startsWith("anthropic/") ? "anthropic" : "gemini");
 
-function strip(node, drop) {
+function strip(node, drop, isNameMap = false) {
   if (Array.isArray(node)) return node.map((n) => strip(n, drop));
   if (node === null || typeof node !== "object") return node;
   const out = {};
   for (const [k, v] of Object.entries(node)) {
-    if (drop(k, node)) continue;
-    out[k] = strip(v, drop);
+    if (!isNameMap && drop(k, node)) continue;
+    out[k] = strip(v, drop, !isNameMap && k === "properties");
   }
   return out;
 }
@@ -108,11 +108,17 @@ export async function llmJson({ system, user, schema, validate, images, maxToken
       }
       lastErr = null;
       const parsed = parseJson(text);
-      const issues = parsed ? (validate ? validate(parsed.value) : []) : [PARSE_ISSUE];
-      const units = { tokensIn: usage.in, tokensOut: usage.out };
+      let issues = [PARSE_ISSUE];
+      if (parsed) {
+        try { issues = validate ? validate(parsed.value) : []; } catch (e) { issues = ["validator error: " + e.message]; }
+      }
+      const units = {};
+      if (usage.in !== null) units.tokensIn = usage.in;
+      if (usage.out !== null) units.tokensOut = usage.out;
+      const usd = usage.in !== null && usage.out !== null ? estimate(model, units) : null;
       logCost(costDir, {
         project: meta.project, clip: meta.clip, step: meta.step, model,
-        outcome: issues.length ? "invalid" : "ok", units, usd: estimate(model, units),
+        outcome: issues.length ? "invalid" : "ok", units, usd,
       });
       if (!issues.length) return { data: parsed.value, model, usage };
       allIssues.push(...issues.map((i) => `${model} รอบ ${round}: ${i}`));
