@@ -11,7 +11,7 @@ import {
 } from "./bible.mjs";
 import { useUserImage, toPng, makeRef, sha, CANDIDATES } from "./project-create.mjs";
 import {
-  pinInput, costSince, pickArchiveName, commitStagedRefs, clearStaged, stagedName, contextMessage, loadProject, parseImagePaths,
+  pinInput, pinRun, costSince, pickArchiveName, commitStagedRefs, clearStaged, stagedName, contextMessage, loadProject, parseImagePaths,
   planRows, llmRow, imageRow, qaRow, runEntity,
 } from "./entities.mjs";
 
@@ -52,8 +52,9 @@ async function qaUserImage(dir, ref, char, style, meta, costDir) {
   }
 }
 
-async function work({ dir, ctx, state, key, prompt, images, id, replace, run }) {
+async function work({ dir, ctx, state, key, prompt, images, id, replace, run: fresh }) {
   const { pj, slug, lang, characters, places } = ctx;
+  const run = pinRun(state, fresh);
   const costDir = join(dir, ".vf");
   const taken = new Set([...characters, ...places].map((x) => x.id));
   if (replace) taken.delete(id);
@@ -68,7 +69,7 @@ async function work({ dir, ctx, state, key, prompt, images, id, replace, run }) 
       schema: CHARACTER_SCHEMA,
       validate: (c) => validateCharacter(id && c && typeof c === "object" ? { ...c, id } : c, taken),
       images: pics.length ? pics : undefined,
-      meta: { project: slug, step: `character:${key}`, run },
+      meta: { project: slug, step: "character", item: id ?? null, run },
       costDir,
     });
     return id ? { ...data, id } : data;
@@ -98,7 +99,7 @@ async function work({ dir, ctx, state, key, prompt, images, id, replace, run }) 
     extras = made.extras;
     ({ warning } = await step(state, "qa", async () => {
       log("ขั้น qa");
-      return await qaUserImage(dir, stagedMain, char, pj.style_prompt, { project: slug, step: `qa:${cid}`, run }, costDir);
+      return await qaUserImage(dir, stagedMain, char, pj.style_prompt, { project: slug, step: "qa", item: cid, run }, costDir);
     }));
   } else {
     made = await step(state, `ref:${cid}`, async () => {

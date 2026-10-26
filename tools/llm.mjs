@@ -1,7 +1,7 @@
 import { run, withRetry } from "./cf.mjs";
 import { MODELS } from "./models.mjs";
 import { estimate } from "./pricing.mjs";
-import { logCost } from "./cost.mjs";
+import { logCost, costRow, failOutcome } from "./cost.mjs";
 import { VfError, log } from "./out.mjs";
 
 const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
@@ -98,7 +98,7 @@ export async function llmJson({ system, user, schema, validate, images, maxToken
         const { result } = await withRetry(() => run(model, input, { meta }));
         ({ text, usage } = readText(model, result));
       } catch (err) {
-        logCost(costDir, { project: meta.project, clip: meta.clip, step: meta.step, run: meta.run, model, outcome: "error", units: {}, usd: null });
+        logCost(costDir, { ...costRow(meta, model), outcome: failOutcome(err), units: {}, usd: null });
         if (err instanceof VfError && err.code === "PROVIDER") {
           lastErr = err;
           allIssues.push(`${model} รอบ ${round}: ${err.message}`);
@@ -116,10 +116,7 @@ export async function llmJson({ system, user, schema, validate, images, maxToken
       if (usage.in !== null) units.tokensIn = usage.in;
       if (usage.out !== null) units.tokensOut = usage.out;
       const usd = usage.in !== null && usage.out !== null ? estimate(model, units) : null;
-      logCost(costDir, {
-        project: meta.project, clip: meta.clip, step: meta.step, run: meta.run, model,
-        outcome: issues.length ? "invalid" : "ok", units, usd,
-      });
+      logCost(costDir, { ...costRow(meta, model), outcome: issues.length ? "invalid" : "ok", units, usd });
       if (!issues.length) return { data: parsed.value, model, usage };
       allIssues.push(...issues.map((i) => `${model} รอบ ${round}: ${i}`));
       messages.push({ role: "assistant", content: text || "(ว่าง)" }, { role: "user", content: feedback(issues) });

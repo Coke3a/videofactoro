@@ -25,7 +25,15 @@ export function pinInput(state, input, keys, hint) {
   }
 }
 
-// ต้นทุนของคำสั่งนี้เท่านั้น: แถวที่มี run id ของรอบนี้
+// run id ของคำสั่งนี้: เก็บใน state ตอนเริ่มครั้งแรก แล้วใช้ค่าเดิมตอนรันซ้ำ (ต้นทุนรวมรอบที่พังด้วย)
+export function pinRun(state, fresh) {
+  const cur = state.get("run")?.id;
+  if (cur) return cur;
+  state.set("run", { id: fresh });
+  return fresh;
+}
+
+// ต้นทุนของคำสั่งนี้เท่านั้น: แถวที่มี run id ของคำสั่งนี้
 export function costSince(costDir, runId) {
   return summarize(readCosts(costDir).filter((r) => r.run === runId)).totalUsd;
 }

@@ -206,3 +206,12 @@ test("usage ขาด -> usd null และเก็บเฉพาะ units ท
   assert.equal(row.usd, null);
   assert.deepEqual(row.units, { tokensIn: 9 });
 });
+
+test("แถว cost ของ llm มี step/item/run; content filter → outcome blocked", async () => {
+  fake(reply(gem('{"b":2}')));
+  await llmJson({ system: "s", user: "u", schema: SCHEMA, meta: { project: "p", step: "character", item: "heron", run: "r1" }, costDir: dir });
+  fake(reply("flagged by moderation", 400));
+  await assert.rejects(llmJson({ system: "s", user: "u", schema: SCHEMA, meta: { project: "p", step: "character", item: "heron", run: "r1" }, costDir: dir }), (e) => e.code === "BLOCKED");
+  const rows = readCosts(dir);
+  assert.deepEqual(rows.map((r) => [r.step, r.item, r.run, r.outcome]), [["character", "heron", "r1", "ok"], ["character", "heron", "r1", "blocked"]]);
+});

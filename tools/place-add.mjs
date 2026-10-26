@@ -6,7 +6,7 @@ import { llmJson } from "./llm.mjs";
 import { openState, step } from "./state.mjs";
 import { PLACE_SCHEMA, validatePlace, placeAddSystemPrompt, addPlaceFiles, ID_RE } from "./bible.mjs";
 import { makePlate, sha } from "./project-create.mjs";
-import { pinInput, costSince, contextMessage, loadProject, planRows, llmRow, imageRow, qaRow, runEntity } from "./entities.mjs";
+import { pinInput, pinRun, costSince, contextMessage, loadProject, planRows, llmRow, imageRow, qaRow, runEntity } from "./entities.mjs";
 
 const OPTIONS = {
   prompt: { type: "string" },
@@ -27,8 +27,9 @@ function dryRun() {
   };
 }
 
-async function work({ dir, ctx, state, key, prompt, id, maxRerolls, run }) {
+async function work({ dir, ctx, state, key, prompt, id, maxRerolls, run: fresh }) {
   const { pj, slug, lang, characters, places } = ctx;
+  const run = pinRun(state, fresh);
   const costDir = join(dir, ".vf");
   const taken = new Set([...characters, ...places].map((x) => x.id));
 
@@ -38,7 +39,7 @@ async function work({ dir, ctx, state, key, prompt, id, maxRerolls, run }) {
     const { data } = await llmJson({
       system: placeAddSystemPrompt(lang), user, schema: PLACE_SCHEMA,
       validate: (p) => validatePlace(id && p && typeof p === "object" ? { ...p, id } : p, taken),
-      meta: { project: slug, step: `place:${key}`, run }, costDir,
+      meta: { project: slug, step: "place", item: id ?? null, run }, costDir,
     });
     return id ? { ...data, id } : data;
   });

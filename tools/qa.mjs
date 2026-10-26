@@ -3,7 +3,7 @@ import { promisify } from "node:util";
 import { run, withRetry } from "./cf.mjs";
 import { MODELS } from "./models.mjs";
 import { estimate } from "./pricing.mjs";
-import { logCost } from "./cost.mjs";
+import { logCost, costRow, failOutcome } from "./cost.mjs";
 import { VfError, log } from "./out.mjs";
 
 const execFileP = promisify(execFile);
@@ -38,12 +38,13 @@ export async function clef({ state, questions, images = [], videos, audio, meta 
   };
   if (videos?.length) input.videos = videos;
   if (audio?.length) input.audio = audio;
-  const row = { project: meta.project, clip: meta.clip, run: meta.run, step: meta.step, model: MODELS.qa };
+  const row = costRow(meta, MODELS.qa, "qa");
+  const header = { ...meta, step: "qa" };
   let result;
   try {
-    ({ result } = await withRetry(() => run(MODELS.qa, input, { meta })));
+    ({ result } = await withRetry(() => run(MODELS.qa, input, { meta: header })));
   } catch (err) {
-    logCost(costDir, { ...row, outcome: "error", units: {}, usd: null });
+    logCost(costDir, { ...row, outcome: failOutcome(err), units: {}, usd: null });
     throw err;
   }
   const u = result?.usage;

@@ -18,7 +18,7 @@ const creditsCheck = (costDir) =>
       user: 'Return {"ok":true}.',
       schema: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
       maxTokens: 16,
-      meta: { step: "setup" },
+      meta: { step: "setup", item: null },
       costDir,
     });
     return `LLM ตอบได้ (${model})`;

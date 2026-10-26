@@ -7,7 +7,7 @@ import { uploadTemp } from "./r2.mjs";
 import { run, withRetry, extractMedia, download } from "./cf.mjs";
 import { MODELS } from "./models.mjs";
 import { estimate } from "./pricing.mjs";
-import { logCost } from "./cost.mjs";
+import { logCost, costRow, failOutcome } from "./cost.mjs";
 import { writeJsonAtomic } from "./state.mjs";
 import { VfError, log } from "./out.mjs";
 
@@ -34,10 +34,12 @@ function sniffExt(b) {
   return "png";
 }
 
+const RESOLUTION_MP = { "1k": 1, "2k": 4 };
+
 function megapixels(bytes, resolution) {
   const d = dimensions(bytes);
   if (d && d.w > 0 && d.h > 0) return Math.round(((d.w * d.h) / 1e6) * 100) / 100;
-  return { "1k": 1, "2k": 4 }[resolution] ?? null;
+  return RESOLUTION_MP[resolution] ?? null;
 }
 
 const PRESIGNED = /https?:\/\/[^\s"'<>\\]*X-Amz-[^\s"'<>\\]*/gi;
@@ -64,13 +66,13 @@ export async function generateImage({
   if (!kind) throw new VfError("USAGE", "generateImage ต้องระบุ kind");
   if (refs.length > MAX_REFS) throw new VfError("INTERNAL", `klein รับภาพอ้างอิงได้ไม่เกิน ${MAX_REFS} ภาพ (ส่งมา ${refs.length})`);
   const costDir = join(projectDir, ".vf");
-  const row = { project: meta.project, clip: meta.clip, run: meta.run, step: meta.step ?? "image", model: MODELS.image };
+  const row = costRow(meta, MODELS.image, meta.step ?? "image");
   const finalPrompt = prompt + SUFFIX;
   const key = cacheKey({ model: MODELS.image, prompt: finalPrompt, refs, aspect, resolution, seed });
 
   const hit = libFindByKey(libLoad(projectDir), key);
   if (hit && existsSync(join(projectDir, hit.blob))) {
-    logCost(costDir, { ...row, outcome: "cached", units: { images: 1 }, usd: 0, cached: true });
+    logCost(costDir, { ...row, outcome: "ok", units: { images: 1 }, usd: 0, cached: true });
     return { file: join(projectDir, hit.blob), entry: hit, cached: true, usd: 0 };
   }
 
@@ -88,13 +90,18 @@ export async function generateImage({
     const input = { prompt: finalPrompt, aspect_ratio: aspect, resolution, seed: usedSeed };
     if (urls.length) input.images = urls;
     log(`klein: refs=${urls.length} model=${MODELS.image}`);
+    let paid = false;
     try {
       const { result } = await withRetry(() => run(MODELS.image, input, { meta }));
+      paid = true;
       const out = join(tmp, "out");
       await download(extractMedia(result), out);
       bytes = readFileSync(out);
     } catch (err) {
-      logCost(costDir, { ...row, outcome: "error", units: { images: 1 }, usd: null });
+      // run สำเร็จแล้ว (จ่ายแล้ว) แต่ได้ไฟล์ไม่ครบ: ลงราคาประเมินจาก resolution ที่ขอ
+      const mp = RESOLUTION_MP[resolution];
+      const usd = paid && mp ? estimate(MODELS.image, { images: 1, mp }) : null;
+      logCost(costDir, { ...row, outcome: failOutcome(err), units: { images: 1 }, usd });
       throw scrubUrls(err, urls);
     }
   } finally {

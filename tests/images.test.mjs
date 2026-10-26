@@ -55,7 +55,7 @@ test("เรียกซ้ำด้วยค่าเดิมไม่ยิ�
   assert.equal(rows.length, 2);
   assert.equal(rows[0].outcome, "ok");
   assert.equal(rows[0].units.mp, 0.54);
-  assert.equal(rows[1].outcome, "cached");
+  assert.equal(rows[1].outcome, "ok");
   assert.equal(rows[1].cached, true);
 });
 
@@ -157,4 +157,39 @@ test("seed 0 ถูกส่งเป็น seed:0 และ key ต่างจ
   delete p.seed;
   const u = await generateImage(p);
   assert.notEqual(z.entry.key, u.entry.key);
+});
+
+// --- final fix (R13) ---
+test("แถว cost มี step/item/run จาก meta; cache hit = outcome ok + cached:true", async () => {
+  const meta = { project: "p", step: "ref", item: "mochi", run: "r1" };
+  await generateImage({ ...base(), meta });
+  await generateImage({ ...base(), meta });
+  const rows = readCosts(path.join(dir, ".vf"));
+  assert.deepEqual(rows.map((r) => [r.step, r.item, r.run, r.outcome, r.cached ?? false]), [["ref", "mochi", "r1", "ok", false], ["ref", "mochi", "r1", "ok", true]]);
+  assert.equal(JSON.parse(aiCalls()[0].init.headers["cf-aig-metadata"]).item, "mochi");
+});
+
+test("ไม่มี meta: step = image, item = null", async () => {
+  await generateImage(base());
+  const [r] = readCosts(path.join(dir, ".vf"));
+  assert.equal(r.step, "image");
+  assert.equal(r.item, null);
+});
+
+test("content filter → แถว outcome blocked", async () => {
+  cf.setFetch(async () => ({ ok: false, status: 400, text: async () => "flagged by moderation" }));
+  await assert.rejects(generateImage(base()), (e) => e.code === "BLOCKED");
+  const [r] = readCosts(path.join(dir, ".vf"));
+  assert.equal(r.outcome, "blocked");
+});
+
+test("run สำเร็จแต่ download ล้ม: แถว error มี usd ประเมินจาก resolution ที่ขอ (จ่ายไปแล้ว)", async () => {
+  cf.setFetch(async (url) => {
+    if (String(url).includes("/ai/run")) return { ok: true, status: 200, text: async () => JSON.stringify({ success: true, result: { image: "https://cdn.example/a.png" } }) };
+    throw new Error("fetch failed");
+  });
+  await assert.rejects(generateImage({ ...base(), resolution: "2k" }));
+  const [r] = readCosts(path.join(dir, ".vf"));
+  assert.equal(r.outcome, "error");
+  assert.ok(Math.abs(r.usd - (0.009 + 3 * 0.0017)) < 1e-12);
 });

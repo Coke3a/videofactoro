@@ -407,3 +407,30 @@ test("commitStagedRefs: crash หลังย้าย extra แต่ก่อ�
   assert.equal(fs.readFileSync(path.join(d, "old-X", "main.png"), "utf8"), "OLD-MAIN");
   assert.ok(fs.readdirSync(d).every((n) => !n.startsWith(".new-")));
 });
+
+// --- final fix (R13) ---
+test("R13: character add / place add ที่พังแล้วรันซ้ำ: run เดิม, cost.usd รวมรอบที่พัง, step/item ตามชนิด", async () => {
+  const vf = path.join(dir, ".vf");
+  let n0 = readCosts(vf).length;
+  failMatch = HERON.slice(0, 40);
+  await assert.rejects(add(["--id", "heron"]), (e) => e.code === "PROVIDER");
+  failMatch = null;
+  const r = await add(["--id", "heron"]);
+  let rows = readCosts(vf).slice(n0);
+  assert.ok(rows.every((x) => x.run === rows[0].run));
+  assert.ok(Math.abs(r.cost.usd - rows.reduce((s, x) => s + (x.usd ?? 0), 0)) < 1e-12);
+  assert.ok(rows.some((x) => x.step === "character" && x.item === "heron" && x.usd > 0));
+  assert.ok(rows.filter((x) => x.step === "ref").every((x) => x.item === "heron"));
+  assert.ok(rows.filter((x) => x.step === "qa").every((x) => x.item === "heron"));
+
+  n0 = readCosts(vf).length;
+  failMatch = "quiet backyard garden";
+  await assert.rejects(placeAdd(["demo", "--prompt", "สวนหลังบ้าน", "--id", "garden", "--foreground"]), (e) => e.code === "PROVIDER");
+  failMatch = null;
+  const p = await placeAdd(["demo", "--prompt", "สวนหลังบ้าน", "--id", "garden", "--foreground"]);
+  rows = readCosts(vf).slice(n0);
+  assert.ok(rows.every((x) => x.run === rows[0].run));
+  assert.ok(Math.abs(p.cost.usd - rows.reduce((s, x) => s + (x.usd ?? 0), 0)) < 1e-12);
+  assert.ok(rows.some((x) => x.step === "place" && x.item === "garden" && x.usd > 0));
+  assert.ok(rows.filter((x) => x.step === "plate" || x.step === "qa").every((x) => x.item === "garden"));
+});

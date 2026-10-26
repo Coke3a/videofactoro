@@ -11,10 +11,9 @@ import { pickBest, generateWithQa, NO_PASS_WARNING } from "./qa.mjs";
 import { RULES } from "./qa-rules.mjs";
 import { openState, step } from "./state.mjs";
 import { libAdd, libLoad, libUpdate } from "./cache.mjs";
-import { readCosts, summarize } from "./cost.mjs";
 import { estimate } from "./pricing.mjs";
 import { MODELS } from "./models.mjs";
-import { pinInput, runEntity } from "./entities.mjs";
+import { pinInput, pinRun, costSince, runEntity } from "./entities.mjs";
 import { BIBLE_SCHEMA, validateBible, bibleSystemPrompt, writeProjectFiles } from "./bible.mjs";
 
 const execFileP = promisify(execFile);
@@ -144,7 +143,7 @@ function dryRun(images) {
 
 // dest: เขียนภาพที่เลือกไว้ staging (ไม่แตะ main.png/สถานะ) · seedKey: ผสมใน seed base (ค่าเริ่ม = id)
 export async function makeRef(dir, slug, bible, c, costDir, { refs = [], dest, run, seedKey } = {}) {
-  const meta = { project: slug, step: `ref:${c.id}`, run };
+  const meta = { project: slug, step: "ref", item: c.id, run };
   const prompt = `${c.look} ${bible.style_prompt}${REF_SUFFIX}`;
   const base = baseSeed(slug, seedKey ?? c.id);
   const cands = [];
@@ -169,7 +168,7 @@ export async function makeRef(dir, slug, bible, c, costDir, { refs = [], dest, r
 }
 
 export async function makePlate(dir, slug, bible, p, aspect, maxRerolls, costDir, { run } = {}) {
-  const meta = { project: slug, step: `plate:${p.id}`, run };
+  const meta = { project: slug, step: "plate", item: p.id, run };
   const prompt = `${p.desc} ${bible.style_prompt}${PLATE_SUFFIX}`;
   const ctx = { desc: p.desc, style: bible.style_prompt };
   const base = baseSeed(slug, p.id);
@@ -200,9 +199,10 @@ function matchImages(bible, images) {
   return { byChar, warnings };
 }
 
-async function work({ dir, slug, prompt, lang, aspect, images, maxRerolls }) {
+async function work({ dir, slug, prompt, lang, aspect, images, maxRerolls, run: fresh }) {
   const costDir = join(dir, ".vf");
   const state = openState(costDir, "create-state.json");
+  const run = pinRun(state, fresh);
   const required = images.map((i) => i.name);
 
   const bible = await step(state, "bible", async () => {
@@ -215,7 +215,7 @@ async function work({ dir, slug, prompt, lang, aspect, images, maxRerolls }) {
     ].join("\n");
     const { data } = await llmJson({
       system: bibleSystemPrompt(lang), user, schema: BIBLE_SCHEMA, validate: validateBible,
-      meta: { project: slug, step: "bible" }, costDir,
+      meta: { project: slug, step: "bible", item: null, run }, costDir,
     });
     return { ...data, lang };
   });
@@ -228,7 +228,7 @@ async function work({ dir, slug, prompt, lang, aspect, images, maxRerolls }) {
       ...(await step(state, `ref:${c.id}`, async () => {
         log(`ขั้น ref:${c.id}`);
         if (byChar[c.id]) return { ref: (await useUserImage(dir, c.id, byChar[c.id])).ref };
-        return await makeRef(dir, slug, bible, c, costDir);
+        return await makeRef(dir, slug, bible, c, costDir, { run });
       })),
     });
   }
@@ -238,7 +238,7 @@ async function work({ dir, slug, prompt, lang, aspect, images, maxRerolls }) {
       id: p.id,
       ...(await step(state, `plate:${p.id}`, async () => {
         log(`ขั้น plate:${p.id}`);
-        return await makePlate(dir, slug, bible, p, aspect, maxRerolls, costDir);
+        return await makePlate(dir, slug, bible, p, aspect, maxRerolls, costDir, { run });
       })),
     });
   }
@@ -258,7 +258,7 @@ async function work({ dir, slug, prompt, lang, aspect, images, maxRerolls }) {
     dir,
     characters: chars,
     places,
-    cost: { usd: summarize(readCosts(costDir)).totalUsd },
+    cost: { usd: costSince(costDir, run) },
     ...(warnings.length ? { warnings } : {}),
     next: [`vf project show ${slug}`, `vf character add ${slug} --prompt ...`, `vf place add ${slug} --prompt ...`],
   };
@@ -302,6 +302,6 @@ export async function main(argv) {
   const command = buildCommand({ prompt, slug, lang, aspect, maxRerolls, images });
   return await runEntity({
     dir, projectRef: slug, slug, command, label: `project create ${slug}`, foreground: values.foreground, jobExtra: { dir },
-    work: () => work({ dir, slug, prompt, lang, aspect, images, maxRerolls }),
+    work: ({ run }) => work({ dir, slug, prompt, lang, aspect, images, maxRerolls, run }),
   });
 }

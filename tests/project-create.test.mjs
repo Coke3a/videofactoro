@@ -257,3 +257,33 @@ test("--image ซ้ำตัวเดียวกัน: ใช้ภาพแ�
   const e = libLoad(path.join(root, "demo")).entries.filter((x) => x.need === "user image");
   assert.equal(e.length, 1);
 });
+
+// --- final fix (R13) ---
+const KINDS = new Set(["bible", "ref", "plate", "qa", "look"]);
+test("R13: แถว cost มี step ตามชนิด + item + run เดียวกันข้าม resume; cost.usd = ผลรวมของ run นั้น (รวมรอบที่พัง)", async () => {
+  failMatch = DOG;
+  await assert.rejects(create(), (e) => e.code === "PROVIDER");
+  const vf = path.join(root, "demo", ".vf");
+  const crashed = readCosts(vf);
+  fs.appendFileSync(path.join(vf, "costs.jsonl"), JSON.stringify({ step: "bible", model: "x/y", run: "other", usd: 5, outcome: "ok" }) + "\n");
+  failMatch = null;
+  const r = await create();
+  const rows = readCosts(vf).filter((x) => x.run !== "other");
+  const run = rows[0].run;
+  assert.ok(typeof run === "string" && run.length > 0);
+  assert.ok(rows.every((x) => x.run === run));
+  assert.ok(crashed.length > 0 && crashed.every((x) => x.run === run));
+  const sum = rows.reduce((s, x) => s + (x.usd ?? 0), 0);
+  assert.ok(Math.abs(r.cost.usd - sum) < 1e-12, `${r.cost.usd} vs ${sum}`);
+  for (const x of rows) {
+    assert.ok(KINDS.has(x.step), x.step);
+    assert.ok(["ok", "invalid", "qa_reject", "blocked", "error"].includes(x.outcome), x.outcome);
+  }
+  assert.ok(rows.filter((x) => x.step === "bible").every((x) => x.item === null));
+  assert.deepEqual([...new Set(rows.filter((x) => x.step === "ref").map((x) => x.item))].sort(), ["cat", "dog"]);
+  assert.deepEqual([...new Set(rows.filter((x) => x.step === "plate").map((x) => x.item))], ["kitchen"]);
+  assert.deepEqual([...new Set(rows.filter((x) => x.step === "qa").map((x) => x.item))].sort(), ["cat", "dog", "kitchen"]);
+  const md = fs.readFileSync(path.join(root, "demo", "PROJECT.md"), "utf8");
+  assert.equal(md.split("\n").filter((l) => l.startsWith(`| ref | ${MODELS.image} |`)).length, 1);
+  assert.ok(!/\| ref:/.test(md));
+});

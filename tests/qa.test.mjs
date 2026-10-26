@@ -226,3 +226,12 @@ test("generateWithQa สร้างไม่เกิน 1+2 ครั้ง �
   assert.equal(r.verdict.score, 0.5);
   assert.equal(r.attempts.length, 3);
 });
+
+test("แถว cost ของ clef: step = qa, item/run จาก meta; content filter → blocked", async () => {
+  fake(ok({ a: n(0.9) }));
+  await clef({ state: "s", questions: {}, images: [], meta: { project: "p", step: "ref", item: "mochi", run: "r1" }, costDir: dir });
+  fake(reply("flagged by moderation", 400));
+  await assert.rejects(clef({ state: "s", questions: {}, images: [], meta: { project: "p", step: "plate", item: "kitchen", run: "r1" }, costDir: dir }), (e) => e.code === "BLOCKED");
+  const rows = readCosts(dir);
+  assert.deepEqual(rows.map((r) => [r.step, r.item, r.run, r.outcome]), [["qa", "mochi", "r1", "ok"], ["qa", "kitchen", "r1", "blocked"]]);
+});

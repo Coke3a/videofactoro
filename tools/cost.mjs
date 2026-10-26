@@ -3,6 +3,17 @@ import { join } from "node:path";
 
 const file = (dir) => join(dir, "costs.jsonl");
 
+// R13: outcome ∈ ok | invalid | qa_reject | blocked | error (+ cached:true) · step = ชนิดงาน · item = id ของชิ้น (หรือ null)
+export const costRow = (meta = {}, model, step) => ({
+  project: meta.project,
+  ...(meta.clip !== undefined ? { clip: meta.clip } : {}),
+  step: step ?? meta.step,
+  item: meta.item ?? null,
+  run: meta.run,
+  model,
+});
+export const failOutcome = (err) => (err?.code === "BLOCKED" ? "blocked" : "error");
+
 export function logCost(dir, entry) {
   mkdirSync(dir, { recursive: true });
   const row = { ...entry, at: new Date().toISOString(), estimated: true };
