@@ -28,13 +28,15 @@ vf wait <slug>                              # วนจน status = done | faile
 vf project show <slug>                      # ตรวจผล
 vf character add <slug> --prompt "..."      # เพิ่มตัวละคร (ทางเลือก)
 vf place add <slug> --prompt "..."          # เพิ่มสถานที่ (ทางเลือก)
+vf clip <slug> --prompt "..." --dry-run     # ดูราคาคลิป (ไม่เสียเงิน)
+vf clip <slug> --prompt "..."               # คลิปสั้นช็อตเดียว (draft) คืน {job, next} แล้ว vf wait
 ```
 
 - **ใส่ `--name <ascii-slug>` เสมอ** (a-z 0-9 และ `-`) ถ้า prompt เป็นไทยล้วนและไม่ใส่ `--name` ชื่อจะเป็น `project-<8 hex>` prompt เดิมให้ slug เดิมเสมอ จึงรันซ้ำ = ทำต่อจากเดิม
 - ตัวเลือกของ `project create`: `--lang`, `--aspect`, `--max-rerolls 0-5`, `--image <ชื่อตัวละคร>=<path>` (ใช้ภาพของผู้ใช้เอง ใส่ซ้ำได้)
 - `character add`: `--id`, `--image <path>` (สูงสุด 4 ภาพ), `--replace --id <id>` (แทนที่ตัวละครเดิม ภาพเก่าเก็บใน `ref/old-<stamp>/`)
 - `place add`: `--id`, `--max-rerolls`
-- `--dry-run` ใช้ได้กับ create / character add / place add: แสดงขั้นตอนและ USD ประเมิน ไม่เสียเงิน
+- `--dry-run` ใช้ได้กับ create / character add / place add / clip: แสดงขั้นตอนและ USD ประเมิน ไม่เสียเงิน
 - `vf status <slug>` แสดง job ล่าสุด
 
 ## งานยาว: job และ wait
@@ -63,7 +65,13 @@ stdout มี JSON ก้อนเดียวเสมอ (`{ok:true,...}` ห�
 
 ## โหมดวิดีโอ
 
-`vf clip`, `vf film`, `vf motion`: ยังไม่มี (แผน 2–4) ตอนนี้ทำได้ถึงขั้น project, ตัวละคร, สถานที่ ถ้าผู้ใช้ขอวิดีโอจริง ให้สร้าง project ให้เสร็จแล้วบอกว่าขั้นวิดีโอยังไม่เปิดใช้
+`vf clip <slug> --prompt "..."` (แบบย่อ): คลิปช็อตเดียว 5–20 วินาที จากตัวละครและสถานที่ใน project
+- LLM เลือกตัวละคร (≤3) กับสถานที่ให้เอง → keyframe แรก (QA, สร้างใหม่ ≤2) → flux-3-video i2v → QA วิดีโอ (รายงานอย่างเดียว)
+- ค่าเริ่มต้นเป็น **draft** (ถูก ~$0.06 ต่อคลิป) ใส่ `--hd` เมื่อผู้ใช้พอใจแล้วเท่านั้น · `--duration 5-20` · `--id` เพื่อทำอีกคลิปจาก prompt เดิม
+- ผล: `renders/<clip-id>.mp4` + `clips/<clip-id>/` (plan.json, keyframe.jpg, qa.json) + แถวใน EPISODES.md · ยังไม่มีพากย์ เพลง หรือ end frame
+- prompt เดิมที่ทำเสร็จแล้วรันซ้ำ = USAGE (ใส่ `--id` ใหม่) · ล้มกลางทางรันคำสั่งเดิมซ้ำ = ทำต่อ (วิดีโอที่ส่งไปแล้วจะตามผลเดิม ไม่จ่ายซ้ำ)
+
+`vf film`, `vf motion`: ยังไม่มี (แผน 3–4) ถ้าผู้ใช้ขอคลิปยาวหลายช็อต ให้ทำทีละช็อตด้วย `vf clip` แล้วบอกว่าการต่อช็อตอัตโนมัติยังไม่เปิดใช้
 
 ## รายงานท้ายงาน (ภาษาไทย)
 

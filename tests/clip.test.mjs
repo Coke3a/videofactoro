@@ -1,0 +1,170 @@
+import { test, before, beforeEach, afterEach } from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
+import * as cf from "../tools/cf.mjs";
+import { MODELS } from "../tools/models.mjs";
+import { readCosts } from "../tools/cost.mjs";
+import { main as create } from "../tools/project-create.mjs";
+import { main as clip, validateClipPlan } from "../tools/clip.mjs";
+import { goodBible } from "./fixtures/bible.mjs";
+import { bodyOf } from "./fixtures/body.mjs";
+
+process.env.VF_NO_DOTENV = "1";
+const TINY = fileURLToPath(new URL("./fixtures/tiny.png", import.meta.url));
+const B64 = fs.readFileSync(TINY).toString("base64");
+const ENV = { CLOUDFLARE_AI_ACCOUNT_ID: "acc1", CLOUDFLARE_AI_API_TOKEN: "tok-secret-123456" };
+const ENV_KEYS = [...Object.keys(ENV), "VF_PROJECTS"];
+const PLAN = () => ({
+  title: "Cake Heist", summary: "แมวแอบกินเค้ก หมาจับได้", duration: 5, characters: ["cat", "dog"], place: "kitchen",
+  first_frame_prompt: "The cat reaches for a cake on the kitchen table while the dog peeks from the door.",
+  video_prompt: "0-2s: the cat sniffs the cake. 2-5s: the dog barks softly and the cat freezes.",
+});
+
+let MP4, root, dir, saved, calls, origWrite, plan, pollFail;
+const reply = (result) => ({ ok: true, status: 200, text: async () => JSON.stringify({ success: true, result }) });
+const videoPosts = () => calls.filter((c) => c.method === "POST" && c.body?.model === MODELS.video);
+const imagePosts = () => calls.filter((c) => c.body?.model === MODELS.image);
+
+before(() => {
+  MP4 = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "vf-clipfix-")), "tiny.mp4");
+  execFileSync("ffmpeg", ["-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=160x284:rate=8:duration=1", "-pix_fmt", "yuv420p", MP4]);
+});
+
+function install() {
+  calls = [];
+  cf.setFetch(async (url, init = {}) => {
+    const u = String(url);
+    const method = init.method ?? "GET";
+    if (u.startsWith("https://cdn.example/")) return new Response(fs.readFileSync(MP4));
+    if (u.includes("/ai/requests/")) {
+      calls.push({ url: u, method, body: null });
+      if (pollFail) return { ok: true, status: 200, text: async () => JSON.stringify({ success: true, result: { state: "failed", error: "boom" } }) };
+      return reply({ state: "completed", result: { video: "https://cdn.example/v.mp4" } });
+    }
+    const body = bodyOf(url, init);
+    calls.push({ url: u, method, body });
+    if (u.includes("clef-omni")) {
+      const answers = Object.fromEntries(Object.keys(body.questions).map((k) => [k, { noul: /text/.test(k) || k === "has_people_or_animals" ? 0 : 0.9 }]));
+      return reply({ answers, usage: { prompt_tokens: 1500 } });
+    }
+    if (body?.model === MODELS.image) return reply({ image: B64 });
+    if (body?.model === MODELS.video) return reply({ state: "queued", request_id: "req-1" });
+    if (body?.model === MODELS.llm[0]) {
+      const sys = body.input.systemInstruction.parts[0].text;
+      const data = sys.includes("story bible") ? goodBible() : plan;
+      return reply({ candidates: [{ content: { parts: [{ text: JSON.stringify(data) }] } }], usageMetadata: { promptTokenCount: 800, candidatesTokenCount: 300 } });
+    }
+    throw new Error("unexpected fetch " + u);
+  });
+}
+
+beforeEach(async () => {
+  saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
+  root = fs.mkdtempSync(path.join(os.tmpdir(), "vf-clip-"));
+  Object.assign(process.env, ENV, { VF_PROJECTS: root });
+  cf.setSleep(async () => {});
+  plan = PLAN();
+  pollFail = false;
+  install();
+  origWrite = process.stderr.write;
+  process.stderr.write = () => true;
+  await create(["--prompt", "แมวกับหมาในครัว", "--name", "demo", "--foreground"]);
+  dir = path.join(root, "demo");
+  calls.length = 0;
+});
+afterEach(() => {
+  process.stderr.write = origWrite;
+  for (const [k, v] of Object.entries(saved)) v === undefined ? delete process.env[k] : (process.env[k] = v);
+  cf.setFetch((...a) => globalThis.fetch(...a));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+const make = (extra = []) => clip(["demo", "--prompt", "แมวแอบกินเค้ก หมาจับได้", "--foreground", ...extra]);
+
+test("clip: keyframe จาก ref + ฉาก, วิดีโอ draft ส่ง keyframe เป็น base64, ไฟล์และ EPISODES ครบ", async () => {
+  const r = await make();
+  const id = r.clip.id;
+  assert.match(id, /^cake-heist-[0-9a-f]{4}$/);
+  for (const f of [`clips/${id}/plan.json`, `clips/${id}/keyframe.jpg`, `clips/${id}/clip.mp4`, `clips/${id}/qa.json`, `renders/${id}.mp4`]) {
+    assert.ok(fs.existsSync(path.join(dir, f)), f);
+  }
+  assert.equal(r.clip.file, path.join(dir, "renders", `${id}.mp4`));
+
+  const img = imagePosts()[0].body.input;
+  assert.deepEqual(Object.keys(img).filter((k) => k.startsWith("input_image_")), ["input_image_0", "input_image_1", "input_image_2"]);
+  assert.match(img.prompt, /Image 1 is มะลิ/);
+  assert.match(img.prompt, /Image 3 is the location/);
+
+  assert.equal(videoPosts().length, 1);
+  const v = videoPosts()[0].body.input;
+  assert.equal(v.mode, "i2v");
+  assert.equal(v.draft, true);
+  assert.equal(v.resolution, "hd");
+  assert.equal(v.duration, 5);
+  assert.equal(v.aspect_ratio, "9:16");
+  assert.equal(v.generate_audio, true);
+  assert.ok(v.prompt.endsWith("No background music."));
+  assert.ok(!/^https?:|^data:/.test(v.keyframes) && Buffer.from(v.keyframes, "base64").length > 0);
+
+  const qa = JSON.parse(fs.readFileSync(path.join(dir, "clips", id, "qa.json"), "utf8"));
+  assert.equal(qa.keyframe.pass, true);
+  assert.equal(qa.video.pass, true);
+  assert.ok(fs.readFileSync(path.join(dir, "EPISODES.md"), "utf8").includes(`| clip draft | Cake Heist |`));
+  const rows = readCosts(path.join(dir, ".vf")).filter((x) => x.step === "video");
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].usd, 0.06);
+  assert.equal(rows[0].clip, id);
+  assert.ok(r.cost.usd > 0.06);
+});
+
+test("clip --hd: ไม่ส่ง draft และคิด 0.17", async () => {
+  const r = await make(["--hd", "--duration", "6"]);
+  const v = videoPosts()[0].body.input;
+  assert.ok(!("draft" in v));
+  assert.equal(v.duration, 6);
+  assert.equal(r.clip.quality, "hd");
+  assert.equal(readCosts(path.join(dir, ".vf")).find((x) => x.step === "video").usd, 0.17);
+});
+
+test("clip: poll ล้มหลังได้ request id → รันซ้ำตามงานเดิม ไม่ POST วิดีโอใหม่", async () => {
+  pollFail = true;
+  await assert.rejects(make(), (e) => e.code === "PROVIDER" && e.details.request_id === "req-1");
+  assert.equal(videoPosts().length, 1);
+  pollFail = false;
+  const r = await make();
+  assert.equal(videoPosts().length, 1);
+  assert.ok(fs.existsSync(r.clip.file));
+  assert.equal(imagePosts().length, 1, "keyframe ไม่ถูกสร้างใหม่");
+});
+
+test("clip: ทำเสร็จแล้วรันซ้ำ → USAGE", async () => {
+  await make();
+  await assert.rejects(make(), (e) => e.code === "USAGE" && /เสร็จแล้ว/.test(e.message));
+});
+
+test("clip --dry-run ไม่ยิง fetch และมีแถว video", async () => {
+  const r = await make(["--dry-run"]);
+  assert.equal(calls.length, 0);
+  assert.ok(r.planned.some((p) => p.step === "video" && p.model === MODELS.video));
+  assert.ok(r.estimated_usd > 0.06);
+});
+
+test("clip: --duration ผิด → USAGE", async () => {
+  for (const d of ["4", "21", "5.5", "x"]) await assert.rejects(make(["--duration", d]), (e) => e.code === "USAGE");
+});
+
+test("validateClipPlan: id ที่ไม่มี, จำนวนตัวละคร, duration, คำเสี่ยง", () => {
+  const ctx = { characters: [{ id: "cat" }, { id: "dog" }], places: [{ id: "kitchen" }] };
+  assert.deepEqual(validateClipPlan(PLAN(), ctx), []);
+  assert.ok(validateClipPlan({ ...PLAN(), characters: ["cow"] }, ctx).some((i) => i.includes("cow")));
+  assert.ok(validateClipPlan({ ...PLAN(), characters: [] }, ctx).length);
+  assert.ok(validateClipPlan({ ...PLAN(), place: "moon" }, ctx).some((i) => i.includes("moon")));
+  assert.deepEqual(validateClipPlan({ ...PLAN(), place: "" }, ctx), []);
+  assert.ok(validateClipPlan({ ...PLAN(), duration: 30 }, ctx).length);
+  assert.deepEqual(validateClipPlan({ ...PLAN(), duration: 30 }, ctx, { duration: 8 }), []);
+  assert.deepEqual(validateClipPlan(null, ctx), ["แผนคลิปต้องเป็น object"]);
+});

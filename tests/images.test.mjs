@@ -131,8 +131,15 @@ test("run ล้มเหลวพร้อม presigned URL ใน body: error 
   });
 });
 
-test("download ล้มเหลว: ลง cost error, ลบ temp dir, ไม่มี URL รั่ว", async () => {
-  const before = fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith("vf-img-") && n !== path.basename(dir));
+test("download ล้มเหลว: ลง cost error, ลบ temp dir, ไม่มี URL รั่ว", async (t) => {
+  // TMPDIR แยกของ test นี้: test ไฟล์อื่นที่รันขนานกันก็สร้าง vf-img-* ใน tmp กลาง
+  const ownTmp = fs.mkdtempSync(path.join(os.tmpdir(), "vf-imgtmp-"));
+  const savedTmp = process.env.TMPDIR;
+  process.env.TMPDIR = ownTmp;
+  t.after(() => {
+    savedTmp === undefined ? delete process.env.TMPDIR : (process.env.TMPDIR = savedTmp);
+    fs.rmSync(ownTmp, { recursive: true, force: true });
+  });
   cf.setFetch(async (url, init = {}) => {
     if (String(url).includes("/ai/run")) return { ok: true, status: 200, text: async () => JSON.stringify({ success: true, result: { image: "https://cdn.example/a.png" } }) };
     throw Object.assign(new Error(`fetch failed ${URLBODY}`), { body: URLBODY });
@@ -141,8 +148,7 @@ test("download ล้มเหลว: ลง cost error, ลบ temp dir, ไม
   const rows = readCosts(path.join(dir, ".vf"));
   assert.equal(rows.length, 1);
   assert.equal(rows[0].outcome, "error");
-  const after = fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith("vf-img-") && n !== path.basename(dir));
-  assert.deepEqual(after.sort(), before.sort());
+  assert.deepEqual(fs.readdirSync(ownTmp), []);
 });
 
 test("cache hit แต่ blob หาย: ถือเป็น miss แล้วสร้างใหม่", async () => {

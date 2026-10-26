@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { basename, join } from "node:path";
 import { riskFindings } from "./risk.mjs";
 import { replaceAuto } from "./md.mjs";
@@ -343,6 +343,16 @@ function addEntity(projectDir, key, entity, { replace, write, commit }) {
   // project.json เขียนท้ายสุด: ถ้าพังกลางทาง รันขั้นนี้ซ้ำได้
   writeJsonAtomic(file, next);
   return next;
+}
+
+// หลังทำคลิป: เพิ่มแถวใน EPISODES.md แล้วอัปเดตตารางต้นทุนใน PROJECT.md
+export function recordEpisode(projectDir, row) {
+  const ep = join(projectDir, "EPISODES.md");
+  if (!existsSync(ep)) writeFileSync(ep, EPISODES);
+  const cell = (v) => String(v ?? "").replace(/\|/g, "/").replace(/\s+/g, " ").trim();
+  const cells = [row.date, row.mode, row.title, row.summary, (row.characters ?? []).join(", "), row.file].map(cell);
+  appendFileSync(ep, `| ${cells.join(" | ")} |\n`);
+  refreshProjectMd(projectDir, readJson(join(projectDir, "project.json")));
 }
 
 export function addCharacterFiles(projectDir, character, { ref, extras = [], replace = false, commit } = {}) {
