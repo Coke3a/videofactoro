@@ -34,7 +34,7 @@ test("ทุก vf <command> ใน SKILL.md มีอยู่จริงใ�
         seen.add(cmd);
         continue;
       }
-      assert.ok(planned.has(cmd) && line.includes("ยังไม่มี"), `คำสั่งที่ไม่มีจริง: vf ${cmd} (บรรทัด: ${line})`);
+      assert.ok(planned.has(cmd) && line.includes("not available yet"), `คำสั่งที่ไม่มีจริง: vf ${cmd} (บรรทัด: ${line})`);
     }
   }
   for (const c of ["doctor", "setup", "project create", "project show", "character add", "place add", "asset find", "wait", "status"]) {
@@ -49,15 +49,14 @@ test("symlink .claude/skills/videofactoro ชี้ถึง skills/videofactoro
 });
 
 test("SKILL.md: failed job = exit 0 + status failed, ใช้ error.code, ลองซ้ำสูงสุด 2 ครั้ง, CONFIG/USAGE ห้ามลองซ้ำ", () => {
-  const sec = skill.slice(skill.indexOf("## งานยาว"), skill.indexOf("## โหมดวิดีโอ"));
+  const sec = skill.slice(skill.indexOf("## 4. Long jobs"), skill.indexOf("## 5. Video mode"));
   assert.match(sec, /exit 0/);
   assert.match(sec, /status:\s*"failed"/);
   assert.match(sec, /error\.code/);
   assert.match(sec, /`resume`/);
-  assert.match(sec, /สูงสุด 2 ครั้ง/);
-  assert.ok((sec.match(/สูงสุด 2 ครั้ง/g) ?? []).length >= 2, "ทั้ง BLOCKED และ PROVIDER/INTERNAL ต้องมีเพดาน 2 ครั้ง");
-  assert.match(sec, /\| 3 \| CONFIG \|[^\n]*ห้ามลองซ้ำ[^\n]*vf setup/);
-  assert.match(sec, /\| 2 \| USAGE \|[^\n]*ห้ามลองซ้ำแบบไม่ดู/);
+  assert.ok((sec.match(/at most 2 retries/g) ?? []).length >= 2, "ทั้ง BLOCKED และ PROVIDER/INTERNAL ต้องมีเพดาน 2 ครั้ง");
+  assert.match(sec, /\| 3 \| CONFIG \|[^\n]*never retry[^\n]*vf setup/);
+  assert.match(sec, /\| 2 \| USAGE \|[^\n]*Do not retry without reading/);
   assert.match(sec, /worker หยุดกลางทาง/);
 });
 

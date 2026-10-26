@@ -1,0 +1,11 @@
+# Lessons log
+
+Format: date · symptom → cause → fix. Newest last. Add an entry when something fails in a new way or a workaround proves itself.
+
+- 2026-10-27 · `project create` bible failed validation twice on Gemini, then Haiku produced it → validator issues were not visible → `llmJson` now logs the issues to stderr. If the bible keeps failing, read the job log for the issue list and simplify the prompt.
+- 2026-10-27 · flux-2 image calls returned 500/408 for a while → provider outage → `withRetry` retries transient errors. If a job still fails with PROVIDER, run `resume` (max 2 retries), then stop.
+- 2026-10-27 · `flux-3-image-klein` rejected base64 refs (400 "Must be an HTTP(S) URL") → that model needs hosted URLs → the image model is `flux-2-klein-9b`, which takes inline multipart refs. No storage bucket is needed anywhere.
+- 2026-10-27 · Same keyframe seed gave byte-identical images → klein-9b seeding is deterministic → a reroll must change the seed (the tool does).
+- 2026-10-27 · Early clips had cartoon music stingers baked into the video audio → the video prompt mentioned instruments → the planner now writes diegetic sound only, and "No background music." is appended. Music is generated and mixed separately.
+- 2026-10-27 · Clip "the-great-cookie-heist" got video QA `character_consistent` 0.30 and `follows_prompt` 0.24, but the frames showed the right characters doing the right thing → the camera cut to close-ups, which the QA reads as a change → treat video QA as a hint; inspect a contact sheet before rerolling.
+- 2026-10-27 · Music gate `needs_music` 0.42 → no music on a quiet sneaking scene → working as intended; pass `--music` when the user wants music anyway.

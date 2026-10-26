@@ -1,34 +1,40 @@
-# videofactoro
+# videofactoro docs
 
-เครื่องมือ CLI `vf` (Node 22 ไม่มี dependency) ที่ให้ LLM agent สร้างโลกของเรื่อง ตัวละคร และสถานที่ด้วย AI ผ่าน Cloudflare Workers AI เท่านั้น แต่ละคำสั่งพิมพ์ JSON หนึ่งก้อนและไม่ถามผู้ใช้ ภาพรวมและวิธีติดตั้งเบื้องต้นอยู่ที่ [README.md](../README.md) และสเปกเต็มอยู่ที่ [docs/superpowers/specs/2026-10-26-videofactoro-design.md](superpowers/specs/2026-10-26-videofactoro-design.md)
+The overview and quick start are in the [main README](../README.md). The full design is the [spec](superpowers/specs/2026-10-26-videofactoro-design.md).
 
-## ตั้งค่า
+## Setup
 
-1. รัน `bash tools/set-env.sh` ใน Terminal ของคุณเอง (ค่าคีย์ไม่แสดงบนจอ เขียนลง `.env` แบบ chmod 600)
-2. รัน `node bin/vf.mjs setup` เพื่อทดสอบ token และเครดิต
-3. ตรวจซ้ำได้ทุกเมื่อด้วย `node bin/vf.mjs doctor` (อ่านอย่างเดียว)
+1. Run `bash tools/set-env.sh` in your own Terminal. Key input is hidden, and it writes `.env` with chmod 600.
+2. Run `node bin/vf.mjs setup` to check the token and credits.
+3. Re-check any time with `node bin/vf.mjs doctor` (read-only).
 
-ไม่ต้องคัดลอก `.env.example` หรือพิมพ์คีย์เอง (`.env.example` เป็นแค่รายชื่อตัวแปร) · ห้ามนำ `.env` ไปไว้ใน git (มี pre-commit hook ช่วยกัน: `node tools/install-hooks.mjs`) · `.env` ที่ใช้คือไฟล์ที่ root ของ repo เท่านั้น (env ของ process มาก่อนเสมอ)
+You never copy `.env.example` or type keys by hand; it only lists the variable names. `.env` must never be committed (the pre-commit hook from `node tools/install-hooks.mjs` blocks it). Only the `.env` at the repo root is read, and process env always wins.
 
-## คำสั่ง
+## Code map
 
-| คำสั่ง | ทำอะไร |
+| Path | Role |
 |---|---|
-| `vf setup` / `vf doctor` | ตั้งค่า / ตรวจสภาพแวดล้อม |
-| `vf project create --prompt "..." --name <slug>` | สร้าง project จาก prompt เดียว |
-| `vf project show <slug>` | สรุป project เป็น JSON |
-| `vf character add <slug> --prompt "..."` | เพิ่มตัวละคร |
-| `vf place add <slug> --prompt "..."` | เพิ่มสถานที่ |
-| `vf asset find <slug> <คำค้น...>` | ค้นคลังของ project |
-| `vf wait <slug> [job-id]` | รอ job เบื้องหลัง (สูงสุด 540 วินาทีต่อครั้ง) |
-| `vf status <slug>` | job ล่าสุดของ project |
+| `bin/vf.mjs` | Entry point and command router |
+| `tools/cf.mjs` | Workers AI / AI Gateway client: run, retry, async polling, media download, redaction |
+| `tools/llm.mjs` | Structured JSON from Gemini/Haiku with schema validation and repair rounds |
+| `tools/images.mjs` | FLUX.2 klein 9B with inline reference images; sizes per aspect |
+| `tools/qa.mjs`, `tools/qa-rules.mjs` | clef-omni vision QA and the pass/fail rules per asset type |
+| `tools/bible.mjs` | Project bible schema, PROJECT.md/EPISODES.md rendering, cost table |
+| `tools/project-create.mjs`, `character-add.mjs`, `place-add.mjs` | Project building commands |
+| `tools/clip.mjs` | Single-shot clip pipeline |
+| `tools/audio.mjs` | TTS, music and the ffmpeg mix |
+| `tools/jobs.mjs`, `wait.mjs`, `status.mjs` | Background jobs, heartbeat, resume |
+| `tools/state.mjs` | Per-command checkpoints (pay-once resume) |
+| `tools/cache.mjs`, `asset-find.mjs` | Project asset library (cache keys, Thai search words) and search |
+| `tools/entities.mjs`, `md.mjs` | Character/place helpers; `vf:auto` block rewriting |
+| `tools/risk.mjs` | Prompt risk check (protected names) before paid calls |
+| `tools/pricing.mjs`, `cost.mjs` | Price table and cost log |
+| `skills/videofactoro/` | Agent skill (SKILL.md + references) |
+| `spikes/` | Live probes of each provider; results in `spikes/RESULTS.md` |
 
-คำสั่งที่เสียเงินรองรับ `--dry-run` เพื่อดูแผนและราคาประเมินก่อน โหมดวิดีโอ (`clip`, `film`, `motion`) ยังไม่มี
+## Conventions
 
-## project อยู่ที่ไหน
-
-ใน `$VF_PROJECTS` (ค่าเริ่มต้น `./projects/` และอยู่ใน `.gitignore`) หนึ่งโฟลเดอร์ต่อหนึ่ง project เริ่มอ่านที่ `projects/<slug>/PROJECT.md`
-
-## ให้ agent ใช้
-
-เปิด Claude Code ใน repo นี้ skill `videofactoro` (`.claude/skills/videofactoro` → `skills/videofactoro`) จะถูกโหลดอัตโนมัติ แล้วสั่งเช่น "สร้าง project เรื่องเพนกวินทำร้านกาแฟ"
+- One JSON object on stdout, logs on stderr, no prompts.
+- Every paid call goes through `withRetry`, writes a cost row, and is checkpointed before the next step.
+- Secrets never reach stdout, stderr, logs, project files or error messages; `redact()` scrubs known values and signed URLs are stripped.
+- Tool messages are in Thai; the agent skill is in English.
