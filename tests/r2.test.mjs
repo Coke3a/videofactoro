@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
 import { setFetch } from "../tools/cf.mjs";
-import { presignUrl, r2Config, uploadTemp, ensureBucket, putLifecycle, putObject } from "../tools/r2.mjs";
+import { presignUrl, r2Config, uploadTemp, ensureBucket, putLifecycle, putObject, headObject } from "../tools/r2.mjs";
 
 const KEYS = ["CLOUDFLARE_AI_ACCOUNT_ID", "VF_R2_BUCKET", "VF_R2_ACCESS_KEY_ID", "VF_R2_SECRET_ACCESS_KEY", "VF_R2_TOKEN"];
 let saved;
@@ -80,6 +80,12 @@ test("uploadTemp อัปโหลดเมื่อ head ไม่เจอ", 
   const calls = recorder((m) => (m === "HEAD" ? 404 : 200));
   await uploadTemp(f);
   assert.deepEqual(calls.map((c) => c.method), ["HEAD", "PUT"]);
+  assert.match(calls[0].url, /X-Amz-Expires=60&/);
+  const put = calls[1];
+  assert.deepEqual(Buffer.from(put.body), Buffer.from("x"));
+  assert.equal(put.headers["content-type"], "video/mp4");
+  assert.match(put.url, /X-Amz-Expires=60&/);
+  assert.match(put.url, /X-Amz-SignedHeaders=content-type%3Bhost/);
   fs.rmSync(dir, { recursive: true });
 });
 
@@ -109,4 +115,15 @@ test("putLifecycle ส่ง XML + Content-MD5 ที่เซ็นแล้ว
 test("error ไม่มี signature/secret ใน message", async () => {
   setFetch(async () => { throw new Error("boom"); });
   await assert.rejects(putObject("k", Buffer.from("a"), "text/plain"), (e) => !/Signature|SECRETSECRET/.test(e.message));
+});
+
+test("headObject/putObject: 403 -> CONFIG, 500 -> PROVIDER, 404 head -> false", async () => {
+  recorder(() => 403);
+  await assert.rejects(headObject("k"), (e) => e.code === "CONFIG");
+  await assert.rejects(putObject("k", Buffer.from("a"), "text/plain"), (e) => e.code === "CONFIG");
+  recorder(() => 500);
+  await assert.rejects(headObject("k"), (e) => e.code === "PROVIDER");
+  await assert.rejects(putObject("k", Buffer.from("a"), "text/plain"), (e) => e.code === "PROVIDER");
+  recorder(() => 404);
+  assert.equal(await headObject("k"), false);
 });
