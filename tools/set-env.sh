@@ -14,11 +14,14 @@ strip() { tr -d '[:space:]'; }
 ask()   { local v; read -r -p "$1: " v; printf '%s' "$v" | strip; }
 asks()  { local v; read -rs -p "$1 (พิมพ์แล้วไม่แสดงบนจอ): " v; echo >&2; printf '%s' "$v" | strip; }
 fail()  { echo "ผิดรูปแบบ: $1 - ยังไม่ได้เขียนอะไรลงไฟล์" >&2; exit 1; }
+# Current value of NAME in ENV_FILE (last match), used so Enter keeps it. Never printed.
+cur()   { [ -f "$ENV_FILE" ] || return 0; grep -E "^[[:space:]]*(export[[:space:]]+)?$1[[:space:]]*=" "$ENV_FILE" | tail -n 1 | cut -d= -f2- | strip; }
+keep()  { local hint=""; [ -n "$(cur "$1")" ] && hint=" (กด Enter = ใช้ค่าเดิม)"; local v; v=$(asks "$1$2$hint"); printf '%s' "${v:-$(cur "$1")}"; }
 
 echo "Account ID: dash.cloudflare.com > Workers & Pages > ขวามือ" >&2
 echo "CLOUDFLARE_AI_API_TOKEN: สิทธิ์ Workers AI Read + Edit | VF_R2_TOKEN: สิทธิ์ R2 (Object Read & Write + Admin ถ้าให้ vf สร้าง bucket)" >&2
-ACCT=$(asks "CLOUDFLARE_AI_ACCOUNT_ID (32 ตัว hex)")
-TOK=$(asks  "CLOUDFLARE_AI_API_TOKEN")
+ACCT=$(keep CLOUDFLARE_AI_ACCOUNT_ID " (32 ตัว hex)")
+TOK=$(keep CLOUDFLARE_AI_API_TOKEN "")
 BUCKET=$(ask "VF_R2_BUCKET (กด Enter = videofactoro)")
 BUCKET="${BUCKET:-videofactoro}"
 R2TOK=$(asks "VF_R2_TOKEN (เว้นว่างได้ถ้าจะใส่ access key ด้านล่าง)")
