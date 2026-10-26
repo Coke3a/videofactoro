@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { existsSync } from "node:fs";
 import { loadEnv } from "../tools/env.mjs";
 import { emit, fail, VfError, EXIT } from "../tools/out.mjs";
 import { finishJob, setWorkerJob } from "../tools/jobs.mjs";
@@ -45,7 +44,6 @@ async function run(argv) {
   }
   if (cmd === "help") return { commands: Object.keys(COMMANDS) };
   const file = new URL(`../tools/${COMMANDS[cmd]}.mjs`, import.meta.url);
-  if (!existsSync(file)) throw new VfError("USAGE", `ยังไม่มีคำสั่งนี้: ${cmd}`);
   const mod = await import(file.href);
   return await mod.main(rest);
 }

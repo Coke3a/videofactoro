@@ -20,3 +20,13 @@ test("vf nope exit 2 พร้อมรายชื่อคำสั่ง", ()
   assert.equal(j.error.code, "USAGE");
   assert.ok(j.error.details.commands.includes("setup"));
 });
+
+test("ทุกคำสั่งใน COMMANDS มีไฟล์ module จริง และไม่มี branch 'ยังไม่มีคำสั่งนี้' เหลือ", async () => {
+  const { readFileSync, existsSync } = await import("node:fs");
+  const src = readFileSync(bin, "utf8");
+  const body = src.match(/const COMMANDS = \{([\s\S]*?)\n\};/)[1];
+  const mods = [...body.matchAll(/^\s*"?[a-z ]+"?\s*:\s*(null|"([a-z-]+)")/gm)].map((m) => m[2]).filter(Boolean);
+  assert.ok(mods.length >= 9);
+  for (const m of mods) assert.ok(existsSync(new URL(`../tools/${m}.mjs`, import.meta.url)), `ไม่มี tools/${m}.mjs`);
+  assert.doesNotMatch(src, /ยังไม่มีคำสั่งนี้/);
+});
