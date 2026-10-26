@@ -3,7 +3,8 @@ import { basename, join } from "node:path";
 import { riskFindings } from "./risk.mjs";
 import { replaceAuto } from "./md.mjs";
 import { readCosts, summarize, renderCostTable } from "./cost.mjs";
-import { writeJsonAtomic } from "./state.mjs";
+import { writeJsonAtomic, readJson } from "./state.mjs";
+import { VfError } from "./out.mjs";
 
 // เสียง prebuilt ของ Gemini TTS 30 ชื่อ (genhaha/app/lib/cinematic/board.ts)
 export const GEMINI_VOICES = [
@@ -48,7 +49,10 @@ export const BIBLE_SCHEMA = {
   },
 };
 
-const ID_RE = /^[a-z][a-z0-9-]{1,30}$/;
+export const CHARACTER_SCHEMA = BIBLE_SCHEMA.properties.characters.items;
+export const PLACE_SCHEMA = BIBLE_SCHEMA.properties.places.items;
+
+export const ID_RE = /^[a-z][a-z0-9-]{1,30}$/;
 const HEX_RE = /^#[0-9a-fA-F]{6}$/;
 const MIN_LOOK = 120;
 const TEXT_FIELDS = ["title", "logline", "premise", "world", "style_prompt", "tone", "music_style", "lang"];
@@ -62,6 +66,45 @@ function risks(label, text, issues) {
     const word = i >= 0 ? raw.slice(i, i + f.matched.length) : f.matched;
     issues.push(`${label} มีคำเสี่ยง: ${word}`);
   }
+}
+
+function idIssues(kind, id, taken, issues) {
+  if (!ID_RE.test(String(id))) issues.push(`id ของ${kind} "${id}" ผิดรูปแบบ (ต้องเป็น a-z0-9- ขึ้นต้นด้วยตัวอักษร 2–31 ตัว)`);
+  if (taken.has(id)) issues.push(`id "${id}" ซ้ำ`);
+}
+
+function characterFieldIssues(c, issues) {
+  for (const k of ["name", "role", "personality", "voice_description"]) {
+    if (!nonEmpty(c?.[k])) issues.push(`${k} ของ ${c?.id} ต้องไม่ว่าง`);
+  }
+  if (typeof c?.look !== "string" || c.look.length < MIN_LOOK) {
+    issues.push(`look ของ ${c?.id} สั้นเกินไป (${String(c?.look ?? "").length} < ${MIN_LOOK} ตัวอักษร) ต้องบอกสี ลาย สัดส่วน จุดเด่นที่ต้องคงที่`);
+  }
+  if (!GEMINI_VOICES.includes(c?.tts_voice)) issues.push(`tts_voice ของ ${c?.id} ไม่อยู่ในรายชื่อเสียง Gemini TTS: ${c?.tts_voice}`);
+  risks(`look ของ ${c?.id}`, c?.look, issues);
+  risks(`name ของ ${c?.id}`, c?.name, issues);
+}
+
+function placeFieldIssues(p, issues) {
+  for (const k of ["name", "desc"]) if (!nonEmpty(p?.[k])) issues.push(`${k} ของ ${p?.id} ต้องไม่ว่าง`);
+  risks(`desc ของ ${p?.id}`, p?.desc, issues);
+}
+
+// taken = id ที่ใช้แล้ว (ตัวละครและสถานที่ของ project)
+export function validateCharacter(c, taken = new Set()) {
+  if (c === null || typeof c !== "object" || Array.isArray(c)) return ["ตัวละครต้องเป็น object"];
+  const issues = [];
+  idIssues("ตัวละคร", c.id, taken, issues);
+  characterFieldIssues(c, issues);
+  return issues;
+}
+
+export function validatePlace(p, taken = new Set()) {
+  if (p === null || typeof p !== "object" || Array.isArray(p)) return ["สถานที่ต้องเป็น object"];
+  const issues = [];
+  idIssues("สถานที่", p.id, taken, issues);
+  placeFieldIssues(p, issues);
+  return issues;
 }
 
 export function validateBible(b) {
@@ -82,26 +125,16 @@ export function validateBible(b) {
   if (places.length < 1 || places.length > 4) issues.push("places ต้องมี 1–4 แห่ง");
   const seen = new Set();
   const checkId = (kind, id) => {
-    if (!ID_RE.test(String(id))) issues.push(`id ของ${kind} "${id}" ผิดรูปแบบ (ต้องเป็น a-z0-9- ขึ้นต้นด้วยตัวอักษร 2–31 ตัว)`);
-    if (seen.has(id)) issues.push(`id "${id}" ซ้ำ`);
+    idIssues(kind, id, seen, issues);
     seen.add(id);
   };
   for (const c of chars) {
     checkId("ตัวละคร", c?.id);
-    for (const k of ["name", "role", "personality", "voice_description"]) {
-      if (!nonEmpty(c?.[k])) issues.push(`${k} ของ ${c?.id} ต้องไม่ว่าง`);
-    }
-    if (typeof c?.look !== "string" || c.look.length < MIN_LOOK) {
-      issues.push(`look ของ ${c?.id} สั้นเกินไป (${String(c?.look ?? "").length} < ${MIN_LOOK} ตัวอักษร) ต้องบอกสี ลาย สัดส่วน จุดเด่นที่ต้องคงที่`);
-    }
-    if (!GEMINI_VOICES.includes(c?.tts_voice)) issues.push(`tts_voice ของ ${c?.id} ไม่อยู่ในรายชื่อเสียง Gemini TTS: ${c?.tts_voice}`);
-    risks(`look ของ ${c?.id}`, c?.look, issues);
-    risks(`name ของ ${c?.id}`, c?.name, issues);
+    characterFieldIssues(c, issues);
   }
   for (const p of places) {
     checkId("สถานที่", p?.id);
-    for (const k of ["name", "desc"]) if (!nonEmpty(p?.[k])) issues.push(`${k} ของ ${p?.id} ต้องไม่ว่าง`);
-    risks(`desc ของ ${p?.id}`, p?.desc, issues);
+    placeFieldIssues(p, issues);
   }
   risks("title", b.title, issues);
   risks("style_prompt", b.style_prompt, issues);
@@ -120,6 +153,42 @@ export function bibleSystemPrompt(lang) {
     "- id ของตัวละครและสถานที่ใช้ a-z 0-9 และ - เท่านั้น ขึ้นต้นด้วยตัวอักษร ห้ามซ้ำกัน",
     `- ข้อความในฟิลด์ทั้งหมดเป็นภาษา ${lang} ยกเว้น look และ style_prompt ที่ต้องเป็นภาษาอังกฤษเสมอ (desc ของสถานที่เป็นภาษาอังกฤษด้วยเพื่อใช้สร้างภาพ)`,
     `- ตั้งค่า lang เป็น "${lang}"`,
+  ].join("\n");
+}
+
+const ADD_RULES = (lang) => [
+  "- ห้ามใช้ชื่อคนจริง แบรนด์ หรือตัวละครมีลิขสิทธิ์ทั้งในชื่อและคำบรรยาย ถ้า prompt ของผู้ใช้พูดถึง ให้แทนด้วยตัวละครต้นฉบับที่ออกแบบใหม่",
+  "- id ใช้ a-z 0-9 และ - เท่านั้น ขึ้นต้นด้วยตัวอักษร และต้องไม่ซ้ำกับ id ที่มีอยู่แล้วใน project (ตัวละครหรือสถานที่)",
+  `- ข้อความในฟิลด์เป็นภาษา ${lang} ยกเว้น look (และ desc ของสถานที่) ที่ต้องเป็นภาษาอังกฤษเสมอ`,
+];
+
+export function characterAddSystemPrompt(lang) {
+  return [
+    "คุณคือผู้เขียนตัวละครใหม่เพิ่มเข้าไปใน project วิดีโอสั้นที่มีอยู่แล้ว ตอบเป็น JSON ของตัวละครหนึ่งตัวตาม schema เท่านั้น",
+    "- ผู้ใช้จะให้ PROJECT.md และรายการ id ที่มีอยู่ ตัวละครใหม่ต้องเข้ากับโลก โทน และสไตล์เดิม ไม่ขัดกับกฎของเรื่อง",
+    "- look ต้องละเอียดอย่างน้อย 120 ตัวอักษร: บอกสี ลาย สัดส่วน และจุดเด่นที่ต้องคงที่ทุกภาพ (look ถูกใส่ใน prompt ภาพทุกครั้งคำต่อคำ) และไม่ซ้ำกับตัวละครเดิม",
+    "- tts_voice ต้องเป็นเสียงจากรายชื่อใน schema และควรต่างจากตัวละครเดิมที่ใช้อยู่",
+    ...ADD_RULES(lang),
+  ].join("\n");
+}
+
+export function lookFromImageSystemPrompt(lang) {
+  return [
+    "คุณคือผู้เขียนตัวละครใหม่เพิ่มเข้าไปใน project วิดีโอสั้นที่มีอยู่แล้ว โดยผู้ใช้ให้ภาพของตัวละครนั้นมาแล้ว ตอบเป็น JSON ของตัวละครหนึ่งตัวตาม schema เท่านั้น",
+    "- ภาพที่แนบมาคือหน้าตาจริงของตัวละคร (ภาพแรกคือภาพหลัก) เขียน look จากสิ่งที่เห็นในภาพจริงๆ ห้ามแต่งเพิ่มจนขัดกับภาพ",
+    "- look ต้องละเอียดอย่างน้อย 120 ตัวอักษร: บอกสี ลาย สัดส่วน เสื้อผ้า และจุดเด่นที่ต้องคงที่ทุกภาพ (look ถูกใส่ใน prompt ภาพทุกครั้งคำต่อคำ)",
+    "- ผู้ใช้จะให้ PROJECT.md และรายการ id ที่มีอยู่ ส่วนบุคลิก บทบาท และเสียงให้เข้ากับโลกและโทนเดิม",
+    "- ถ้าในภาพมีตัวหนังสือหรือโลโก้ อย่าใส่ลงใน look",
+    ...ADD_RULES(lang),
+  ].join("\n");
+}
+
+export function placeAddSystemPrompt(lang) {
+  return [
+    "คุณคือผู้เขียนสถานที่ใหม่เพิ่มเข้าไปใน project วิดีโอสั้นที่มีอยู่แล้ว ตอบเป็น JSON ของสถานที่หนึ่งแห่งตาม schema เท่านั้น",
+    "- ผู้ใช้จะให้ PROJECT.md และรายการ id ที่มีอยู่ สถานที่ใหม่ (สถานที่ใหม่ในเรื่อง) ต้องเข้ากับโลก ยุค และสไตล์เดิม",
+    "- desc บอกสถานที่แบบฉากเปล่า ไม่มีคนและสัตว์: วัสดุ สี แสง องค์ประกอบสำคัญที่ต้องคงที่",
+    ...ADD_RULES(lang),
   ].join("\n");
 }
 
@@ -223,43 +292,74 @@ function placeMd(p) {
 
 const EPISODES = "# ตอนที่ทำแล้ว\n\n| วันที่ | โหมด | ชื่อ | เรื่องย่อ | ตัวละคร | ไฟล์ |\n|---|---|---|---|---|---|\n";
 
+function writeCharacterFiles(projectDir, c, b, { ref, extras = [] } = {}) {
+  const d = join(projectDir, "characters", c.id);
+  mkdirSync(d, { recursive: true });
+  writeFileSync(join(d, "CHARACTER.md"), characterMd(c, b));
+  const { tts_voice, voice_description, ...rest } = c;
+  const refName = ref ? `ref/${basename(ref)}` : undefined;
+  writeJsonAtomic(join(d, "character.json"), {
+    ...rest, voice: { tts_voice, description: voice_description },
+    ...(refName ? { ref: refName } : {}),
+    ...(extras.length ? { extra_refs: extras.map((x) => `ref/${basename(x)}`) } : {}),
+  });
+}
+
+function writePlaceFiles(projectDir, p, { plate } = {}) {
+  const d = join(projectDir, "places", p.id);
+  mkdirSync(d, { recursive: true });
+  writeFileSync(join(d, "PLACE.md"), placeMd(p));
+  writeJsonAtomic(join(d, "place.json"), { ...p, ...(plate ? { plate: `plates/${basename(plate)}` } : {}) });
+}
+
+function refreshProjectMd(projectDir, project) {
+  const mdFile = join(projectDir, "PROJECT.md");
+  const usdThb = Number(process.env.VF_USD_THB) || 33.5;
+  let md = existsSync(mdFile) ? readFileSync(mdFile, "utf8") : projectMd(project);
+  md = under(md, "## ตัวละคร", "characters", charactersTable(project));
+  md = under(md, "## สถานที่", "places", placesTable(project));
+  md = under(md, "## แผนที่ไฟล์", "files", fileMap());
+  md = under(md, "## ต้นทุนสะสม", "cost", renderCostTable(summarize(readCosts(join(projectDir, ".vf"))), usdThb));
+  writeFileSync(mdFile, md);
+}
+
+function addEntity(projectDir, key, entity, replace, write) {
+  const file = join(projectDir, "project.json");
+  const project = readJson(file);
+  const list = Array.isArray(project[key]) ? project[key] : [];
+  const i = list.findIndex((x) => x.id === entity.id);
+  if (i >= 0 && !replace) throw new VfError("USAGE", `มี id นี้แล้ว: ${entity.id} (ใช้ --replace ถ้าต้องการแทนที่)`);
+  const next = { ...project, [key]: i >= 0 ? list.map((x, j) => (j === i ? entity : x)) : [...list, entity] };
+  write(next);
+  refreshProjectMd(projectDir, next);
+  // project.json เขียนท้ายสุด: ถ้าพังกลางทาง รันขั้นนี้ซ้ำได้ (ยังไม่นับว่าเพิ่มแล้ว)
+  writeJsonAtomic(file, next);
+  return next;
+}
+
+export function addCharacterFiles(projectDir, character, { ref, extras = [], replace = false } = {}) {
+  return addEntity(projectDir, "characters", character, replace, (p) => writeCharacterFiles(projectDir, character, p, { ref, extras }));
+}
+
+export function addPlaceFiles(projectDir, place, { plate, replace = false } = {}) {
+  return addEntity(projectDir, "places", place, replace, () => writePlaceFiles(projectDir, place, { plate }));
+}
+
 export function writeProjectFiles(projectDir, bible, opts = {}) {
   const { selected = {}, plates = {} } = opts;
   const slug = opts.slug ?? basename(projectDir);
   const lang = opts.lang ?? bible.lang;
   const aspect = opts.aspect ?? "9:16";
-  const costDir = join(projectDir, ".vf");
-  const usdThb = Number(process.env.VF_USD_THB) || 33.5;
-  const costText = renderCostTable(summarize(readCosts(costDir)), usdThb);
 
   mkdirSync(projectDir, { recursive: true });
   writeJsonAtomic(join(projectDir, "project.json"), {
     ...bible, slug, aspect, lang, created_at: opts.created_at ?? new Date().toISOString(), version: 1,
   });
 
-  const mdFile = join(projectDir, "PROJECT.md");
-  let md = existsSync(mdFile) ? readFileSync(mdFile, "utf8") : projectMd(bible);
-  md = under(md, "## ตัวละคร", "characters", charactersTable(bible));
-  md = under(md, "## สถานที่", "places", placesTable(bible));
-  md = under(md, "## แผนที่ไฟล์", "files", fileMap());
-  md = under(md, "## ต้นทุนสะสม", "cost", costText);
-  writeFileSync(mdFile, md);
+  refreshProjectMd(projectDir, bible);
 
-  for (const c of bible.characters) {
-    const d = join(projectDir, "characters", c.id);
-    mkdirSync(d, { recursive: true });
-    writeFileSync(join(d, "CHARACTER.md"), characterMd(c, bible));
-    const { tts_voice, voice_description, ...rest } = c;
-    const ref = selected[c.id] ? `ref/${basename(selected[c.id])}` : undefined;
-    writeJsonAtomic(join(d, "character.json"), { ...rest, voice: { tts_voice, description: voice_description }, ...(ref ? { ref } : {}) });
-  }
-  for (const p of bible.places) {
-    const d = join(projectDir, "places", p.id);
-    mkdirSync(d, { recursive: true });
-    writeFileSync(join(d, "PLACE.md"), placeMd(p));
-    const plate = plates[p.id] ? `plates/${basename(plates[p.id])}` : undefined;
-    writeJsonAtomic(join(d, "place.json"), { ...p, ...(plate ? { plate } : {}) });
-  }
+  for (const c of bible.characters) writeCharacterFiles(projectDir, c, bible, { ref: selected[c.id] });
+  for (const p of bible.places) writePlaceFiles(projectDir, p, { plate: plates[p.id] });
   const ep = join(projectDir, "EPISODES.md");
   if (!existsSync(ep)) writeFileSync(ep, EPISODES);
 }

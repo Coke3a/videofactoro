@@ -15,15 +15,16 @@ import { libAdd, libLoad, libUpdate } from "./cache.mjs";
 import { readCosts, summarize } from "./cost.mjs";
 import { estimate } from "./pricing.mjs";
 import { MODELS } from "./models.mjs";
+import { pinInput, shq } from "./entities.mjs";
 import { BIBLE_SCHEMA, validateBible, bibleSystemPrompt, writeProjectFiles } from "./bible.mjs";
 
 const execFileP = promisify(execFile);
 const ASPECTS = ["9:16", "16:9", "1:1"];
 const PNG_MAGIC = 0x89504e47;
-const CANDIDATES = 3;
-const REF_SUFFIX = " Character reference: single character, full body, front view, neutral pose, plain light background.";
-const PLATE_SUFFIX = " Background plate: empty location, no people, no animals, wide establishing view.";
-const sha = (b) => createHash("sha256").update(b).digest("hex");
+export const CANDIDATES = 3;
+export const REF_SUFFIX = " Character reference: single character, full body, front view, neutral pose, plain light background.";
+export const PLATE_SUFFIX = " Background plate: empty location, no people, no animals, wide establishing view.";
+export const sha = (b) => createHash("sha256").update(b).digest("hex");
 
 const OPTIONS = {
   prompt: { type: "string" },
@@ -36,8 +37,8 @@ const OPTIONS = {
   "dry-run": { type: "boolean" },
 };
 
-const baseSeed = (slug, id) => parseInt(sha(`${slug}:${id}`).slice(0, 8), 16);
-const seedAt = (base, i) => (base + i) % 2 ** 32;
+export const baseSeed = (slug, id) => parseInt(sha(`${slug}:${id}`).slice(0, 8), 16);
+export const seedAt = (base, i) => (base + i) % 2 ** 32;
 
 async function ffmpeg(args, what) {
   try {
@@ -47,7 +48,7 @@ async function ffmpeg(args, what) {
   }
 }
 
-async function convert(src, dest, outArgs, what) {
+export async function convert(src, dest, outArgs, what) {
   mkdirSync(dirname(dest), { recursive: true });
   const ext = dest.slice(dest.lastIndexOf("."));
   const tmp = `${dest}.tmp-${process.pid}${ext}`;
@@ -59,7 +60,7 @@ async function convert(src, dest, outArgs, what) {
   }
 }
 
-async function toPng(src, dest) {
+export async function toPng(src, dest) {
   const head = readFileSync(src).subarray(0, 4);
   if (head.length === 4 && head.readUInt32BE(0) === PNG_MAGIC) {
     mkdirSync(dirname(dest), { recursive: true });
@@ -138,14 +139,14 @@ function dryRun(images) {
   };
 }
 
-async function makeRef(dir, slug, bible, c, costDir) {
+export async function makeRef(dir, slug, bible, c, costDir, { refs = [] } = {}) {
   const meta = { project: slug, step: `ref:${c.id}` };
   const prompt = `${c.look} ${bible.style_prompt}${REF_SUFFIX}`;
   const base = baseSeed(slug, c.id);
   const cands = [];
   for (let i = 0; i < CANDIDATES; i++) {
     cands.push(await generateImage({
-      projectDir: dir, prompt, aspect: "3:4", seed: seedAt(base, i), need: `ref:${c.id}`,
+      projectDir: dir, prompt, refs, aspect: "3:4", seed: seedAt(base, i), need: `ref:${c.id}`,
       kind: "character-ref", characters: [c.id], meta,
     }));
   }
@@ -162,7 +163,7 @@ async function makeRef(dir, slug, bible, c, costDir) {
   return { ref: rel, ...(best.warning ? { warning: best.warning } : {}) };
 }
 
-async function makePlate(dir, slug, bible, p, aspect, maxRerolls, costDir) {
+export async function makePlate(dir, slug, bible, p, aspect, maxRerolls, costDir) {
   const meta = { project: slug, step: `plate:${p.id}` };
   const prompt = `${p.desc} ${bible.style_prompt}${PLATE_SUFFIX}`;
   const ctx = { desc: p.desc, style: bible.style_prompt };
@@ -266,20 +267,8 @@ export function buildCommand({ prompt, slug, lang, aspect, maxRerolls, images })
   ];
 }
 
-const shq = (a) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(a) ? a : `'${a.replace(/'/g, "'\\''")}'`);
-
 function checkInput(state, input) {
-  const first = state.get("input");
-  if (!first) {
-    state.set("input", input);
-    return;
-  }
-  for (const k of ["prompt_sha", "lang", "aspect", "images"]) {
-    if (JSON.stringify(first[k]) !== JSON.stringify(input[k])) {
-      const field = k === "prompt_sha" ? "prompt" : k;
-      throw new VfError("USAGE", `${field} ต่างจากครั้งแรกของ project นี้ ถ้าต้องการสร้างใหม่ให้ใช้ --name อื่น`);
-    }
-  }
+  pinInput(state, input, ["prompt_sha", "lang", "aspect", "images"], "ของ project นี้ ถ้าต้องการสร้างใหม่ให้ใช้ --name อื่น");
 }
 
 export async function main(argv) {

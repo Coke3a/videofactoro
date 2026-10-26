@@ -19,14 +19,16 @@ const bad = (a, k) => {
 };
 
 const q = (instructions) => ({ type: "noul", instructions });
+const SINGLE_Q = "Does the image show exactly one character, and no other characters?";
+const TEXT_Q = "Are there readable letters, words, logos or watermarks anywhere in the image?";
 
 export const RULES = {
   characterRef: {
     state: (ctx) => `A character reference image. Art style: ${ctx.style}.`,
     questions: (ctx) => ({
       matches_look: q(`Does this image show this character: ${ctx.look}?`),
-      single_character: q("Does the image show exactly one character, and no other characters?"),
-      has_text: q("Are there readable letters, words, logos or watermarks anywhere in the image?"),
+      single_character: q(SINGLE_Q),
+      has_text: q(TEXT_Q),
       full_body: q("Is the character's whole body visible from head to feet?"),
     }),
     judge(a) {
@@ -39,6 +41,21 @@ export const RULES = {
       if (!(single >= CHAR_SINGLE_MIN)) reasons.push(`ไม่ใช่ตัวละครเดี่ยว (${single.toFixed(2)} < ${CHAR_SINGLE_MIN})`);
       if (!(text < CHAR_TEXT_MAX)) reasons.push(`มีตัวหนังสือหรือโลโก้ในภาพ (${text.toFixed(2)} ≥ ${CHAR_TEXT_MAX})`);
       return { pass: reasons.length === 0, score: matches + CHAR_FULLBODY_WEIGHT * full - text, reasons };
+    },
+  },
+  characterFromImage: {
+    state: (ctx) => `A character reference image. Art style: ${ctx.style}.`,
+    questions: () => ({
+      single_character: q(SINGLE_Q),
+      has_text: q(TEXT_Q),
+    }),
+    judge(a) {
+      const single = good(a, "single_character");
+      const text = bad(a, "has_text");
+      const reasons = [];
+      if (!(single >= CHAR_SINGLE_MIN)) reasons.push(`ไม่ใช่ตัวละครเดี่ยว (${single.toFixed(2)} < ${CHAR_SINGLE_MIN})`);
+      if (!(text < CHAR_TEXT_MAX)) reasons.push(`มีตัวหนังสือหรือโลโก้ในภาพ (${text.toFixed(2)} ≥ ${CHAR_TEXT_MAX})`);
+      return { pass: reasons.length === 0, score: single - text, reasons };
     },
   },
   placePlate: {
