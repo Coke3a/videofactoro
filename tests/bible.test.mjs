@@ -57,6 +57,15 @@ test("validateBible ไม่ผ่านเมื่อ look มีคำว่
   assert.ok(issues.some((i) => i === "look ของ cat มีคำเสี่ยง: Garfield"), issues.join("|"));
 });
 
+test("validateBible ตรวจ desc ของสถานที่และ name ของตัวละคร", () => {
+  const b = goodBible();
+  b.places[0].desc += " like the Starbucks";
+  b.characters[1].name = "Pikachu";
+  const issues = validateBible(b);
+  assert.ok(issues.includes("desc ของ kitchen มีคำเสี่ยง: Starbucks"), issues.join("|"));
+  assert.ok(issues.includes("name ของ dog มีคำเสี่ยง: Pikachu"), issues.join("|"));
+});
+
 test("validateBible ตรวจ title/style/premise ด้วย", () => {
   const b = goodBible();
   b.title = "Pikachu และเพื่อน";
@@ -75,11 +84,13 @@ test("riskFindings ภาษาไทยและอังกฤษ คืน {i
   assert.deepEqual(riskFindings("no gore, no blood"), []);
 });
 
-test("slugify('หมาแมวซน') ไม่ว่างและเป็น ASCII", () => {
+test("slugify('หมาแมวซน') ไม่ว่าง เป็น ASCII และได้ค่าเดิมทุกครั้ง (R10)", () => {
   const s = slugify("หมาแมวซน");
-  assert.ok(s.length > 0);
-  assert.match(s, /^[a-z0-9-]+$/);
-  assert.match(s, /^project-\d{8}-\d{4}$/);
+  assert.match(s, /^project-[0-9a-f]{8}$/);
+  assert.equal(slugify("หมาแมวซน"), s);
+  assert.notEqual(slugify("แมวหมาซน"), s);
+  assert.match(slugify(""), /^project-\d{8}-\d{4}$/);
+  assert.match(slugify("   "), /^project-\d{8}-\d{4}$/);
 });
 
 test("slugify('Cat & Dog!') === 'cat-dog' และตัดที่ 40", () => {
@@ -99,7 +110,14 @@ test("projectsRoot/resolveProject", () => {
   try {
     process.env.VF_PROJECTS = root;
     assert.equal(projectsRoot(), root);
-    fs.mkdirSync(path.join(root, "p1"));
+    fs.mkdirSync(path.join(root, "p1", ".vf"), { recursive: true });
+    fs.mkdirSync(path.join(root, "bare"));
+    fs.mkdirSync(path.join(root, "md"));
+    fs.writeFileSync(path.join(root, "md", "PROJECT.md"), "x");
+    assert.equal(resolveProject("md"), path.join(root, "md"));
+    for (const bad of ["", ".", "..", "../p1", "Bad_Name", "bare", path.join(root, "bare")]) {
+      assert.throws(() => resolveProject(bad), (e) => e.code === "USAGE", JSON.stringify(bad));
+    }
     assert.equal(resolveProject("p1"), path.join(root, "p1"));
     assert.equal(resolveProject(path.join(root, "p1")), path.join(root, "p1"));
     assert.throws(() => resolveProject("nope"), (e) => e.code === "USAGE");

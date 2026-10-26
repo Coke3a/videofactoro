@@ -4,7 +4,7 @@ import { promisify } from "node:util";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { parse, VfError, log } from "./out.mjs";
-import { projectsRoot, slugify } from "./paths.mjs";
+import { projectsRoot, slugify, NAME_RE } from "./paths.mjs";
 import { llmJson } from "./llm.mjs";
 import { generateImage } from "./images.mjs";
 import { pickBest, generateWithQa, NO_PASS_WARNING } from "./qa.mjs";
@@ -19,7 +19,6 @@ import { BIBLE_SCHEMA, validateBible, bibleSystemPrompt, writeProjectFiles } fro
 
 const execFileP = promisify(execFile);
 const ASPECTS = ["9:16", "16:9", "1:1"];
-const NAME_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const PNG_MAGIC = 0x89504e47;
 const CANDIDATES = 3;
 const REF_SUFFIX = " Character reference: single character, full body, front view, neutral pose, plain light background.";
@@ -189,7 +188,8 @@ function matchImages(bible, images) {
     const key = im.name.toLowerCase();
     const c = bible.characters.find((x) => x.id.toLowerCase() === key || x.name.toLowerCase() === key);
     if (!c) warnings.push(`--image ${im.name}: ไม่พบตัวละครชื่อนี้ใน bible จึงไม่ใช้ภาพนี้`);
-    else if (!byChar[c.id]) byChar[c.id] = im.path;
+    else if (byChar[c.id]) warnings.push(`--image ${im.name}: ตัวละคร ${c.id} มีภาพแล้ว ใช้ภาพแรก`);
+    else byChar[c.id] = im.path;
   }
   return { byChar, warnings };
 }
@@ -258,6 +258,30 @@ async function work({ dir, slug, prompt, lang, aspect, images, maxRerolls }) {
   };
 }
 
+export function buildCommand({ prompt, slug, lang, aspect, maxRerolls, images }) {
+  return [
+    "project", "create", `--prompt=${prompt}`, "--name", slug, "--lang", lang, "--aspect", aspect,
+    "--max-rerolls", String(maxRerolls),
+    ...images.map((i) => `--image=${i.name}=${i.path}`),
+  ];
+}
+
+const shq = (a) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(a) ? a : `'${a.replace(/'/g, "'\\''")}'`);
+
+function checkInput(state, input) {
+  const first = state.get("input");
+  if (!first) {
+    state.set("input", input);
+    return;
+  }
+  for (const k of ["prompt_sha", "lang", "aspect", "images"]) {
+    if (JSON.stringify(first[k]) !== JSON.stringify(input[k])) {
+      const field = k === "prompt_sha" ? "prompt" : k;
+      throw new VfError("USAGE", `${field} ต่างจากครั้งแรกของ project นี้ ถ้าต้องการสร้างใหม่ให้ใช้ --name อื่น`);
+    }
+  }
+}
+
 export async function main(argv) {
   const { values } = parse(argv, OPTIONS);
   const prompt = values.prompt?.trim();
@@ -274,20 +298,25 @@ export async function main(argv) {
   const slug = values.name ?? slugify(prompt);
   const dir = join(projectsRoot(), slug);
   const stateDir = join(dir, ".vf");
-  if (existsSync(join(stateDir, "create-state.json")) && openState(stateDir, "create-state.json").get("files")?.status === "done") {
+  const state = openState(stateDir, "create-state.json");
+  if (existsSync(join(stateDir, "create-state.json")) && state.get("files")?.status === "done") {
     throw new VfError("USAGE", `มี project นี้แล้ว: ${slug}`);
   }
   mkdirSync(stateDir, { recursive: true });
+  checkInput(state, { prompt_sha: sha(prompt), lang, aspect, images: images.map((i) => `${i.name}=${i.path}`) });
 
+  const command = buildCommand({ prompt, slug, lang, aspect, maxRerolls, images });
   if (!values.foreground) {
     mkdirSync(join(dir, ".jobs"), { recursive: true });
-    const command = [
-      "project", "create", "--prompt", prompt, "--name", slug, "--lang", lang, "--aspect", aspect,
-      "--max-rerolls", String(maxRerolls),
-      ...images.flatMap((i) => ["--image", `${i.name}=${i.path}`]),
-    ];
     const job = startJob({ jobRoot: jobRootOf(dir), command, label: `project create ${slug}` });
-    return { project: slug, dir, job: { id: job.id, dir: job.dir, status: job.status }, next: [`vf wait ${dir} ${job.id}`] };
+    return { project: slug, dir, job: { id: job.id, dir: job.dir, status: job.status }, next: [`vf wait ${slug} ${job.id}`] };
   }
-  return await work({ dir, slug, prompt, lang, aspect, images, maxRerolls });
+  try {
+    return await work({ dir, slug, prompt, lang, aspect, images, maxRerolls });
+  } catch (e) {
+    if (e instanceof VfError) {
+      e.details = { ...e.details, project: slug, resume: `vf ${command.map(shq).join(" ")}` };
+    }
+    throw e;
+  }
 }

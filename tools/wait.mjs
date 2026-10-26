@@ -1,10 +1,11 @@
 import { join } from "node:path";
 import { parse, VfError } from "./out.mjs";
+import { resolveProject } from "./paths.mjs";
 import { listJobIds, waitJob, jobRootOf } from "./jobs.mjs";
 
 export async function main(argv) {
   const { values, positionals } = parse(argv, { timeout: { type: "string" } });
-  const root = jobRootOf(positionals[0]);
+  const root = jobRootOf(resolveProject(positionals[0]));
   const ids = listJobIds(root);
   const id = positionals[1] ?? ids.at(-1);
   if (!id || !ids.includes(id)) throw new VfError("USAGE", `ไม่พบ job: ${id ?? "(ไม่มี job)"}`);

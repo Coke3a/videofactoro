@@ -96,10 +96,12 @@ export function validateBible(b) {
     }
     if (!GEMINI_VOICES.includes(c?.tts_voice)) issues.push(`tts_voice ของ ${c?.id} ไม่อยู่ในรายชื่อเสียง Gemini TTS: ${c?.tts_voice}`);
     risks(`look ของ ${c?.id}`, c?.look, issues);
+    risks(`name ของ ${c?.id}`, c?.name, issues);
   }
   for (const p of places) {
     checkId("สถานที่", p?.id);
     for (const k of ["name", "desc"]) if (!nonEmpty(p?.[k])) issues.push(`${k} ของ ${p?.id} ต้องไม่ว่าง`);
+    risks(`desc ของ ${p?.id}`, p?.desc, issues);
   }
   risks("title", b.title, issues);
   risks("style_prompt", b.style_prompt, issues);

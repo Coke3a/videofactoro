@@ -1,5 +1,6 @@
 import { existsSync, statSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { VfError } from "./out.mjs";
 
@@ -15,15 +16,16 @@ const isDir = (p) => {
   }
 };
 
+export const NAME_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const isProject = (p) => isDir(p) && (existsSync(join(p, ".vf")) || existsSync(join(p, "PROJECT.md")));
+
 export function resolveProject(nameOrPath) {
-  if (!nameOrPath) throw new VfError("USAGE", "ต้องระบุ <project>");
-  const direct = resolve(nameOrPath);
-  const hasSep = isAbsolute(nameOrPath) || /[\\/]/.test(nameOrPath);
-  if (hasSep && isDir(direct)) return direct;
-  const byName = join(projectsRoot(), nameOrPath);
-  if (existsSync(byName) && isDir(byName)) return byName;
-  if (isDir(direct) && existsSync(join(direct, "PROJECT.md"))) return direct;
-  throw new VfError("USAGE", `ไม่พบ project: ${nameOrPath}`);
+  if (!nameOrPath || typeof nameOrPath !== "string") throw new VfError("USAGE", "ต้องระบุ <project>");
+  const byPath = isAbsolute(nameOrPath) || /[\\/]/.test(nameOrPath);
+  if (!byPath && !NAME_RE.test(nameOrPath)) throw new VfError("USAGE", `ชื่อ project ไม่ถูกต้อง: ${nameOrPath}`);
+  const dir = byPath ? resolve(nameOrPath) : join(projectsRoot(), nameOrPath);
+  if (!isProject(dir)) throw new VfError("USAGE", `ไม่พบ project: ${nameOrPath}`);
+  return dir;
 }
 
 export function stamp(d = new Date()) {
@@ -32,12 +34,15 @@ export function stamp(d = new Date()) {
 }
 
 export function slugify(text) {
-  const s = String(text ?? "")
+  const raw = String(text ?? "");
+  const s = raw
     .normalize("NFKD")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 40)
     .replace(/-+$/g, "");
-  return s || `project-${stamp()}`;
+  if (s) return s;
+  if (raw.trim() === "") return `project-${stamp()}`;
+  return `project-${createHash("sha256").update(raw).digest("hex").slice(0, 8)}`;
 }

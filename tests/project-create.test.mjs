@@ -10,7 +10,9 @@ import { MODELS } from "../tools/models.mjs";
 import { libLoad } from "../tools/cache.mjs";
 import { readCosts } from "../tools/cost.mjs";
 import { waitJob } from "../tools/jobs.mjs";
-import { main, useUserImage } from "../tools/project-create.mjs";
+import { main as waitMain } from "../tools/wait.mjs";
+import { main as statusMain } from "../tools/status.mjs";
+import { main, useUserImage, buildCommand } from "../tools/project-create.mjs";
 import { goodBible } from "./fixtures/bible.mjs";
 
 process.env.VF_NO_DOTENV = "1";
@@ -122,8 +124,12 @@ test("รันซ้ำหลังพังที่ตัวละครท�
   const llmBefore = calls.filter((c) => c.body?.model === MODELS.llm[0]).length;
   assert.equal(catBefore, 3);
   assert.equal(llmBefore, 1);
+  const clefBefore = calls.filter((c) => c.url.includes("clef-omni")).length;
+  assert.equal(clefBefore, 3);
   failMatch = null;
   const r = await create();
+  const clefAfter = calls.filter((c) => c.url.includes("clef-omni")).length;
+  assert.equal(clefAfter - clefBefore, 3 + 1);
   assert.equal(imageCalls(CAT()).length, catBefore);
   assert.equal(calls.filter((c) => c.body?.model === MODELS.llm[0]).length, llmBefore);
   assert.equal(r.characters.length, 2);
@@ -143,12 +149,18 @@ test("ไม่มี --foreground คืน job ทันที", async () => {
   const r = await main(["--prompt", "cat and dog", "--name", "bg"]);
   try {
     assert.ok(r.job.id);
+    assert.deepEqual(r.next, [`vf wait bg ${r.job.id}`]);
     assert.equal(r.job.status, "running");
     assert.equal(r.project, "bg");
     assert.ok(fs.existsSync(path.join(root, "bg", ".vf")));
     assert.equal(calls.length, 0);
   } finally {
-    await waitJob(r.job.dir, 30, 100);
+    const done = await waitJob(r.job.dir, 30, 100);
+    assert.equal(done.status, "failed");
+    assert.equal(done.error.code, "CONFIG");
+    const viaSlug = await waitMain(["bg", r.job.id, "--timeout", "0"]);
+    assert.equal(viaSlug.status, "failed");
+    assert.equal((await statusMain(["bg"])).jobs[0].id, r.job.id);
   }
 });
 
@@ -165,7 +177,7 @@ test("--dry-run ไม่ยิง fetch เลย ไม่เขียนไ�
 
 test("prompt ไทยล้วนไม่ระบุ --name: slug เป็น project-<stamp>", async () => {
   const r = await main(["--prompt", "หมาแมวซน", "--foreground"]);
-  assert.match(r.project, /^project-\d{8}-\d{4}$/);
+  assert.match(r.project, /^project-[0-9a-f]{8}$/);
   assert.ok(fs.existsSync(path.join(root, r.project, "PROJECT.md")));
 });
 
@@ -201,4 +213,47 @@ test("--image รูปแบบผิด / ไฟล์ไม่มี → USAG
   await assert.rejects(create(["--image", "nopath"]), (e) => e.code === "USAGE");
   await assert.rejects(create(["--image", "cat=/no/such/file.png"]), (e) => e.code === "USAGE");
   await assert.rejects(main(["--foreground"]), (e) => e.code === "USAGE");
+});
+
+test("error จาก worker มี details.project และ details.resume", async () => {
+  failMatch = DOG;
+  await assert.rejects(create(), (e) => {
+    assert.equal(e.details.project, "demo");
+    assert.match(e.details.resume, /^vf project create /);
+    assert.ok(e.details.resume.includes("--name demo"));
+    assert.ok(e.details.resume.includes("--prompt"));
+    return true;
+  });
+});
+
+test("buildCommand ใส่ --prompt= และ --image= ใน argv เดียว (prompt ขึ้นต้นด้วย -)", async () => {
+  const cmd = buildCommand({ prompt: "--weird -x", slug: "s", lang: "en", aspect: "9:16", maxRerolls: 2, images: [{ name: "-cat", path: "/a b/c.png" }] });
+  assert.ok(cmd.includes("--prompt=--weird -x"));
+  assert.ok(cmd.includes("--image=-cat=/a b/c.png"));
+  assert.ok(cmd.includes("--name=s") || (cmd.includes("--name") && cmd.includes("s")));
+  const r = await main(["--prompt=-ขึ้นต้นด้วยขีด", "--name", "dash", "--foreground"]);
+  assert.equal(r.project, "dash");
+});
+
+test("resume ด้วย prompt/lang/aspect/images ที่ต่างไป → USAGE ระบุฟิลด์", async () => {
+  failMatch = DOG;
+  await assert.rejects(create(), (e) => e.code === "PROVIDER");
+  failMatch = null;
+  const n = calls.length;
+  const again = (args) => main(["--name", "demo", "--foreground", ...args]);
+  await assert.rejects(again(["--prompt", "อย่างอื่น"]), (e) => e.code === "USAGE" && e.message.includes("prompt") && e.message.includes("--name"));
+  await assert.rejects(again(["--prompt", "แมวกับหมาในครัว", "--lang", "th"]), (e) => e.code === "USAGE" && e.message.includes("lang"));
+  await assert.rejects(again(["--prompt", "แมวกับหมาในครัว", "--aspect", "16:9"]), (e) => e.code === "USAGE" && e.message.includes("aspect"));
+  await assert.rejects(again(["--prompt", "แมวกับหมาในครัว", "--image", `x=${TINY}`]), (e) => e.code === "USAGE" && e.message.includes("images"));
+  assert.equal(calls.length, n);
+  assert.equal((await again(["--prompt", "แมวกับหมาในครัว"])).characters.length, 2);
+});
+
+test("--image ซ้ำตัวเดียวกัน: ใช้ภาพแรก และมี warning", async () => {
+  const other = path.join(root, "other.png");
+  fs.copyFileSync(TINY, other);
+  const r = await create(["--image", `cat=${TINY}`, "--image", `CAT=${other}`]);
+  assert.ok(r.warnings.some((w) => w.includes("CAT")));
+  const e = libLoad(path.join(root, "demo")).entries.filter((x) => x.need === "user image");
+  assert.equal(e.length, 1);
 });
