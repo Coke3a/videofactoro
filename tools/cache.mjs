@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, mkdirSync, renameSync, existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { VfError, EXIT } from "./out.mjs";
+import { VfError } from "./out.mjs";
 import { writeJsonAtomic, readJson } from "./state.mjs";
 
 export const TH_WORDS = {
@@ -30,11 +30,11 @@ export function libFindByKey(lib, key) {
 
 export function libAdd(projectDir, entry, bytes, ext) {
   if (!/^[a-z0-9]{1,8}$/i.test(String(ext))) {
-    throw new VfError(EXIT.USAGE, `นามสกุลไฟล์ไม่ถูกต้อง: "${ext}"`);
+    throw new VfError("USAGE", `นามสกุลไฟล์ไม่ถูกต้อง: "${ext}"`);
   }
   const lib = libLoad(projectDir);
   if (lib.entries.some((e) => e.id === entry.id)) {
-    throw new VfError(EXIT.USAGE, `มี entry id "${entry.id}" ในคลังแล้ว`);
+    throw new VfError("USAGE", `มี entry id "${entry.id}" ในคลังแล้ว`);
   }
   const blob = `library/blobs/${sha(bytes).slice(0, 12)}.${ext}`;
   mkdirSync(join(projectDir, "library", "blobs"), { recursive: true });
@@ -58,7 +58,7 @@ export function libAdd(projectDir, entry, bytes, ext) {
 export function libUpdate(projectDir, id, patch) {
   const lib = libLoad(projectDir);
   const i = lib.entries.findIndex((e) => e.id === id);
-  if (i < 0) throw new VfError(EXIT.USAGE, `ไม่พบ entry id "${id}" ในคลัง`);
+  if (i < 0) throw new VfError("USAGE", `ไม่พบ entry id "${id}" ในคลัง`);
   const cur = lib.entries[i];
   lib.entries[i] = { ...cur, ...patch, id: cur.id, blob: cur.blob, created_at: cur.created_at };
   writeJsonAtomic(indexFile(projectDir), lib);

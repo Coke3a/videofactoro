@@ -40,12 +40,12 @@ test("libAdd แล้ว libFindByKey เจอ และไฟล์ blob ม�
     assert.ok(existsSync(join(d, e.blob)));
     assert.ok(e.created_at);
     assert.equal(libFindByKey(libLoad(d), "abc").id, "cat-1");
-    assert.throws(() => libAdd(d, { ...base, id: "cat-1", key: "z" }, Buffer.from("q"), "png"), { code: 2 });
+    assert.throws(() => libAdd(d, { ...base, id: "cat-1", key: "z" }, Buffer.from("q"), "png"), { code: "USAGE" });
     const u = libUpdate(d, "cat-1", { status: "selected", id: "hack" });
     assert.equal(u.status, "selected");
     assert.equal(u.id, "cat-1");
     assert.equal(libLoad(d).entries[0].status, "selected");
-    assert.throws(() => libUpdate(d, "nope", {}), { code: 2 });
+    assert.throws(() => libUpdate(d, "nope", {}), { code: "USAGE" });
   } finally { rmSync(d, { recursive: true, force: true }); }
 });
 
@@ -94,7 +94,7 @@ test("writeJsonAtomic ไม่ทิ้งไฟล์ .tmp และสร้�
 test("libAdd ปฏิเสธ ext ที่ไม่ปลอดภัย", () => {
   const d = tmp();
   try {
-    assert.throws(() => libAdd(d, { ...base, id: "e" }, Buffer.from("x"), "../../esc"), { code: 2 });
+    assert.throws(() => libAdd(d, { ...base, id: "e" }, Buffer.from("x"), "../../esc"), { code: "USAGE" });
     assert.deepEqual(libLoad(d), { entries: [] });
   } finally { rmSync(d, { recursive: true, force: true }); }
 });
@@ -106,4 +106,13 @@ test("libSearch: constructor ไม่ throw, [''] ได้ [], tag_p ไม่
   assert.deepEqual(libSearch(lib, ["  "], {}), []);
   assert.equal(libSearch(lib, [" jump "], {})[0].score, 4.5);
   assert.deepEqual(libSearch(lib, ["abc"], {}), []);
+});
+
+test("libAdd id ซ้ำ และ libUpdate id ที่ไม่มี ได้ code USAGE (ไม่ใช่ตัวเลข)", () => {
+  const d = tmp();
+  try {
+    libAdd(d, { ...base, id: "dup" }, Buffer.from("a"), "png");
+    assert.throws(() => libAdd(d, { ...base, id: "dup" }, Buffer.from("b"), "png"), (e) => e.code === "USAGE" && /dup/.test(e.message));
+    assert.throws(() => libUpdate(d, "nope", {}), { code: "USAGE" });
+  } finally { rmSync(d, { recursive: true, force: true }); }
 });
