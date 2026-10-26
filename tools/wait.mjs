@@ -1,14 +1,6 @@
-import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { parse, VfError } from "./out.mjs";
-import { listJobIds, waitJob } from "./jobs.mjs";
-
-export function jobRootOf(project) {
-  if (!project) throw new VfError("USAGE", "ต้องระบุ <project>");
-  const root = join(project, ".jobs");
-  if (!existsSync(root)) throw new VfError("USAGE", `ไม่พบโฟลเดอร์ .jobs ใน: ${project}`);
-  return root;
-}
+import { listJobIds, waitJob, jobRootOf } from "./jobs.mjs";
 
 export async function main(argv) {
   const { values, positionals } = parse(argv, { timeout: { type: "string" } });

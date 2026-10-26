@@ -1,7 +1,6 @@
 import { join } from "node:path";
 import { parse } from "./out.mjs";
-import { listJobIds, jobStatus } from "./jobs.mjs";
-import { jobRootOf } from "./wait.mjs";
+import { listJobIds, jobStatus, jobRootOf } from "./jobs.mjs";
 
 export async function main(argv) {
   const { positionals } = parse(argv, {});

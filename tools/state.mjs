@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync, renameSync, mkdirSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { redact } from "./out.mjs";
 
 export function writeJsonAtomic(file, obj) {
   mkdirSync(dirname(file), { recursive: true });
@@ -41,13 +42,13 @@ export async function step(state, id, fn) {
   const cur = state.get(id);
   if (cur?.status === "done") return cur.output;
   const attempts = (cur?.attempts ?? 0) + 1;
-  state.set(id, { status: "running", attempts });
+  state.set(id, { status: "running", attempts, error: undefined });
   try {
     const output = await fn();
     state.set(id, { status: "done", output, error: undefined });
     return output;
   } catch (e) {
-    state.set(id, { status: "failed", error: String(e?.message ?? e) });
+    state.set(id, { status: "failed", error: redact(e?.message ?? e) });
     throw e;
   }
 }

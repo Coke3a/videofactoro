@@ -21,9 +21,12 @@ function takeJobDir(argv) {
   const out = [];
   let jobDir;
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === "--job-dir") jobDir = argv[++i];
+    if (argv[i] === "--job-dir") jobDir = argv[++i] ?? "";
     else if (argv[i].startsWith("--job-dir=")) jobDir = argv[i].slice(10);
     else out.push(argv[i]);
+  }
+  if (jobDir !== undefined && (jobDir === "" || jobDir.startsWith("--"))) {
+    return { argv: out, jobDir: undefined, bad: true };
   }
   return { argv: out, jobDir };
 }
@@ -47,22 +50,28 @@ async function run(argv) {
   return await mod.main(rest);
 }
 
-const { argv: args, jobDir } = takeJobDir(process.argv.slice(2));
+const { argv: args, jobDir, bad } = takeJobDir(process.argv.slice(2));
+const safeFinish = (outcome) => {
+  if (!jobDir) return;
+  try {
+    finishJob(jobDir, outcome);
+  } catch {}
+};
 let result;
-let failure;
-try {
-  result = await run(args);
-} catch (e) {
-  failure = e;
+let failure = bad ? new VfError("USAGE", "--job-dir ต้องมีค่าเป็นโฟลเดอร์") : undefined;
+if (!failure) {
+  try {
+    result = await run(args);
+  } catch (e) {
+    failure = e;
+  }
 }
 if (!failure) {
+  safeFinish({ result });
   emit(result);
-  if (jobDir) finishJob(jobDir, { result });
 } else {
-  if (jobDir) {
-    const v = failure instanceof VfError ? failure : new VfError("INTERNAL", failure?.message ?? String(failure));
-    const code = v.code in EXIT ? v.code : "INTERNAL";
-    finishJob(jobDir, { error: { code, message: v.message, details: v.details } });
-  }
+  const v = failure instanceof VfError ? failure : new VfError("INTERNAL", failure?.message ?? String(failure));
+  const code = v.code in EXIT ? v.code : "INTERNAL";
+  safeFinish({ error: { code, message: v.message, details: v.details } });
   fail(failure);
 }
