@@ -137,6 +137,7 @@ export async function llmJson({ system, user, schema, validate, images, maxToken
       logCost(costDir, { ...costRow(meta, model), outcome: issues.length ? "invalid" : "ok", units, usd });
       if (!issues.length) return { data: parsed.value, model, usage };
       allIssues.push(...issues.map((i) => `${model} รอบ ${round}: ${i}`));
+      log(`LLM ${model} รอบ ${round} ไม่ผ่าน: ${issues.join(" | ").slice(0, 500)}`);
       messages.push({ role: "assistant", content: text || "(ว่าง)" }, { role: "user", content: feedback(issues) });
     }
   }
