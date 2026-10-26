@@ -14,8 +14,8 @@ import { libAdd, libLoad, libUpdate } from "./cache.mjs";
 import { logCost, costRow } from "./cost.mjs";
 import { estimate } from "./pricing.mjs";
 import { MODELS } from "./models.mjs";
-import { pinInput, pinRun, costSince, runEntity } from "./entities.mjs";
-import { BIBLE_SCHEMA, validateBible, bibleSystemPrompt, writeProjectFiles } from "./bible.mjs";
+import { pinInput, pinRun, costSince, runEntity, designCharacter, qaUserImage } from "./entities.mjs";
+import { BIBLE_SCHEMA, validateBible, validateCharacter, bibleSystemPrompt, writeProjectFiles } from "./bible.mjs";
 
 const execFileP = promisify(execFile);
 const ASPECTS = ["9:16", "16:9", "1:1"];
@@ -121,11 +121,13 @@ function dryRun(images) {
   const places = 2;
   const gen = Math.max(0, chars - images.length);
   const refImgs = gen * CANDIDATES;
+  const qaN = refImgs + places + images.length;
   const rows = [
     { step: "bible", model: MODELS.llm[0], count: 1, usd: estimate(MODELS.llm[0], { tokensIn: 3000, tokensOut: 4000 }) },
+    ...(images.length ? [{ step: "look", model: MODELS.llm[0], count: images.length, usd: estimate(MODELS.llm[0], { tokensIn: 1500 * images.length, tokensOut: 600 * images.length }) }] : []),
     { step: "character-ref", model: MODELS.image, count: refImgs, usd: estimate(MODELS.image, { images: refImgs, mp: 1 }) },
     { step: "place-plate", model: MODELS.image, count: places, usd: estimate(MODELS.image, { images: places, mp: 1 }) },
-    { step: "qa", model: MODELS.qa, count: refImgs + places, usd: estimate(MODELS.qa, { tokensIn: 1500 * (refImgs + places), tokensOut: 0 }) },
+    { step: "qa", model: MODELS.qa, count: qaN, usd: estimate(MODELS.qa, { tokensIn: 1500 * qaN, tokensOut: 0 }) },
   ];
   const estimated_usd = rows.reduce((s, r) => s + (r.usd ?? 0), 0);
   return {
@@ -138,6 +140,7 @@ function dryRun(images) {
       `ภาพตัวละคร ${CANDIDATES} แบบต่อตัว (ไม่นับตัวที่ใช้ --image: ${images.length} ตัว)`,
       "ภาพฉาก 1 ครั้งต่อสถานที่ (ไม่มี reroll)",
       "QA ใช้ 1500 tokens ต่อภาพ ที่ 1 MP",
+      ...(images.length ? ["ภาพของผู้ใช้: LLM เขียน look จากภาพ 1 ครั้งต่อภาพ (1500 tokens เข้า / 600 ออก) + QA 1 ครั้ง"] : []),
     ],
   };
 }
@@ -197,6 +200,18 @@ export async function makePlate(dir, slug, bible, p, aspect, maxRerolls, costDir
   return { plate: rel, ...(res.passed ? {} : { warning: NO_PASS_WARNING }) };
 }
 
+function lookMessage(bible, c) {
+  return [
+    "[story bible]",
+    `ชื่อเรื่อง: ${bible.title}`,
+    `โลก: ${bible.world}`,
+    `style_prompt: ${bible.style_prompt}`,
+    "",
+    "ตัวละครนี้ (คง id, name, role, personality, voice และ tts_voice เดิม เขียน look ใหม่จากภาพเท่านั้น):",
+    JSON.stringify({ ...c, look: undefined }),
+  ].join("\n");
+}
+
 function matchImages(bible, images) {
   const byChar = {};
   const warnings = [];
@@ -216,7 +231,7 @@ async function work({ dir, slug, prompt, lang, aspect, images, maxRerolls, run: 
   const run = pinRun(state, fresh);
   const required = images.map((i) => i.name);
 
-  const bible = await step(state, "bible", async () => {
+  let bible = await step(state, "bible", async () => {
     log("ขั้น bible");
     const user = [
       prompt,
@@ -232,13 +247,44 @@ async function work({ dir, slug, prompt, lang, aspect, images, maxRerolls, run: 
   });
 
   const { byChar, warnings } = matchImages(bible, images);
+  // spec §6.1: ตัวละครที่มีภาพของผู้ใช้ → LLM vision เขียน look จากภาพ แทน look เดิมใน bible (เก็บกลับลง state)
+  for (const c of bible.characters) {
+    if (!byChar[c.id]) continue;
+    const { look } = await step(state, `look:${c.id}`, async () => {
+      log(`ขั้น look:${c.id}`);
+      const data = await designCharacter({
+        lang,
+        user: lookMessage(bible, c),
+        images: [byChar[c.id]],
+        validate: (x) => validateCharacter({ ...c, look: x?.look }),
+        meta: { project: slug, step: "look", item: c.id, run },
+        costDir,
+      });
+      return { look: data.look };
+    });
+    bible = { ...bible, characters: bible.characters.map((x) => (x.id === c.id ? { ...x, look } : x)) };
+  }
+  if (Object.keys(byChar).length) state.set("bible", { output: bible });
+
   const chars = [];
   for (const c of bible.characters) {
+    if (byChar[c.id]) {
+      const { ref, entryId } = await step(state, `ref:${c.id}`, async () => {
+        log(`ขั้น ref:${c.id}`);
+        const u = await useUserImage(dir, c.id, byChar[c.id]);
+        return { ref: u.ref, entryId: u.entry.id };
+      });
+      const { warning } = await step(state, `qa:${c.id}`, async () => {
+        log(`ขั้น qa:${c.id}`);
+        return await qaUserImage(dir, ref, { style: bible.style_prompt, entryId, meta: { project: slug, step: "qa", item: c.id, run }, costDir });
+      });
+      chars.push({ id: c.id, ref, ...(warning ? { warning } : {}) });
+      continue;
+    }
     chars.push({
       id: c.id,
       ...(await step(state, `ref:${c.id}`, async () => {
         log(`ขั้น ref:${c.id}`);
-        if (byChar[c.id]) return { ref: (await useUserImage(dir, c.id, byChar[c.id])).ref };
         return await makeRef(dir, slug, bible, c, costDir, { run });
       })),
     });

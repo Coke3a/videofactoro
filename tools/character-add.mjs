@@ -2,17 +2,12 @@ import { existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { parse, VfError, log } from "./out.mjs";
 import { resolveProject, stamp } from "./paths.mjs";
-import { llmJson } from "./llm.mjs";
-import { pickBest, toQaImage } from "./qa.mjs";
-import { RULES } from "./qa-rules.mjs";
 import { openState, step } from "./state.mjs";
-import {
-  CHARACTER_SCHEMA, validateCharacter, characterAddSystemPrompt, lookFromImageSystemPrompt, addCharacterFiles, ID_RE,
-} from "./bible.mjs";
+import { validateCharacter, addCharacterFiles, ID_RE } from "./bible.mjs";
 import { useUserImage, toPng, makeRef, sha, CANDIDATES } from "./project-create.mjs";
 import {
   pinInput, pinRun, costSince, pickArchiveName, commitStagedRefs, clearStaged, stagedName, contextMessage, loadProject, parseImagePaths,
-  planRows, llmRow, imageRow, qaRow, runEntity,
+  planRows, llmRow, imageRow, qaRow, runEntity, designCharacter, qaUserImage,
 } from "./entities.mjs";
 
 const OPTIONS = {
@@ -41,17 +36,6 @@ function dryRun(images) {
   };
 }
 
-async function qaUserImage(dir, ref, char, style, meta, costDir) {
-  try {
-    const { ranked } = await pickBest([{ file: join(dir, ref) }], RULES.characterFromImage, { look: char.look, style }, { meta, costDir });
-    const v = ranked[0].verdict;
-    return v.pass ? {} : { warning: `ภาพของผู้ใช้ไม่ผ่านเกณฑ์ QA: ${v.reasons.join(", ")} — ยังใช้ภาพนี้` };
-  } catch (e) {
-    if (e instanceof VfError && ["PROVIDER", "INTERNAL"].includes(e.code)) return { warning: `QA ภาพของผู้ใช้ทำไม่สำเร็จ: ${e.message}` };
-    throw e;
-  }
-}
-
 async function work({ dir, ctx, state, key, prompt, images, id, replace, run: fresh }) {
   const { pj, slug, lang, characters, places } = ctx;
   const run = pinRun(state, fresh);
@@ -61,14 +45,12 @@ async function work({ dir, ctx, state, key, prompt, images, id, replace, run: fr
 
   const char = await step(state, "design", async () => {
     log("ขั้น design");
-    const pics = await Promise.all(images.map((p) => toQaImage(p)));
     const notes = images.length ? [`ภาพที่แนบมา ${images.length} ภาพ เป็นภาพของตัวละครนี้ (ภาพแรกคือภาพหลัก)`] : [];
-    const { data } = await llmJson({
-      system: images.length ? lookFromImageSystemPrompt(lang) : characterAddSystemPrompt(lang),
+    const data = await designCharacter({
+      lang,
       user: contextMessage({ dir, characters, places, prompt, id, notes }),
-      schema: CHARACTER_SCHEMA,
+      images,
       validate: (c) => validateCharacter(id && c && typeof c === "object" ? { ...c, id } : c, taken),
-      images: pics.length ? pics : undefined,
       meta: { project: slug, step: "character", item: id ?? null, run },
       costDir,
     });
@@ -99,7 +81,7 @@ async function work({ dir, ctx, state, key, prompt, images, id, replace, run: fr
     extras = made.extras;
     ({ warning } = await step(state, "qa", async () => {
       log("ขั้น qa");
-      return await qaUserImage(dir, stagedMain, char, pj.style_prompt, { project: slug, step: "qa", item: cid, run }, costDir);
+      return await qaUserImage(dir, stagedMain, { style: pj.style_prompt, entryId: made.entryId, meta: { project: slug, step: "qa", item: cid, run }, costDir });
     }));
   } else {
     made = await step(state, `ref:${cid}`, async () => {

@@ -20,7 +20,8 @@ const TINY = fileURLToPath(new URL("./fixtures/tiny.png", import.meta.url));
 const B64 = fs.readFileSync(TINY).toString("base64");
 const ENV_KEYS = ["CLOUDFLARE_AI_ACCOUNT_ID", "CLOUDFLARE_AI_API_TOKEN", "VF_PROJECTS"];
 
-let root, saved, calls, origWrite, failMatch, bible, fitsSeq;
+let root, saved, calls, origWrite, failMatch, bible, fitsSeq, qaBad;
+const IMG_LOOK = "A chubby grey cat drawn from the user's photo, with a white blaze on the nose, stubby legs, a fluffy striped tail and round amber eyes; always the same proportions.";
 const reply = (result) => ({ ok: true, status: 200, text: async () => JSON.stringify({ success: true, result }) });
 const imageCalls = (m) => calls.filter((c) => c.body?.model === MODELS.image && (!m || c.body.input.prompt.includes(m)));
 const CAT = () => bible.characters[0].look;
@@ -33,7 +34,7 @@ function install() {
     calls.push({ url: String(url), body });
     if (String(url).includes("clef-omni")) {
       const answers = Object.fromEntries(
-        Object.keys(body.questions).map((k) => [k, { noul: k === "has_text" || k === "has_people_or_animals" ? 0 : k === "fits" && fitsSeq.length ? fitsSeq.shift() : 0.9 }]),
+        Object.keys(body.questions).map((k) => [k, { noul: k === "has_text" || k === "has_people_or_animals" ? 0 : k === "fits" && fitsSeq.length ? fitsSeq.shift() : k === "single_character" && qaBad ? 0.1 : 0.9 }]),
       );
       return reply({ answers, usage: { prompt_tokens: 1500 } });
     }
@@ -42,8 +43,10 @@ function install() {
       return reply({ image: B64 });
     }
     if (body?.model === MODELS.llm[0]) {
+      const fromImage = body.input.systemInstruction.parts[0].text.includes("ผู้ใช้ให้ภาพของตัวละครนั้นมาแล้ว");
+      const data = fromImage ? { ...bible.characters[0], id: "whatever", look: IMG_LOOK } : bible;
       return reply({
-        candidates: [{ content: { parts: [{ text: JSON.stringify(bible) }] } }],
+        candidates: [{ content: { parts: [{ text: JSON.stringify(data) }] } }],
         usageMetadata: { promptTokenCount: 800, candidatesTokenCount: 1200 },
       });
     }
@@ -59,6 +62,7 @@ beforeEach(() => {
   bible = goodBible();
   failMatch = null;
   fitsSeq = [];
+  qaBad = false;
   install();
   origWrite = process.stderr.write;
   process.stderr.write = () => true;
@@ -182,15 +186,22 @@ test("prompt ไทยล้วนไม่ระบุ --name: slug เป็�
   assert.ok(fs.existsSync(path.join(root, r.project, "PROJECT.md")));
 });
 
-test("--image: ตัวที่ชื่อตรงข้ามการสร้าง ใช้ภาพผู้ใช้ ส่วนที่ไม่ตรงได้ warning", async () => {
+test("--image: ตัวที่ชื่อตรงข้ามการสร้าง ใช้ภาพผู้ใช้ LLM เขียน look จากภาพ แล้ว QA ส่วนที่ไม่ตรงได้ warning", async () => {
   const jpg = path.join(root, "user.jpg");
   execFileSync("ffmpeg", ["-loglevel", "error", "-y", "-i", TINY, jpg]);
   const r = await create(["--image", `CAT=${jpg}`, "--image", `ghost=${TINY}`]);
-  const sys = JSON.stringify(calls.find((c) => c.body?.model === MODELS.llm[0]).body);
+  const llm = calls.filter((c) => c.body?.model === MODELS.llm[0]);
+  const sys = JSON.stringify(llm[0].body);
   assert.ok(sys.includes("CAT") && sys.includes("ghost"));
+  assert.equal(llm.length, 2);
+  const lookCall = llm[1].body.input;
+  assert.ok(lookCall.systemInstruction.parts[0].text.includes("ผู้ใช้ให้ภาพของตัวละครนั้นมาแล้ว"));
+  assert.equal(lookCall.contents[0].parts.filter((p) => p.inlineData?.mimeType === "image/jpeg").length, 1);
   assert.equal(imageCalls(CAT()).length, 0);
+  assert.equal(imageCalls(IMG_LOOK).length, 0);
   assert.equal(imageCalls(DOG()).length, 3);
   assert.equal(r.characters[0].ref, "characters/cat/ref/main.png");
+  assert.equal(r.characters[0].warning, undefined);
   assert.ok(r.warnings.some((w) => w.includes("ghost")));
   const png = fs.readFileSync(path.join(root, "demo/characters/cat/ref/main.png"));
   assert.equal(png.readUInt32BE(0), 0x89504e47);
@@ -198,6 +209,42 @@ test("--image: ตัวที่ชื่อตรงข้ามการส�
   assert.equal(e.kind, "character-ref");
   assert.equal(e.status, "selected");
   assert.equal(e.need, "user image");
+  assert.equal(e.qa.pass, true);
+  const cj = JSON.parse(fs.readFileSync(path.join(root, "demo/characters/cat/character.json"), "utf8"));
+  assert.equal(cj.look, IMG_LOOK);
+  assert.equal(cj.id, "cat");
+  assert.ok(fs.readFileSync(path.join(root, "demo/characters/cat/CHARACTER.md"), "utf8").includes(IMG_LOOK));
+  const state = JSON.parse(fs.readFileSync(path.join(root, "demo/.vf/create-state.json"), "utf8"));
+  assert.equal(state.bible.output.characters[0].look, IMG_LOOK);
+  const fromImageQa = calls.filter((c) => c.url.includes("clef-omni") && !("matches_look" in c.body.questions) && "single_character" in c.body.questions);
+  assert.equal(fromImageQa.length, 1);
+  const rows = readCosts(path.join(root, "demo/.vf"));
+  assert.ok(rows.some((x) => x.step === "look" && x.item === "cat"));
+  assert.ok(rows.some((x) => x.step === "qa" && x.item === "cat"));
+});
+
+test("--image: QA ภาพผู้ใช้ไม่ผ่าน = warning ของตัวละคร ไม่ใช่ error", async () => {
+  qaBad = true;
+  const r = await create(["--image", `cat=${TINY}`]);
+  assert.match(r.characters.find((c) => c.id === "cat").warning, /ไม่ผ่านเกณฑ์ QA/);
+});
+
+test("--image: look จากภาพที่สั้นเกิน/มีคำเสี่ยง ไม่ผ่าน validator → PROVIDER, ไม่ไปขั้น ref", async () => {
+  cf.setFetch(async (url, init = {}) => {
+    const body = init.body ? JSON.parse(init.body) : null;
+    calls.push({ url: String(url), body });
+    const fromImage = body?.input?.systemInstruction?.parts[0].text.includes("ผู้ใช้ให้ภาพของตัวละครนั้นมาแล้ว");
+    const data = fromImage ? { ...bible.characters[0], look: "short" } : bible;
+    if (body?.model?.startsWith("google/") || body?.model?.startsWith("anthropic/")) {
+      const text = JSON.stringify(data);
+      return reply(body.model.startsWith("google/")
+        ? { candidates: [{ content: { parts: [{ text }] } }], usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1 } }
+        : { content: [{ type: "text", text }], usage: { input_tokens: 1, output_tokens: 1 } });
+    }
+    throw new Error("unexpected fetch");
+  });
+  await assert.rejects(create(["--image", `cat=${TINY}`]), (e) => e.code === "PROVIDER" && JSON.stringify(e.details.issues).includes("look"));
+  assert.equal(imageCalls().length, 0);
 });
 
 test("useUserImage คัดลอก PNG ตรงๆ และเรียกซ้ำไม่เพิ่ม entry", async () => {
@@ -327,4 +374,19 @@ test("I4: ภาพฉากที่ QA ไม่ผ่าน → แถว qa_
   assert.equal(bad.qa.answers.fits.noul, 0.1);
   assert.equal(plates.find((e) => e.qa.pass).status, "selected");
   assert.ok(fs.readFileSync(path.join(root, "demo", "PROJECT.md"), "utf8").includes("2 (reroll 1)"));
+});
+
+test("--dry-run กับ --image: วางแผนขั้น look และ QA ภาพผู้ใช้", async () => {
+  const r = await main(["--prompt", "cat and dog", "--image", `cat=${TINY}`, "--dry-run"]);
+  assert.equal(r.planned.find((p) => p.step === "look").count, 1);
+  assert.equal(r.planned.find((p) => p.step === "qa").count, 6 + 2 + 1);
+  assert.equal(calls.length, 0);
+});
+
+test("I3: foreground ที่ลงทะเบียน job เขียน heartbeat ใน job dir", async () => {
+  await create();
+  const jobs = path.join(root, "demo", ".jobs");
+  const ids = fs.readdirSync(jobs).filter((n) => fs.existsSync(path.join(jobs, n, "job.json")));
+  assert.equal(ids.length, 1);
+  assert.ok(fs.existsSync(path.join(jobs, ids[0], "heartbeat")));
 });

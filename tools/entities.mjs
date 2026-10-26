@@ -8,6 +8,10 @@ import { estimate } from "./pricing.mjs";
 import { MODELS } from "./models.mjs";
 import { readCosts, summarize } from "./cost.mjs";
 import { libLoad, libUpdate } from "./cache.mjs";
+import { llmJson } from "./llm.mjs";
+import { pickBest, toQaImage, saveVerdicts } from "./qa.mjs";
+import { RULES } from "./qa-rules.mjs";
+import { CHARACTER_SCHEMA, characterAddSystemPrompt, lookFromImageSystemPrompt } from "./bible.mjs";
 
 
 // บันทึก input ครั้งแรกไว้ใน state แล้วเทียบกับครั้งต่อไป; ต่างกัน → USAGE ระบุฟิลด์
@@ -74,6 +78,34 @@ export function commitStagedRefs(projectDir, charId, { entryId, archiveName, dem
     }
   }
   libUpdate(projectDir, entryId, { status: "selected" });
+}
+
+// ออกแบบตัวละครด้วย LLM; มีภาพ → LLM vision เขียน look จากภาพ (ใช้ทั้ง character add และ project create --image)
+export async function designCharacter({ lang, user, images = [], validate, meta, costDir }) {
+  const pics = await Promise.all(images.map((p) => toQaImage(p)));
+  const { data } = await llmJson({
+    system: images.length ? lookFromImageSystemPrompt(lang) : characterAddSystemPrompt(lang),
+    user,
+    schema: CHARACTER_SCHEMA,
+    validate,
+    images: pics.length ? pics : undefined,
+    meta,
+    costDir,
+  });
+  return data;
+}
+
+// QA ภาพของผู้ใช้ (ตัวเดียว ไม่มีตัวอักษร): ไม่ผ่านหรือ QA ล้ม = warning ไม่ใช่ error · เก็บผลลงคลังถ้ารู้ entry
+export async function qaUserImage(dir, ref, { style, entryId, meta, costDir }) {
+  try {
+    const { ranked } = await pickBest([{ file: join(dir, ref), entry: entryId ? { id: entryId } : undefined }], RULES.characterFromImage, { style }, { meta, costDir });
+    saveVerdicts(dir, ranked);
+    const v = ranked[0].verdict;
+    return v.pass ? {} : { warning: `ภาพของผู้ใช้ไม่ผ่านเกณฑ์ QA: ${v.reasons.join(", ")} — ยังใช้ภาพนี้` };
+  } catch (e) {
+    if (e instanceof VfError && ["PROVIDER", "INTERNAL"].includes(e.code)) return { warning: `QA ภาพของผู้ใช้ทำไม่สำเร็จ: ${e.message}` };
+    throw e;
+  }
 }
 
 export function readProjectMd(dir) {
