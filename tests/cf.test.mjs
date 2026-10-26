@@ -178,3 +178,41 @@ test("download base64 และ url", async () => {
     assert.equal(fs.readFileSync(b, "utf8"), "data");
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("onRequestId ถูกเรียกแบบ sync ทันทีที่รู้ id ก่อน poll ครั้งแรก", async () => {
+  const seen = [];
+  fake(reply(fx("cf-queued.json")), () => { seen.push(`poll:${calls.length}`); return reply(fx("cf-completed.json")); });
+  const { result } = await cf.run("black-forest-labs/flux-3-video", {}, { onRequestId: (id) => seen.push(`id:${id}:${calls.length}`) });
+  assert.deepEqual(seen, ["id:req-1:1", "poll:2"]);
+  assert.equal(result.video, "https://cdn.example/v.mp4");
+});
+
+test("resumeRequestId ข้าม POST แล้ว poll id เดิมตรงๆ ผ่าน result handling เดียวกัน", async () => {
+  fake(reply('{"success":true,"result":{"state":"Running"}}'), reply(fx("cf-completed.json")));
+  const ids = [];
+  const { result } = await cf.run("black-forest-labs/flux-3-video", { prompt: "x" }, { resumeRequestId: "req-9", onRequestId: (id) => ids.push(id) });
+  assert.ok(calls.every((c) => c.init.method === "GET"));
+  assert.ok(calls[0].url.endsWith("/ai/requests/req-9"));
+  assert.equal(result.video, "https://cdn.example/v.mp4");
+  assert.deepEqual(ids, []);
+  fake(reply('{"success":true,"result":{"state":"Failed","error":"x"}}'));
+  await assert.rejects(cf.run("black-forest-labs/flux-3-video", {}, { resumeRequestId: "req-9" }), (e) => e instanceof VfError && e.details.request_id === "req-9");
+});
+
+test("queued แต่ไม่มี id → VfError PROVIDER NO_REQUEST_ID และ withRetry ไม่ส่งงานซ้ำ", async () => {
+  fake(reply('{"success":true,"result":{"state":"Queued"}}'));
+  await assert.rejects(cf.withRetry(() => cf.run("black-forest-labs/flux-3-video", {})), (e) => {
+    assert.ok(e instanceof VfError);
+    assert.equal(e.code, "PROVIDER");
+    assert.equal(e.details.kind, "NO_REQUEST_ID");
+    return true;
+  });
+  assert.equal(calls.length, 1);
+});
+
+test("onRequestId throw → VfError มี request_id (ไม่ใช่ Error ธรรมดาที่ withRetry จะส่งซ้ำ)", async () => {
+  fake(reply(fx("cf-queued.json")));
+  await assert.rejects(cf.withRetry(() => cf.run("a/b", {}, { onRequestId: () => { throw new Error("disk full"); } })),
+    (e) => e instanceof VfError && e.details.request_id === "req-1");
+  assert.equal(calls.length, 1);
+});

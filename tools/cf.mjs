@@ -96,8 +96,19 @@ function checkState(result, status, raw) {
   if (s && s !== "completed" && s !== "queued" && s !== "running") throw providerError(status, raw);
 }
 
+// opts.onRequestId(id): เรียกแบบ sync ทันทีที่ได้ request id (queued/running) ก่อน poll — ให้ผู้เรียกบันทึก id ลง state (spec §7.2, §9.1)
+// opts.resumeRequestId: ไม่ POST ใหม่ แต่ poll id ที่บันทึกไว้ต่อ (process ตายระหว่างรอผล → รันซ้ำไม่จ่ายซ้ำ)
 export async function run(model, input, opts = {}) {
   const env = requireEnv(["CLOUDFLARE_AI_ACCOUNT_ID", "CLOUDFLARE_AI_API_TOKEN"]);
+  const t0 = Date.now();
+  const poll = async (id) => {
+    try {
+      return await pollRequest(id, { timeoutMs: opts.pollTimeoutMs, meta: opts.meta });
+    } catch (err) {
+      throw tagPollError(err, id);
+    }
+  };
+  if (opts.resumeRequestId) return { result: await poll(opts.resumeRequestId), ms: Date.now() - t0 };
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const base = `${BASE}/${env.CLOUDFLARE_AI_ACCOUNT_ID}/ai/run`;
   const hosted = isCfHosted(model);
@@ -110,18 +121,19 @@ export async function run(model, input, opts = {}) {
     h["Content-Type"] = "application/json";
     body = JSON.stringify(hosted ? input : { model, input });
   }
-  const t0 = Date.now();
   let { result, raw, status } = await call(url, { method: "POST", headers: h, body }, timeoutMs);
   checkState(result, status, raw);
   const s = stateOf(result);
   if ((s === "queued" || s === "running") && !hasMedia(result)) {
     const id = idOf(result);
-    if (!id) throw providerError(status, raw);
+    // งานถูกรับแล้วแต่ไม่มี id ให้ตาม: ห้ามส่งซ้ำ (อาจจ่ายเงินไปแล้ว)
+    if (!id) throw new VfError("PROVIDER", `Cloudflare รับงานแล้วแต่ไม่คืน request id: ${scrub(raw)}`, { kind: "NO_REQUEST_ID" });
     try {
-      result = await pollRequest(id, { timeoutMs: opts.pollTimeoutMs, meta: opts.meta });
+      opts.onRequestId?.(id);
     } catch (err) {
-      throw tagPollError(err, id);
+      throw new VfError("INTERNAL", `บันทึก request id ไม่สำเร็จ: ${scrub(err?.message)}`, { request_id: id });
     }
+    result = await poll(id);
   } else if (s && s !== "completed") {
     throw providerError(status, raw);
   }
