@@ -11,7 +11,7 @@ import { localChecks, assertCore, attempt, cfTokenCheck } from "./doctor.mjs";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-const creditsCheck = () =>
+const creditsCheck = (costDir) =>
   attempt("cf:credits", async () => {
     const { model } = await llmJson({
       system: "Reply with JSON only.",
@@ -19,7 +19,7 @@ const creditsCheck = () =>
       schema: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
       maxTokens: 16,
       meta: { step: "setup" },
-      costDir: join(REPO_ROOT, ".vf-setup"),
+      costDir,
     });
     return `LLM ตอบได้ (${model})`;
   });
@@ -53,7 +53,7 @@ const presignCheck = () =>
     }
   });
 
-export async function main(argv) {
+export async function main(argv, { costDir = join(REPO_ROOT, ".vf-setup") } = {}) {
   parse(argv, {});
   const checks = localChecks();
   assertCore(checks);
@@ -61,6 +61,6 @@ export async function main(argv) {
   const bucket = await bucketCheck();
   checks.push(bucket);
   checks.push(bucket.ok ? await presignCheck() : { name: "r2:presign", ok: false, detail: "ข้าม (r2:bucket ไม่ผ่าน)" });
-  checks.push(await creditsCheck());
+  checks.push(await creditsCheck(costDir));
   return { checks };
 }

@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 
+process.env.VF_NO_DOTENV = "1";
 const bin = new URL("../bin/vf.mjs", import.meta.url).pathname;
 const vf = (...args) => spawnSync(process.execPath, [bin, ...args], { encoding: "utf8" });
 

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { redact, VfError } from "../tools/out.mjs";
 
+process.env.VF_NO_DOTENV = "1";
 const outUrl = new URL("../tools/out.mjs", import.meta.url).href;
 
 function run(code, env = {}) {

@@ -14,6 +14,7 @@ const kill = (pid) => {
   } catch {}
 };
 
+process.env.VF_NO_DOTENV = "1";
 const FAKE = new URL("./fixtures/fake-cmd.mjs", import.meta.url).pathname;
 const tmp = () => mkdtempSync(join(tmpdir(), "vf-jobs-"));
 

@@ -55,3 +55,12 @@ test("secretValues เก็บเฉพาะชื่อที่เป็น�
     assert.ok(!v.includes("short"));
   } finally { clean("FOO_TOKEN", "FOO_NAME", "BAR_KEY"); }
 });
+
+test("VF_NO_DOTENV=1 ไม่โหลดไฟล์ใดเลย", () => {
+  const d = tmpEnv("NODOT_TEST=x\n");
+  process.env.VF_NO_DOTENV = "1";
+  try {
+    assert.equal(loadEnv(d), null);
+    assert.equal(process.env.NODOT_TEST, undefined);
+  } finally { clean("VF_NO_DOTENV", "NODOT_TEST"); fs.rmSync(d, { recursive: true }); }
+});

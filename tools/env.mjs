@@ -16,6 +16,7 @@ function parseInto(file) {
 
 // Walk up from startDir to find .env, then fall back to the repo-root .env. Never overrides existing env.
 export function loadEnv(startDir = process.cwd()) {
+  if (process.env.VF_NO_DOTENV === "1") return null;
   const candidates = [];
   for (let d = path.resolve(startDir); ; d = path.dirname(d)) {
     candidates.push(path.join(d, ".env"));

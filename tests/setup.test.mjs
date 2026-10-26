@@ -1,10 +1,14 @@
 import { test, beforeEach, afterEach } from "node:test";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import assert from "node:assert/strict";
 import { setFetch, setSleep } from "../tools/cf.mjs";
 import { main } from "../tools/setup.mjs";
 
-const KEYS = ["CLOUDFLARE_AI_ACCOUNT_ID", "CLOUDFLARE_AI_API_TOKEN", "VF_R2_BUCKET", "VF_R2_ACCESS_KEY_ID", "VF_R2_SECRET_ACCESS_KEY", "VF_R2_TOKEN"];
-let saved, origWrite;
+const KEYS = ["CLOUDFLARE_AI_ACCOUNT_ID", "CLOUDFLARE_AI_API_TOKEN", "VF_R2_BUCKET", "VF_R2_ACCESS_KEY_ID", "VF_R2_SECRET_ACCESS_KEY", "VF_R2_TOKEN", "VF_AIG_GATEWAY_ID"];
+process.env.VF_NO_DOTENV = "1";
+let saved, origWrite, errLog, costDir;
 beforeEach(() => {
   saved = Object.fromEntries(KEYS.map((k) => [k, process.env[k]]));
   Object.assign(process.env, {
@@ -12,12 +16,16 @@ beforeEach(() => {
     VF_R2_ACCESS_KEY_ID: "AKID", VF_R2_SECRET_ACCESS_KEY: "SECRETSECRET",
   });
   delete process.env.VF_R2_TOKEN;
+  delete process.env.VF_AIG_GATEWAY_ID;
+  costDir = fs.mkdtempSync(path.join(os.tmpdir(), "vf-setup-cost-"));
   setSleep(async () => {});
   origWrite = process.stderr.write;
-  process.stderr.write = () => true;
+  errLog = [];
+  process.stderr.write = (c) => { errLog.push(String(c)); return true; };
 });
 afterEach(() => {
   process.stderr.write = origWrite;
+  fs.rmSync(costDir, { recursive: true, force: true });
   for (const k of KEYS) saved[k] === undefined ? delete process.env[k] : (process.env[k] = saved[k]);
   setFetch((...a) => globalThis.fetch(...a));
 });
@@ -53,17 +61,17 @@ function fakeCloudflare({ bucketExists = false, corrupt = false } = {}) {
 
 test("setup: ทุก check ผ่านด้วย Cloudflare ปลอม และ URL/คีย์ไม่หลุด", async () => {
   const seen = fakeCloudflare();
-  const { checks } = await main([]);
+  const { checks } = await main([], { costDir });
   const by = Object.fromEntries(checks.map((c) => [c.name, c]));
   for (const n of ["cf:token", "r2:bucket", "r2:presign", "cf:credits"]) assert.equal(by[n].ok, true, n + " " + by[n].detail);
   assert.ok(seen.some((s) => s.startsWith("PUT") && s.endsWith("/bkt")));
-  const text = JSON.stringify(checks);
-  for (const v of ["SECRETSECRET", "tok-secret-123456", "X-Amz"]) assert.ok(!text.includes(v), v);
+  const text = JSON.stringify(checks) + errLog.join("");
+  for (const v of ["SECRETSECRET", "tok-secret-123456", "X-Amz", "AKID"]) assert.ok(!text.includes(v), v);
 });
 
 test("setup: r2:presign ล้มเมื่อไบต์ที่ได้กลับมาไม่ตรง แต่คำสั่งยังคืน checks", async () => {
   fakeCloudflare({ corrupt: true });
-  const { checks } = await main([]);
+  const { checks } = await main([], { costDir });
   const p = checks.find((c) => c.name === "r2:presign");
   assert.equal(p.ok, false);
   assert.ok(!p.detail.includes("X-Amz"));
@@ -72,6 +80,6 @@ test("setup: r2:presign ล้มเมื่อไบต์ที่ได้�
 test("setup: env หลักขาด -> CONFIG พร้อม checks และไม่เรียกเครือข่าย", async () => {
   delete process.env.VF_R2_BUCKET;
   const seen = fakeCloudflare();
-  await assert.rejects(main([]), (e) => e.code === "CONFIG" && Array.isArray(e.details.checks));
+  await assert.rejects(main([], { costDir }), (e) => e.code === "CONFIG" && Array.isArray(e.details.checks));
   assert.equal(seen.length, 0);
 });

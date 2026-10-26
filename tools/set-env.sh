@@ -9,7 +9,6 @@ umask 077
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${ENV_FILE:-$REPO/.env}"
 mkdir -p "$(dirname "$ENV_FILE")"
-[ -f "$ENV_FILE" ] || : > "$ENV_FILE"
 
 strip() { tr -d '[:space:]'; }
 ask()   { local v; read -r -p "$1: " v; printf '%s' "$v" | strip; }
@@ -39,12 +38,13 @@ SAK=$(asks  "VF_R2_SECRET_ACCESS_KEY")
 NAMES="CLOUDFLARE_AI_ACCOUNT_ID CLOUDFLARE_AI_API_TOKEN VF_R2_BUCKET"
 [ -z "$R2TOK" ] || NAMES="$NAMES VF_R2_TOKEN"
 [ -z "$AKID" ]  || NAMES="$NAMES VF_R2_ACCESS_KEY_ID VF_R2_SECRET_ACCESS_KEY"
-PATTERN="^($(echo "$NAMES" | tr ' ' '|'))="
+ALL="$NAMES VF_R2_TOKEN VF_R2_ACCESS_KEY_ID VF_R2_SECRET_ACCESS_KEY"
+PATTERN="^[[:space:]]*(export[[:space:]]+)?($(echo "$ALL" | tr ' ' '|'))[[:space:]]*="
 
 tmp=$(mktemp "$(dirname "$ENV_FILE")/.env.XXXXXX")
 trap 'rm -f "$tmp"' EXIT
 {
-  grep -Ev "$PATTERN" "$ENV_FILE" || true
+  if [ -f "$ENV_FILE" ]; then grep -Ev "$PATTERN" "$ENV_FILE" || true; fi
   printf 'CLOUDFLARE_AI_ACCOUNT_ID=%s\n' "$ACCT"
   printf 'CLOUDFLARE_AI_API_TOKEN=%s\n'  "$TOK"
   printf 'VF_R2_BUCKET=%s\n'             "$BUCKET"
@@ -58,7 +58,7 @@ chmod 600 "$tmp"
 mv -f "$tmp" "$ENV_FILE"
 trap - EXIT
 
-MODE=$(stat -f %Lp "$ENV_FILE" 2>/dev/null || stat -c %a "$ENV_FILE")
+MODE=$(stat -c %a "$ENV_FILE" 2>/dev/null || stat -f %Lp "$ENV_FILE")
 echo "เขียนแล้ว ($MODE $ENV_FILE):"
 for n in $NAMES; do
   printf '  %-26s ยาว %s ตัวอักษร\n' "$n" "$(grep -E "^$n=" "$ENV_FILE" | cut -d= -f2- | tr -d '\n' | wc -c | tr -d ' ')"

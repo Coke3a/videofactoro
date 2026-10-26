@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync, statSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, statSync, rmSync, readdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -38,5 +38,39 @@ test("set-env.sh ปฏิเสธรูปแบบผิดโดยไม่
   try {
     assert.notEqual(r.status, 0);
     assert.equal(readFileSync(file, "utf8"), "KEEP=1\n");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+const lines = (file) => readFileSync(file, "utf8").split("\n").filter(Boolean);
+
+test("set-env.sh รันซ้ำไม่มีบรรทัดซ้ำ และ export NAME= ถูกแทนที่", () => {
+  const { file, dir } = runScript([ACCT, TOK, "", R2, "", ""], `export CLOUDFLARE_AI_API_TOKEN=old\n  VF_R2_BUCKET = old\nKEEP=1\n`);
+  try {
+    const again = spawnSync("bash", [script], { input: [ACCT, TOK, "", R2, "", ""].join("\n") + "\n", encoding: "utf8", env: { PATH: process.env.PATH, HOME: dir, ENV_FILE: file } });
+    assert.equal(again.status, 0, again.stderr);
+    const l = lines(file);
+    for (const n of ["CLOUDFLARE_AI_ACCOUNT_ID", "CLOUDFLARE_AI_API_TOKEN", "VF_R2_BUCKET", "VF_R2_TOKEN"]) {
+      assert.equal(l.filter((x) => new RegExp(`^(export\\s+)?${n}\\s*=`).test(x)).length, 1, n);
+    }
+    assert.ok(!readFileSync(file, "utf8").includes("old"));
+    assert.ok(l.includes("KEEP=1"));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("set-env.sh เปลี่ยนจาก access key เป็น token แล้วลบ key เก่า", () => {
+  const { file, dir } = runScript([ACCT, TOK, "", R2, "", ""], "VF_R2_ACCESS_KEY_ID=OLDKEYID\nVF_R2_SECRET_ACCESS_KEY=OLDSECRET\n");
+  try {
+    const t = readFileSync(file, "utf8");
+    assert.ok(!t.includes("OLDKEYID") && !t.includes("OLDSECRET"));
+    assert.ok(t.includes(`VF_R2_TOKEN=${R2}`));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("set-env.sh ตรวจไม่ผ่าน -> ไม่สร้างไฟล์ และไม่มี temp ค้าง", () => {
+  const { r, file, dir } = runScript(["nothex", TOK, "", R2, "", ""]);
+  try {
+    assert.notEqual(r.status, 0);
+    assert.deepEqual(readdirSync(dir), []);
+    assert.ok(!existsSync(file));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

@@ -10,7 +10,7 @@ const bin = new URL("../bin/vf.mjs", import.meta.url).pathname;
 function vf(envOverrides, ...args) {
   const cwd = mkdtempSync(join(tmpdir(), "vf-doctor-"));
   try {
-    const env = { PATH: process.env.PATH, HOME: cwd, ...envOverrides };
+    const env = { PATH: process.env.PATH, HOME: cwd, VF_NO_DOTENV: "1", ...envOverrides };
     return spawnSync(process.execPath, [bin, ...args], { encoding: "utf8", cwd, env });
   } finally {
     rmSync(cwd, { recursive: true, force: true });
@@ -63,4 +63,22 @@ test("doctor รับ access key pair แทน VF_R2_TOKEN", () => {
   const r = vf({ ...rest, VF_R2_ACCESS_KEY_ID: "AKIDEXAMPLE0000000000", VF_R2_SECRET_ACCESS_KEY: "secretsecretsecretsecret00" }, "doctor");
   assert.equal(r.status, 0, r.stdout);
   assert.ok(!r.stdout.includes("secretsecretsecretsecret00"));
+});
+
+test("doctor ออฟไลน์ไม่เรียกเครือข่ายเลย (fetch ที่ throw ไม่ถูกเรียก)", async () => {
+  const { setFetch } = await import("../tools/cf.mjs");
+  const { main } = await import("../tools/doctor.mjs");
+  const keys = Object.keys(SECRETS);
+  const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+  Object.assign(process.env, SECRETS);
+  let calls = 0;
+  setFetch(() => { calls++; throw new Error("network used"); });
+  try {
+    const { checks } = await main([]);
+    assert.ok(checks.length >= 5);
+    assert.equal(calls, 0);
+  } finally {
+    setFetch((...a) => globalThis.fetch(...a));
+    for (const k of keys) saved[k] === undefined ? delete process.env[k] : (process.env[k] = saved[k]);
+  }
 });
