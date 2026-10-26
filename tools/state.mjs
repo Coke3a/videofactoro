@@ -23,8 +23,8 @@ export function readJson(file, fallback) {
   }
 }
 
-export function openState(dir) {
-  const file = join(dir, "state.json");
+export function openState(dir, name = "state.json") {
+  const file = join(dir, name);
   const load = () => readJson(file, {});
   return {
     get: (id) => load()[id],
