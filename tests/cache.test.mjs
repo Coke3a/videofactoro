@@ -90,3 +90,20 @@ test("writeJsonAtomic ไม่ทิ้งไฟล์ .tmp และสร้�
     assert.deepEqual(readdirSync(join(d, "sub", "dir")), ["a.json"]);
   } finally { rmSync(d, { recursive: true, force: true }); }
 });
+
+test("libAdd ปฏิเสธ ext ที่ไม่ปลอดภัย", () => {
+  const d = tmp();
+  try {
+    assert.throws(() => libAdd(d, { ...base, id: "e" }, Buffer.from("x"), "../../esc"), { code: 2 });
+    assert.deepEqual(libLoad(d), { entries: [] });
+  } finally { rmSync(d, { recursive: true, force: true }); }
+});
+
+test("libSearch: constructor ไม่ throw, [''] ได้ [], tag_p ไม่สนตัวพิมพ์, ไม่มี reverse substring", () => {
+  const lib = { entries: [{ ...base, tags: ["Jump", "a"], tag_p: { Jump: 0.5 } }] };
+  assert.deepEqual(libSearch(lib, ["constructor"], {}), []);
+  assert.deepEqual(libSearch(lib, [""], {}), []);
+  assert.deepEqual(libSearch(lib, ["  "], {}), []);
+  assert.equal(libSearch(lib, [" jump "], {})[0].score, 4.5);
+  assert.deepEqual(libSearch(lib, ["abc"], {}), []);
+});
