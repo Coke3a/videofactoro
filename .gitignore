@@ -1,1 +1,7 @@
 .superpowers/
+.env
+projects/
+node_modules/
+spikes/out/
+*.log
+.DS_Store
