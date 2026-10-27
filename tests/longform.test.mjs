@@ -41,7 +41,7 @@ const MOTION = () => ({
   scenes: [scene(5, { card: "#4", move: "zoom_in" }), scene(5, { card: "#3" }), scene(5, { card: "#2", move: "bounce" }), scene(5, { card: "#1", narration: "" })],
 });
 
-let MP4, WAV, MP3, root, dir, saved, calls, origWrite, plan, pollFail, flagImages;
+let MP4, WAV, MP3, root, dir, saved, calls, origWrite, plan, pollFail, flagImages, blockVideos;
 const reply = (result) => ({ ok: true, status: 200, text: async () => JSON.stringify({ success: true, result }) });
 const posts = (model) => calls.filter((c) => c.method === "POST" && c.body?.model === model);
 const probe = (f) => JSON.parse(execFileSync("ffprobe", ["-v", "error", "-show_entries", "stream=codec_type:format=duration", "-of", "json", f], { encoding: "utf8" }));
@@ -64,6 +64,7 @@ beforeEach(async () => {
   cf.setSleep(async () => {});
   pollFail = false;
   flagImages = 0;
+  blockVideos = 0;
   calls = [];
   cf.setFetch(async (url, init = {}) => {
     const u = String(url);
@@ -88,6 +89,10 @@ beforeEach(async () => {
         return { ok: false, status: 400, text: async () => err };
       }
       return reply({ image: B64 });
+    }
+    if (body?.model === MODELS.video && blockVideos > 0) {
+      blockVideos--;
+      return { ok: false, status: 422, text: async () => JSON.stringify({ errors: [{ message: "Model execution failed (Content moderation error)", code: 2000 }], success: false }) };
     }
     if (body?.model === MODELS.video) return reply({ state: "queued", request_id: `req-${posts(MODELS.video).length}` });
     if (body?.model === MODELS.tts) return reply({ audio: "data:audio/wav;base64," + fs.readFileSync(WAV).toString("base64") });
@@ -165,6 +170,21 @@ test("film: ภาพที่ถูก flag (3030) เปลี่ยน seed �
   assert.equal(new Set(seeds).size, 4, "ทุกครั้งที่ลองใหม่ใช้ seed ใหม่");
   flagImages = 99;
   await assert.rejects(film(["demo", "--prompt", "ภาพโดน flag ตลอด", "--duration", "20", "--foreground"]), (e) => e.code === "BLOCKED");
+});
+
+test("film: วิดีโอช็อตเดียวโดน moderation → ลองช็อตนั้นใหม่ (prompt อ่อนลง แล้ว keyframe ใหม่) ไม่เริ่มทั้งเรื่องใหม่", async () => {
+  plan = FILM();
+  plan.shots = [shot(10), shot(10)];
+  blockVideos = 2;
+  const r = await film(["demo", "--prompt", "วิดีโอโดนบล็อก", "--duration", "20", "--foreground"]);
+  assert.ok(fs.existsSync(r.film.file));
+  const vids = posts(MODELS.video);
+  assert.equal(vids.length, 4, "2 ครั้งที่โดนบล็อก + 2 ช็อตที่ผ่าน");
+  assert.match(vids.at(-1).body.input.prompt, /family-friendly/);
+  assert.equal(posts(MODELS.image).length, 3, "keyframe ใหม่ 1 ภาพในรอบที่ 2");
+  assert.match(r.film.warnings.join(" "), /โดนบล็อก 2 ครั้ง/);
+  blockVideos = 99;
+  await assert.rejects(film(["demo", "--prompt", "วิดีโอโดนบล็อกตลอด", "--duration", "20", "--foreground"]), (e) => e.code === "BLOCKED");
 });
 
 test("film --dry-run และ --duration นอกช่วง ไม่เรียก API", async () => {

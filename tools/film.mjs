@@ -20,6 +20,8 @@ import { pinInput, pinRun, costSince, contextMessage, loadProject, planRows, llm
 export const SHOT_MIN = 5;
 export const SHOT_MAX = 10;
 export const CONCURRENCY = 3;
+export const VIDEO_BLOCK_RETRIES = 2;
+const SOFTEN = "Gentle, family-friendly cartoon tone: playful and harmless, no injury, no peril, no scary moments.";
 
 const OPTIONS = { ...COMMON_OPTIONS, hd: { type: "boolean" } };
 
@@ -142,13 +144,32 @@ async function work({ dir, ctx, state, key, prompt, total, hd, maxRerolls, audio
       });
     });
     if (kf.warning) warnings.push(`ช็อต ${n}: ${kf.warning}`);
-    const vid = await step(state, `shot-${n}-video`, async () => {
-      log(`ช็อต ${n}: video (${hd ? "hd" : "draft"} ${shot.duration} วินาที)`);
-      return makeVideo({
-        dir, state, requestKey: `shot-${n}-video-request`, keyframe: kf.file, prompt: shot.video_prompt, duration: shot.duration,
-        hd, aspect, meta: smeta, out: `${base}/shot-${n}.mp4`,
-      });
-    });
+    // ช็อตเดียวโดน moderation ไม่ควรทิ้งทั้งเรื่อง: รอบ 1 ใช้ prompt ที่อ่อนลง, รอบ 2 ทำ keyframe ใหม่ (seed ใหม่) ด้วย
+    let vid;
+    for (let r = 0; ; r++) {
+      const sfx = r ? `-r${r}` : "";
+      try {
+        const key = r < 2 ? kf : await step(state, `shot-${n}-keyframe${sfx}`, async () => {
+          log(`ช็อต ${n}: keyframe ใหม่หลังโดนบล็อก`);
+          return makeKeyframe({
+            dir, pj, slug, cast, place, prompt: `${shot.first_frame_prompt} ${SOFTEN}`, seedKey: `film:${id}:${n}${sfx}`,
+            need: `keyframe:${id}#${n}`, maxRerolls, meta: smeta, out: `${base}/shot-${n}${sfx}.jpg`,
+          });
+        });
+        vid = await step(state, `shot-${n}-video${sfx}`, async () => {
+          log(`ช็อต ${n}: video (${hd ? "hd" : "draft"} ${shot.duration} วินาที)${r ? ` ลองใหม่ครั้งที่ ${r}` : ""}`);
+          return makeVideo({
+            dir, state, requestKey: `shot-${n}-video-request${sfx}`, keyframe: key.file, prompt: r ? `${shot.video_prompt} ${SOFTEN}` : shot.video_prompt,
+            duration: shot.duration, hd, aspect, meta: smeta, out: `${base}/shot-${n}.mp4`,
+          });
+        });
+        if (r) warnings.push(`ช็อต ${n}: วิดีโอโดนบล็อก ${r} ครั้ง ทำใหม่ด้วย prompt ที่อ่อนลง${r >= 2 ? " และ keyframe ใหม่" : ""}`);
+        break;
+      } catch (e) {
+        if (!(e instanceof VfError && e.code === "BLOCKED" && r < VIDEO_BLOCK_RETRIES)) throw e;
+        log(`ช็อต ${n}: วิดีโอโดนบล็อก (${e.message.slice(0, 120)})`);
+      }
+    }
     const voice = await step(state, `shot-${n}-narration`, async () => {
       if (!shot.narration) return null;
       log(`ช็อต ${n}: narration`);
