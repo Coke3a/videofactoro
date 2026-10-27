@@ -41,7 +41,7 @@ const MOTION = () => ({
   scenes: [scene(5, { card: "#4", move: "zoom_in" }), scene(5, { card: "#3" }), scene(5, { card: "#2", move: "bounce" }), scene(5, { card: "#1", narration: "" })],
 });
 
-let MP4, WAV, MP3, root, dir, saved, calls, origWrite, plan, pollFail;
+let MP4, WAV, MP3, root, dir, saved, calls, origWrite, plan, pollFail, flagImages;
 const reply = (result) => ({ ok: true, status: 200, text: async () => JSON.stringify({ success: true, result }) });
 const posts = (model) => calls.filter((c) => c.method === "POST" && c.body?.model === model);
 const probe = (f) => JSON.parse(execFileSync("ffprobe", ["-v", "error", "-show_entries", "stream=codec_type:format=duration", "-of", "json", f], { encoding: "utf8" }));
@@ -63,6 +63,7 @@ beforeEach(async () => {
   Object.assign(process.env, ENV, { VF_PROJECTS: root });
   cf.setSleep(async () => {});
   pollFail = false;
+  flagImages = 0;
   calls = [];
   cf.setFetch(async (url, init = {}) => {
     const u = String(url);
@@ -80,7 +81,14 @@ beforeEach(async () => {
       const answers = Object.fromEntries(Object.keys(body.questions).map((k) => [k, { noul: /text/.test(k) || k === "has_people_or_animals" ? 0 : 0.9 }]));
       return reply({ answers, usage: { prompt_tokens: 1500 } });
     }
-    if (body?.model === MODELS.image) return reply({ image: B64 });
+    if (body?.model === MODELS.image) {
+      if (flagImages > 0) {
+        flagImages--;
+        const err = JSON.stringify({ errors: [{ message: "AiError: AiError: Your output has been flagged. Please choose another prompt / input image combination (x)", code: 3030 }], success: false });
+        return { ok: false, status: 400, text: async () => err };
+      }
+      return reply({ image: B64 });
+    }
     if (body?.model === MODELS.video) return reply({ state: "queued", request_id: `req-${posts(MODELS.video).length}` });
     if (body?.model === MODELS.tts) return reply({ audio: "data:audio/wav;base64," + fs.readFileSync(WAV).toString("base64") });
     if (body?.model === MODELS.music) return reply({ state: "Completed", result: { audio: "https://cdn.example/m.mp3" } });
@@ -144,6 +152,19 @@ test("film: วิดีโอค้างแล้วรันซ้ำ ตา�
   assert.equal(posts(MODELS.video).length, 3, "ไม่จ่ายวิดีโอซ้ำ");
   assert.ok(fs.existsSync(r.film.file));
   await assert.rejects(film(["demo", "--prompt", "วันเกิดมะลิ", "--duration", "20", "--foreground"]), (e) => e.code === "USAGE");
+});
+
+test("film: ภาพที่ถูก flag (3030) เปลี่ยน seed แล้วลองใหม่ ไม่ล้มทั้งเรื่อง; flag ทุกครั้ง = BLOCKED", async () => {
+  plan = FILM();
+  plan.shots = [shot(10), shot(10)];
+  flagImages = 2;
+  const r = await film(["demo", "--prompt", "ภาพโดน flag", "--duration", "20", "--foreground"]);
+  assert.ok(fs.existsSync(r.film.file));
+  const seeds = posts(MODELS.image).map((p) => p.body.input.seed);
+  assert.equal(seeds.length, 4);
+  assert.equal(new Set(seeds).size, 4, "ทุกครั้งที่ลองใหม่ใช้ seed ใหม่");
+  flagImages = 99;
+  await assert.rejects(film(["demo", "--prompt", "ภาพโดน flag ตลอด", "--duration", "20", "--foreground"]), (e) => e.code === "BLOCKED");
 });
 
 test("film --dry-run และ --duration นอกช่วง ไม่เรียก API", async () => {

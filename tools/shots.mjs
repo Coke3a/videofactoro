@@ -12,6 +12,10 @@ import { logCost, costRow, failOutcome } from "./cost.mjs";
 import { baseSeed, seedAt } from "./project-create.mjs";
 
 export const NO_MUSIC = "No background music.";
+export const OUTPUT_FLAG_RETRIES = 3;
+
+// flag ที่ผลลัพธ์ (ไม่ใช่ที่ prompt): เปลี่ยน seed แล้วมักผ่าน
+export const isOutputFlag = (err) => err instanceof VfError && err.code === "BLOCKED" && /output has been flagged|"code":\s*3030/i.test(err.message);
 
 // ภาพนิ่งหนึ่งภาพของช็อต/ฉาก: ref ตัวละคร (≤3) + plate ของสถานที่ แล้วตรวจด้วย RULES.keyframe
 export async function makeKeyframe({ dir, pj, slug, cast, place, prompt, seedKey, need, kind = "keyframe", maxRerolls, meta, out }) {
@@ -28,10 +32,20 @@ export async function makeKeyframe({ dir, pj, slug, cast, place, prompt, seedKey
   const base = baseSeed(slug, seedKey);
   const res = await generateWithQa({
     maxRerolls,
-    generate: (attempt) => generateImage({
-      projectDir: dir, prompt: imgPrompt, refs, aspect: pj.aspect ?? "9:16", seed: seedAt(base, attempt), need,
-      kind, characters: cast.map((c) => c.id), place: place?.id ?? null, meta: { ...meta, step: kind },
-    }),
+    generate: async (attempt) => {
+      // klein บางครั้ง flag ภาพที่สร้างออกมา (3030 "output has been flagged") แบบสุ่มตาม seed: เปลี่ยน seed แล้วลองใหม่
+      for (let k = 0; ; k++) {
+        try {
+          return await generateImage({
+            projectDir: dir, prompt: imgPrompt, refs, aspect: pj.aspect ?? "9:16", seed: seedAt(base, attempt + k * 100), need,
+            kind, characters: cast.map((c) => c.id), place: place?.id ?? null, meta: { ...meta, step: kind },
+          });
+        } catch (err) {
+          if (!(isOutputFlag(err) && k < OUTPUT_FLAG_RETRIES)) throw err;
+          log(`${kind}: ภาพถูก flag เปลี่ยน seed แล้วลองใหม่ (${k + 1}/${OUTPUT_FLAG_RETRIES})`);
+        }
+      }
+    },
     check: async (c) => {
       log(`QA ${kind}`);
       const answers = await clef({

@@ -101,7 +101,7 @@ stdout is always one JSON object: `{ok:true,...}` or `{ok:false,error:{code,mess
 | 0 | ok | Go to the next step (`next` suggests commands). For `vf wait`, also check `status`. |
 | 2 | USAGE | Read `error.message` first and fix what it says (bad argument, unknown project, a job is still running → `vf wait` it out). **Do not retry without reading the message.** |
 | 3 | CONFIG | Env, token or credits problem. **Stop and report to the user; never retry.** The user runs, in their own Terminal: `bash tools/set-env.sh` then `node bin/vf.mjs setup` (that is `vf setup`; the user runs it, not you). |
-| 4 | BLOCKED | Content filter. Rewrite the prompt to be more generic and milder (no protected names), then try again, **at most 2 retries**. Still blocked = stop and report. |
+| 4 | BLOCKED | Content filter (random image-output flags are already retried with new seeds inside the tool). Rewrite the prompt to be more generic and milder (no protected names), then try again, **at most 2 retries**. Still blocked = stop and report. |
 | 5 | PROVIDER | Provider outage or timeout. Run `resume` (or `error.details.resume`), **at most 2 retries**. Still failing = stop and report. |
 | 1 | INTERNAL | Tool bug or dead worker. Run `resume` (or `error.details.resume`), **at most 2 retries**. Still failing = stop and report the error message as it is. |
 
