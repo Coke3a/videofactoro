@@ -11,6 +11,7 @@ import { MODELS } from "./models.mjs";
 import { estimate } from "./pricing.mjs";
 import { logCost, costRow, failOutcome } from "./cost.mjs";
 import { baseSeed, seedAt } from "./project-create.mjs";
+import { llmJson } from "./llm.mjs";
 
 export const NO_MUSIC = "No background music.";
 export const OUTPUT_FLAG_RETRIES = 3;
@@ -31,7 +32,8 @@ export async function makeKeyframe({ dir, pj, slug, cast, place, prompt, seedKey
   const refs = [...charRefs, ...(plate && existsSync(plate) ? [plate] : [])];
   const refNote = cast.map((c, i) => `Image ${i + 1} is ${c.name}: ${c.look}`).join(" ");
   const placeNote = refs.length > cast.length ? ` Image ${refs.length} is the location; use it only as the background.` : "";
-  const imgPrompt = `${prompt} ${refNote}${placeNote} ${pj.style_prompt ?? ""}`.trim();
+  const fullPrompt = (p) => `${p} ${refNote}${placeNote} ${pj.style_prompt ?? ""}`.trim();
+  let rewritten = null; // ทำครั้งเดียวต่อภาพ เมื่อไปถึงระดับที่ต้องเขียนฉากใหม่
   const qaRefs = await Promise.all(charRefs.map((f) => toQaImage(f)));
   const qctx = { characters: cast, shot: prompt, style: pj.style_prompt ?? "" };
   const base = baseSeed(slug, seedKey);
@@ -40,14 +42,20 @@ export async function makeKeyframe({ dir, pj, slug, cast, place, prompt, seedKey
     maxRerolls,
     generate: async (attempt) => {
       // klein บางครั้ง flag ภาพที่สร้างออกมา (3030 "output has been flagged") แบบสุ่มตาม seed แม้ prompt ไม่มีอะไรผิด
-      // seed ตายตัว (resume ได้ผลเดิม) จึงไล่ระดับเองในรอบเดียว: seed ใหม่ → prompt ที่อ่อนลง → klein-9b
+      // seed ตายตัว (resume ได้ผลเดิม) จึงไล่ระดับเองในรอบเดียว: seed ใหม่ → prompt ที่อ่อนลง → LLM เขียนฉากใหม่ → klein-9b
+      // บางฉาก flag ทุก seed ทุก ref (เช่น จอทีวีแสงจ้า ตัวละครล้มตกใจ) ต่อท้าย SOFTEN อย่างเดียวไม่พอ ต้องเปลี่ยนเนื้อฉาก
       const tiers = flagTiers(model);
       for (let t = 0; t < tiers.length; t++) {
         const tier = tiers[t];
+        if (tier.rewrite && rewritten === null) {
+          log(`${kind}: ให้ LLM เขียนฉากใหม่ให้ผ่านตัวกรองภาพ`);
+          rewritten = await rewriteForFlag({ prompt, meta: { ...meta, step: `${kind}-rewrite` }, costDir });
+        }
+        const scene = tier.rewrite ? rewritten : prompt;
         for (let k = 0; k < tier.seeds; k++) {
           try {
             return await generateImage({
-              projectDir: dir, prompt: tier.soften ? `${imgPrompt} ${SOFTEN}` : imgPrompt, refs, aspect: pj.aspect ?? "9:16",
+              projectDir: dir, prompt: tier.soften ? `${fullPrompt(scene)} ${SOFTEN}` : fullPrompt(scene), refs, aspect: pj.aspect ?? "9:16",
               seed: seedAt(base, attempt + (t * 10 + k) * 100), need,
               kind, characters: cast.map((c) => c.id), place: place?.id ?? null, meta: { ...meta, step: kind }, model: tier.model,
             });
@@ -89,8 +97,23 @@ export function flagTiers(model) {
   return [
     { label: "seed ใหม่", model, soften: false, seeds: OUTPUT_FLAG_RETRIES + 1 },
     { label: "prompt อ่อนลง", model, soften: true, seeds: 2 },
-    ...(model === MODELS.image ? [] : [{ label: "klein-9b", model: MODELS.image, soften: true, seeds: 2 }]),
+    { label: "ฉากเขียนใหม่", model, soften: true, rewrite: true, seeds: 2 },
+    ...(model === MODELS.image ? [] : [{ label: "klein-9b", model: MODELS.image, soften: true, rewrite: true, seeds: 2 }]),
   ];
+}
+
+const REWRITE_SYSTEM = `You rewrite one image prompt that an image safety filter keeps flagging, even though the story is family friendly.
+Keep the same characters, place, art style, framing and the joke of the moment.
+Remove what filters tend to flag: falling, tumbling, crashes, shock or fear, flashing or blasting lights, screens showing other cartoons or brands, weapons or weapon-like props, tight clothing or bare skin, anything that reads as injury or danger.
+Show the moment as a calm, readable pose instead. Reply in English as JSON {"prompt": "..."}.`;
+
+export async function rewriteForFlag({ prompt, meta, costDir }) {
+  const { data } = await llmJson({
+    system: REWRITE_SYSTEM, user: prompt, maxTokens: 1500, meta, costDir,
+    schema: { type: "object", properties: { prompt: { type: "string" } }, required: ["prompt"] },
+    validate: (d) => (typeof d?.prompt === "string" && d.prompt.trim().length >= 20 ? [] : ["prompt ต้องเป็นข้อความอย่างน้อย 20 ตัวอักษร"]),
+  });
+  return data.prompt.trim();
 }
 
 // เขียนผล QA ลงคลัง (ให้ reuse เลือกได้) — คลังพังไม่ควรทำให้ภาพที่ได้แล้วเสีย

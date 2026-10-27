@@ -44,6 +44,9 @@ const MOTION = () => ({
 let MP4, WAV, MP3, root, dir, saved, calls, origWrite, plan, pollFail, flagImages, blockVideos, fitsScore, flagFast;
 const reply = (result) => ({ ok: true, status: 200, text: async () => JSON.stringify({ success: true, result }) });
 const posts = (model) => calls.filter((c) => c.method === "POST" && c.body?.model === model);
+const REWRITE_MARK = "image safety filter";
+const REWRITTEN = "A calm rewritten scene.";
+const rewrites = () => posts(MODELS.llm[0]).filter((c) => c.body.input.systemInstruction.parts[0].text.includes(REWRITE_MARK));
 const probe = (f) => JSON.parse(execFileSync("ffprobe", ["-v", "error", "-show_entries", "stream=codec_type:format=duration", "-of", "json", f], { encoding: "utf8" }));
 
 before(() => {
@@ -101,7 +104,7 @@ beforeEach(async () => {
     if (body?.model === MODELS.music) return reply({ state: "Completed", result: { audio: "https://cdn.example/m.mp3" } });
     if (body?.model === MODELS.llm[0]) {
       const sys = body.input.systemInstruction.parts[0].text;
-      const data = sys.includes("story bible") ? goodBible() : plan;
+      const data = sys.includes("story bible") ? goodBible() : sys.includes(REWRITE_MARK) ? { prompt: REWRITTEN } : plan;
       return reply({ candidates: [{ content: { parts: [{ text: JSON.stringify(data) }] } }], usageMetadata: { promptTokenCount: 800, candidatesTokenCount: 300 } });
     }
     throw new Error("unexpected fetch " + u);
@@ -174,17 +177,25 @@ test("film: ภาพที่ถูก flag (3030) เปลี่ยน seed �
   await assert.rejects(film(["demo", "--prompt", "ภาพโดน flag ตลอด", "--duration", "20", "--foreground"]), (e) => e.code === "BLOCKED");
 });
 
-test("ภาพถูก flag ทุก seed ของ 4b → ลอง prompt อ่อนลง แล้วสลับไป klein-9b ในรอบเดียว (resume ใช้ seed เดิมจึงต้องไล่ระดับเอง)", async () => {
+test("ภาพถูก flag ทุก seed ของ 4b → prompt อ่อนลง → LLM เขียนฉากใหม่ → klein-9b ในรอบเดียว (resume ใช้ seed เดิมจึงต้องไล่ระดับเอง)", async () => {
   plan = MOTION();
   flagFast = true;
   const r = await motion(["demo", "--prompt", "4b โดน flag ตลอด", "--duration", "20", "--foreground"]);
   assert.ok(fs.existsSync(r.motion.file));
   const fast = posts(MODELS.imageFast);
-  assert.equal(fast.length, 4 * 6, "ฉากละ 4 seed + 2 prompt อ่อนลง");
-  assert.equal(fast.filter((p) => /family-friendly/.test(p.body.input.prompt)).length, 4 * 2);
+  assert.equal(fast.length, 4 * 8, "ฉากละ 4 seed + 2 prompt อ่อนลง + 2 ฉากที่เขียนใหม่");
+  assert.equal(fast.filter((p) => /family-friendly/.test(p.body.input.prompt)).length, 4 * 4);
+  assert.equal(fast.filter((p) => p.body.input.prompt.startsWith(REWRITTEN)).length, 4 * 2);
+  assert.equal(rewrites().length, 4, "ฉากละครั้งเดียว");
   const nine = posts(MODELS.image);
   assert.equal(nine.length, 4);
-  assert.ok(nine.every((p) => /family-friendly/.test(p.body.input.prompt)));
+  assert.ok(nine.every((p) => p.body.input.prompt.startsWith(REWRITTEN) && /family-friendly/.test(p.body.input.prompt)));
+});
+
+test("ภาพไม่ถูก flag → ไม่เรียก LLM เขียนฉากใหม่", async () => {
+  plan = MOTION();
+  await motion(["demo", "--prompt", "ปกติ", "--duration", "20", "--foreground"]);
+  assert.equal(rewrites().length, 0);
 });
 
 test("film: วิดีโอช็อตเดียวโดน moderation → ลองช็อตนั้นใหม่ (prompt อ่อนลง แล้ว keyframe ใหม่) ไม่เริ่มทั้งเรื่องใหม่", async () => {
