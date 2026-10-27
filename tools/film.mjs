@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { parse, VfError, log } from "./out.mjs";
 import { resolveProject, slugify } from "./paths.mjs";
 import { llmJson } from "./llm.mjs";
-import { openState, step, writeJsonAtomic } from "./state.mjs";
+import { openState, step, writeJsonAtomic, readJson } from "./state.mjs";
 import { recordEpisode } from "./bible.mjs";
 import { MODELS } from "./models.mjs";
 import { estimate } from "./pricing.mjs";
@@ -126,7 +126,18 @@ async function work({ dir, ctx, state, key, prompt, total, hd, maxRerolls, audio
   const id = `${slugify(plan.title).slice(0, 40).replace(/-+$/, "")}-${key.slice(-4)}`;
   const base = `films/${id}`;
   mkdirSync(join(dir, base), { recursive: true });
-  writeJsonAtomic(join(dir, base, "plan.json"), { prompt, total, ...plan });
+  // resume หลังโดนบล็อก: prompt ของช็อตที่แก้ใน plan.json มีผลกับช็อตที่ยังไม่เสร็จ (จำนวนช็อตต้องเท่าเดิม)
+  const planFile = join(dir, base, "plan.json");
+  const edited = readJson(planFile, null);
+  if (edited?.shots?.length === plan.shots.length) {
+    plan.shots.forEach((s, i) => {
+      for (const k of ["first_frame_prompt", "video_prompt"]) {
+        const v = edited.shots[i]?.[k];
+        if (typeof v === "string" && v.trim() && v !== s[k]) { s[k] = v.trim(); log(`ช็อต ${i + 1}: ใช้ ${k} ที่แก้ใน plan.json`); }
+      }
+    });
+  }
+  writeJsonAtomic(planFile, { prompt, total, ...plan });
   const meta = { project: slug, film: id, item: id, run };
   const { w, h } = frameSize(aspect);
   const warnings = [];

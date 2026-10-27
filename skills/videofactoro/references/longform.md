@@ -47,6 +47,7 @@ Say the format, the beats, and the tone. The planner handles the rest.
 - The key is `--id`, or a hash of the inputs; state lives in `.vf/film-<key>-state.json` / `.vf/motion-<key>-state.json`.
 - A crash or a dead worker: run `resume` from `vf wait`. Finished shots/scenes are skipped; in-flight videos are polled, not re-bought.
 - The same prompt after success = USAGE. Use `--id` for another take.
+- A film shot whose video is blocked is retried twice inside the tool (softer prompt, then a new keyframe). If the job still fails BLOCKED, edit that shot's `video_prompt` (and/or `first_frame_prompt`) in `films/<film-id>/plan.json` to something milder, then run `resume`. Finished shots stay as they are; only unfinished shots read the edited prompts. Keep the number of shots the same. Never edit `.vf/*-state.json` by hand.
 
 ## Requirements
 

@@ -187,6 +187,24 @@ test("film: วิดีโอช็อตเดียวโดน moderation �
   await assert.rejects(film(["demo", "--prompt", "วิดีโอโดนบล็อกตลอด", "--duration", "20", "--foreground"]), (e) => e.code === "BLOCKED");
 });
 
+test("film: แก้ video_prompt ใน plan.json แล้วรันซ้ำ → ช็อตที่ยังไม่เสร็จใช้ prompt ใหม่", async () => {
+  plan = FILM();
+  plan.shots = [shot(10), shot(10)];
+  blockVideos = 99;
+  const args = ["demo", "--prompt", "แก้ plan แล้วรันต่อ", "--duration", "20", "--foreground"];
+  await assert.rejects(film(args), (e) => e.code === "BLOCKED");
+  const films = path.join(dir, "films");
+  const planFile = path.join(films, fs.readdirSync(films).map((f) => [f, fs.statSync(path.join(films, f)).mtimeMs]).sort((a, b) => b[1] - a[1])[0][0], "plan.json");
+  const p = JSON.parse(fs.readFileSync(planFile, "utf8"));
+  p.shots[1].video_prompt = "A calm, quiet moment edited by hand.";
+  fs.writeFileSync(planFile, JSON.stringify(p));
+  blockVideos = 0;
+  const r = await film(args);
+  assert.ok(fs.existsSync(r.film.file));
+  assert.ok(posts(MODELS.video).some((c) => c.body.input.prompt.startsWith("A calm, quiet moment edited by hand.")));
+  assert.equal(JSON.parse(fs.readFileSync(planFile, "utf8")).shots[1].video_prompt, "A calm, quiet moment edited by hand.");
+});
+
 test("film --dry-run และ --duration นอกช่วง ไม่เรียก API", async () => {
   const d = await film(["demo", "--prompt", "x", "--duration", "90", "--dry-run"]);
   assert.equal(d.dry_run, true);
