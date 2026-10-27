@@ -118,7 +118,7 @@ stdout is always one JSON object: `{ok:true,...}` or `{ok:false,error:{code,mess
 
 ### Long videos (20–180 s): `vf film` and `vf motion`
 
-Both take `--prompt`, `--duration 20-180` (default 60), `--no-narration`, `--no-music`, `--id`, `--max-rerolls` (default 1), `--foreground` and `--dry-run`, and run as a job (`vf wait`). Details are in `references/longform.md`.
+Both take `--prompt`, `--duration 20-180` (default 60), `--no-narration`, `--no-music`, `--id`, `--max-rerolls` (default 2), `--foreground` and `--dry-run`, and run as a job (`vf wait`). Details are in `references/longform.md`.
 
 - `vf film <slug> --prompt "..." --duration 90`: a **generative AI** short film. The LLM writes a shot list (mostly 8–10 s shots, hook → build → payoff), and each shot gets a keyframe and a flux-3-video clip (3 shots at a time). The shots are joined, with one narration track and one music bed over the whole film. Draft by default, `--hd` for final. About $0.07 per draft shot (video $0.06 + keyframe), so 90 s ≈ $0.7–0.9, taking 10–20 min.
 - `vf motion <slug> --prompt "..." --duration 90`: a **motion-comic** with no video model. Each scene is an AI still of the characters, animated by ffmpeg (zoom, pan, shake, bounce), with text overlays (title, rank cards like `#3`, captions, comic sound words), narration and music. Good for countdowns ("Top 5…"), stories and explainers. About $0.005 per scene, so 90 s ≈ $0.2–0.3. Text needs ffmpeg with libass; without it you get a warning and a clip with no text.

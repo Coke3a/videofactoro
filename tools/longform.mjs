@@ -35,7 +35,8 @@ export function parseCommon(values) {
   }
   const id = values.id;
   if (id !== undefined && !ID_RE.test(id)) throw new VfError("USAGE", "--id ต้องเป็น a-z 0-9 และ - ขึ้นต้นด้วยตัวอักษร ยาว 2–31 ตัว");
-  const maxRerolls = values["max-rerolls"] === undefined ? 1 : Number(values["max-rerolls"]);
+  // klein-4b reroll ราว $0.002: ค่าเริ่มต้น 2 ให้ QA มีโอกาสได้ภาพที่ผ่าน
+  const maxRerolls = values["max-rerolls"] === undefined ? 2 : Number(values["max-rerolls"]);
   if (!Number.isInteger(maxRerolls) || maxRerolls < 0 || maxRerolls > 5) throw new VfError("USAGE", "--max-rerolls ต้องเป็นจำนวนเต็ม 0–5");
   return { prompt, total, id, maxRerolls };
 }

@@ -13,7 +13,7 @@ Both make a 20–180 s video from an existing project's characters and places, r
 
 ## Common flags
 
-`--prompt` (required), `--duration 20-180` (default 60), `--no-narration`, `--no-music`, `--id <id>`, `--max-rerolls 0-5` (default 1, per image), `--foreground`, `--dry-run`. `vf film` also takes `--hd`.
+`--prompt` (required), `--duration 20-180` (default 60), `--no-narration`, `--no-music`, `--id <id>`, `--max-rerolls 0-5` (default 2, per image), `--foreground`, `--dry-run`. `vf film` also takes `--hd`.
 
 Narration is on only when the project has a narrator (`project.json` → `narrator: true`). Music is always on unless you pass `--no-music`: one instrumental bed for the whole video, ducked under the voice.
 
