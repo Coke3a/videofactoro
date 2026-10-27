@@ -20,6 +20,7 @@ This file is the map. Details live in `references/`:
 | Every command, flag, default and output field | `references/commands.md` |
 | Project folder layout, json files, PROJECT.md rules | `references/project.md` |
 | Clip pipeline, prompt craft, narration and music, QA | `references/clip.md` |
+| Long videos: `vf film` (AI video) and `vf motion` (motion-comic) | `references/longform.md` |
 | Prices, measured costs, how to budget | `references/costs.md` |
 | First-time setup, env vars, security rules | `references/setup.md` |
 | Known failure patterns and what fixed them | `references/lessons.md` |
@@ -53,7 +54,8 @@ Whichever track you take, the iron rules below do not change.
 | "redo / change how X looks" | `vf character add <slug> --replace --id <id> --prompt "..."` (old images go to `ref/old-<stamp>/`) |
 | "make a clip of X doing Y" | `vf clip <slug> --prompt "..."` (draft) → `vf wait` → inspect → report |
 | "make it HD / final" | rerun the approved clip prompt with `--hd` |
-| "longer video, several shots" | one `vf clip` per shot; say that automatic shot stitching is not available yet |
+| "longer AI video (30 s – 3 min)" | `vf film <slug> --prompt "..." --duration N` → `vf wait` (loop) |
+| "motion graphics / Top 5 / countdown / explainer" | `vf motion <slug> --prompt "..." --duration N` → `vf wait` (loop) |
 | "how much will it cost?" | add `--dry-run` to the command; it costs nothing |
 | "what's going on / is it done?" | `vf status <slug>` or `vf wait <slug>` |
 | a command exits 3 (CONFIG) | stop and hand the user the setup steps (section 4) |
@@ -74,14 +76,14 @@ vf clip <slug> --prompt "..."                                      # draft clip,
 
 - **Always pass `--name <ascii-slug>`** (a-z, 0-9, `-`). A pure-Thai prompt without `--name` gets `project-<8 hex>`. The same prompt always maps to the same slug, so rerunning a command continues it instead of starting over.
 - `project create` options: `--lang` (default `en`), `--aspect 9:16|16:9|1:1` (default `9:16`), `--max-rerolls 0-5` (default 2), `--image <character-name>=<path>` (repeatable).
-- `--dry-run` works on `project create`, `character add`, `place add` and `clip`.
+- `--dry-run` works on `project create`, `character add`, `place add`, `clip`, `film` and `motion`.
 - `vf status <slug>` lists the latest jobs.
 
 ## 4. Long jobs: job and wait
 
-`project create`, `character add`, `place add` and `clip` return `{job, next}` at once (unless you pass `--foreground`), and the work runs in the background.
+`project create`, `character add`, `place add`, `clip`, `film` and `motion` return `{job, next}` at once (unless you pass `--foreground`), and the work runs in the background.
 
-1. `vf wait <slug> [job-id]` blocks for at most 540 seconds (change with `--timeout <sec>`).
+1. `vf wait <slug> [job-id]` blocks for at most 540 seconds (change with `--timeout <sec>`). If your shell tool kills commands sooner (many agent sandboxes cap a command at 120–180 s), pass a smaller `--timeout`, for example `--timeout 150`.
 2. If it times out while the job is still going (`status:"running"`), call `vf wait` again. **Loop until status is `done` or `failed`.**
 3. A project runs one job at a time. Starting a second one gives USAGE (exit 2). Run `vf wait` on the current job until it finishes.
 4. **A failed job still makes `vf wait` exit 0.** The JSON has `status: "failed"` and `error:{code,message}`. Look up `error.code` in the table below exactly as you would an exit code. Never judge by the exit code alone.
@@ -114,7 +116,15 @@ stdout is always one JSON object: `{ok:true,...}` or `{ok:false,error:{code,mess
 - Rerunning a prompt that already finished = USAGE (pass a new `--id`). Rerunning after a crash continues, and a video request that was already sent is followed up, never paid twice.
 - `result.clip.warnings` lists QA concerns. The video QA is a weak signal: camera moves and cuts often score low on "consistent" and "follows prompt" while the clip looks fine. **Look at frames yourself** before you call a clip bad (see `references/clip.md`, "Inspecting a clip").
 
-`vf film` (multi-shot episodes) and `vf motion` (motion graphics): not available yet (plans 3–4). For a longer video, make one `vf clip` per shot and tell the user that automatic stitching is not available yet.
+### Long videos (20–180 s): `vf film` and `vf motion`
+
+Both take `--prompt`, `--duration 20-180` (default 60), `--no-narration`, `--no-music`, `--id`, `--max-rerolls` (default 1), `--foreground` and `--dry-run`, and run as a job (`vf wait`). Details are in `references/longform.md`.
+
+- `vf film <slug> --prompt "..." --duration 90`: a **generative AI** short film. The LLM writes a shot list (5–10 s shots, hook → build → payoff), and each shot gets a keyframe and a flux-3-video clip (3 shots at a time). The shots are joined, with one narration track and one music bed over the whole film. Draft by default, `--hd` for final. About $0.12–0.15 per draft shot, so 90 s ≈ $1.5–2, taking 10–20 min.
+- `vf motion <slug> --prompt "..." --duration 90`: a **motion-comic** with no video model. Each scene is an AI still of the characters, animated by ffmpeg (zoom, pan, shake, bounce), with text overlays (title, rank cards like `#3`, captions, comic sound words), narration and music. Good for countdowns ("Top 5…"), stories and explainers. About $0.03 per scene, so 90 s ≈ $0.6–0.8. Text needs ffmpeg with libass; without it you get a warning and a clip with no text.
+- Output: `renders/<id>.mp4`; working files are in `films/<id>/` or `motions/<id>/`.
+
+Pick by what the user asked for: "AI video / realistic motion" → film; "motion graphics / ranking / countdown / cheap and fast" → motion; a single moment → clip.
 
 ## 6. Director rules (what makes clips good)
 

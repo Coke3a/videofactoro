@@ -12,6 +12,8 @@ const COMMANDS = {
   "place add": "place-add",
   "asset find": "asset-find",
   clip: "clip",
+  film: "film",
+  motion: "motion",
   wait: "wait",
   status: "status",
   help: null,

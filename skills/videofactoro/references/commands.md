@@ -80,6 +80,8 @@ The last 10 jobs, newest first, without log tails. Free.
 ### `vf help`
 Usage text.
 
-## Not available yet
+### `vf film <project> --prompt "<story>" [--duration 20-180] [--hd] [options]`
+A multi-shot generative AI video (5–10 s shots joined, one narration track, one music bed). Options: `--duration` (default 60), `--hd`, `--no-narration`, `--no-music`, `--id`, `--max-rerolls` (default 1), `--foreground`, `--dry-run`. Result: `film: {id, title, seconds, shots, quality, file, dir, narration, music, warnings}`. See `longform.md`.
 
-`vf film` (multi-shot episode with stitching) and `vf motion` (motion graphics) are planned (plans 3–4).
+### `vf motion <project> --prompt "<idea>" [--duration 20-180] [options]`
+A motion-comic: AI stills animated by ffmpeg with titles, rank cards, captions, sound words, narration and music. No video model. Same options as film except `--hd`. Result: `motion: {id, title, seconds, scenes, file, dir, text, narration, music, warnings}`. See `longform.md`.

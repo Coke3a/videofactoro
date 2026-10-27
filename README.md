@@ -13,7 +13,7 @@ It is designed for automation:
 
 ## Quick start
 
-Requirements: Node.js 22+, `ffmpeg`/`ffprobe` on PATH, and a Cloudflare account with Workers AI, an API token (Workers AI Read + Edit), and AI Gateway Unified Billing credits.
+Requirements: Node.js 22+, `ffmpeg`/`ffprobe` on PATH (built with libass for motion text), and a Cloudflare account with Workers AI, an API token (Workers AI Read + Edit), and AI Gateway Unified Billing credits.
 
 Run these in your own Terminal (you never type keys into files or a chat):
 
@@ -48,6 +48,8 @@ open projects/catdog/renders/*.mp4
 | `vf place add <slug> --prompt "..."` | Add a place (background plate) |
 | `vf asset find <slug> <terms...>` | Search the project library |
 | `vf clip <slug> --prompt "..."` | One 5–20 s shot with narration and music (draft by default, `--hd` for final) |
+| `vf film <slug> --prompt "..." --duration 90` | Multi-shot generative AI video, 20–180 s |
+| `vf motion <slug> --prompt "..." --duration 90` | Motion-comic (AI stills + camera moves + text), 20–180 s, no video model |
 | `vf wait <slug> [job-id]` | Wait for a background job |
 | `vf status <slug>` | Recent jobs |
 
@@ -64,7 +66,7 @@ Exit codes: `0` ok · `1` INTERNAL · `2` USAGE · `3` CONFIG · `4` BLOCKED (co
 5. **Music:** ElevenLabs Music v2 writes an instrumental bed when the shot needs one.
 6. **Mix:** ffmpeg combines scene audio, narration and music, with the music ducked under the voice.
 
-Typical costs: a new project with two characters and three places is about $0.16; a 6 s draft clip with narration is about $0.11. See [costs](skills/videofactoro/references/costs.md).
+Typical costs: a new project with two characters and three places is about $0.16; a 6 s draft clip with narration is about $0.11; a 90 s film draft is about $1.5–2; a 90 s motion-comic is about $0.6–0.8. See [costs](skills/videofactoro/references/costs.md).
 
 ## Project files
 
@@ -81,8 +83,8 @@ Projects live in `$VF_PROJECTS` (default `./projects/`, git-ignored). Start read
 |---|---|
 | Project, characters, places, library, jobs, costs | done |
 | `vf clip` single shot + narration + music | done |
-| `vf film` multi-shot episodes | planned |
-| `vf motion` motion graphics | planned |
+| `vf film` multi-shot AI video (20–180 s) | done |
+| `vf motion` motion-comic (20–180 s) | done |
 
 ## Development
 

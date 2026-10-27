@@ -1,5 +1,5 @@
 // vf clip: คลิปสั้นช็อตเดียวจาก prompt (spec §6.2 แบบย่อ: ยังไม่มี end frame, TTS, เพลง, poster)
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
@@ -10,15 +10,13 @@ import { llmJson } from "./llm.mjs";
 import { openState, step, writeJsonAtomic } from "./state.mjs";
 import { riskFindings } from "./risk.mjs";
 import { recordEpisode, ID_RE } from "./bible.mjs";
-import { generateImage } from "./images.mjs";
-import { generateWithQa, clef, toQaImage, qaRecord } from "./qa.mjs";
+import { clef, toQaImage, qaRecord } from "./qa.mjs";
 import { RULES } from "./qa-rules.mjs";
-import { run as cfRun, withRetry, extractMedia, download } from "./cf.mjs";
 import { MODELS } from "./models.mjs";
 import { estimate } from "./pricing.mjs";
-import { logCost, costRow, failOutcome } from "./cost.mjs";
-import { baseSeed, seedAt, sha } from "./project-create.mjs";
+import { sha } from "./project-create.mjs";
 import { tts, music as makeMusic, mix, mediaInfo, narrationTempo, MUSIC_GAIN, MUSIC_GAIN_UNDER_VOICE } from "./audio.mjs";
+import { makeKeyframe, makeVideo } from "./shots.mjs";
 import { pinInput, pinRun, costSince, contextMessage, loadProject, planRows, llmRow, imageRow, qaRow, runEntity } from "./entities.mjs";
 
 const execFileP = promisify(execFile);
@@ -30,7 +28,6 @@ const MUSIC_GATE = {
   needs_music: { type: "noul", instructions: "Would this short comedic clip feel better with soft background music added under it?" },
   dialogue_heavy: { type: "noul", instructions: "Is the clip dominated by speech or important sounds that music would cover up?" },
 };
-const NO_MUSIC = "No background music.";
 
 const OPTIONS = {
   prompt: { type: "string" },
@@ -62,13 +59,13 @@ export const CLIP_SCHEMA = {
 };
 
 // คำบรรยายต้องพูดจบก่อนคลิปจบ: ภาษาที่เว้นวรรคนับคำ (~2.2 คำ/วินาที), ภาษาที่ไม่เว้นวรรค (ไทย ฯลฯ) นับตัวอักษร
-const WORDS_PER_SEC = 2.2;
-const CHARS_PER_SEC = 11;
+export const WORDS_PER_SEC = 2.2;
+export const CHARS_PER_SEC = 11;
 const SPACED = (lang) => !/^(th|zh|ja|lo|km|my)/i.test(String(lang));
 export const narrationBudget = (lang, seconds) => SPACED(lang)
   ? { unit: "คำ", max: Math.floor((seconds - 1) * WORDS_PER_SEC) }
   : { unit: "ตัวอักษร", max: Math.floor((seconds - 1) * CHARS_PER_SEC) };
-const narrationSize = (lang, text) => SPACED(lang) ? text.trim().split(/\s+/).filter(Boolean).length : [...text.replace(/\s+/g, "")].length;
+export const narrationSize = (lang, text) => SPACED(lang) ? text.trim().split(/\s+/).filter(Boolean).length : [...text.replace(/\s+/g, "")].length;
 
 export function clipSystemPrompt(lang, { narrator = false, musicStyle = "" } = {}) {
   return [
@@ -188,72 +185,18 @@ async function work({ dir, ctx, state, key, prompt, duration, hd, maxRerolls, au
 
   const key1 = await step(state, "keyframe", async () => {
     log("ขั้น keyframe");
-    const charRefs = cast.map((c) => join(dir, "characters", c.id, "ref", "main.png"));
-    for (const f of charRefs) if (!existsSync(f)) throw new VfError("USAGE", `ตัวละครยังไม่มีภาพอ้างอิง: ${f}`);
-    const plate = place ? join(dir, "places", place.id, "plates", "main.jpg") : null;
-    const refs = [...charRefs, ...(plate && existsSync(plate) ? [plate] : [])];
-    const refNote = cast.map((c, i) => `Image ${i + 1} is ${c.name}: ${c.look}`).join(" ");
-    const placeNote = refs.length > cast.length ? ` Image ${refs.length} is the location; use it only as the background.` : "";
-    const imgPrompt = `${plan.first_frame_prompt} ${refNote}${placeNote} ${pj.style_prompt ?? ""}`.trim();
-    const qaRefs = await Promise.all(charRefs.map((f) => toQaImage(f)));
-    const qctx = { characters: cast, shot: plan.first_frame_prompt, style: pj.style_prompt ?? "" };
-    const base = baseSeed(slug, `clip:${id}`);
-    const res = await generateWithQa({
-      maxRerolls,
-      generate: (attempt) => generateImage({
-        projectDir: dir, prompt: imgPrompt, refs, aspect, seed: seedAt(base, attempt), need: `keyframe:${id}`,
-        kind: "keyframe", characters: plan.characters, place: plan.place, meta: { ...meta, step: "keyframe" },
-      }),
-      check: async (c) => {
-        log("QA keyframe");
-        const answers = await clef({
-          state: RULES.keyframe.state(qctx), questions: RULES.keyframe.questions(qctx),
-          images: [...qaRefs, await toQaImage(c.file)], meta, costDir,
-        });
-        const verdict = RULES.keyframe.judge(answers, qctx);
-        c.qa = qaRecord(verdict, answers);
-        return verdict;
-      },
+    return makeKeyframe({
+      dir, pj, slug, cast, place, prompt: plan.first_frame_prompt, seedKey: `clip:${id}`, need: `keyframe:${id}`,
+      maxRerolls, meta, out: `clips/${id}/keyframe.jpg`,
     });
-    for (const a of res.attempts) {
-      if (a.verdict.pass || a.candidate === res.best) continue;
-      logCost(costDir, { ...costRow(meta, MODELS.image, "keyframe"), outcome: "qa_reject", units: {}, usd: 0, reject_of: a.candidate.entry.id });
-    }
-    copyFileSync(res.best.file, join(clipDir, "keyframe.jpg"));
-    return {
-      file: `clips/${id}/keyframe.jpg`,
-      qa: res.best.qa,
-      ...(res.passed ? {} : { warning: `keyframe ไม่ผ่าน QA: ${res.verdict.reasons.join(", ")} — ใช้ภาพคะแนนสูงสุด` }),
-    };
   });
 
   const video = await step(state, "video", async () => {
     log(`ขั้น video (${hd ? "hd" : "draft"} ${plan.duration} วินาที)`);
-    const quality = hd ? "hd" : "draft";
-    const vprompt = plan.video_prompt.includes(NO_MUSIC) ? plan.video_prompt : `${plan.video_prompt} ${NO_MUSIC}`;
-    const input = {
-      mode: "i2v", prompt: vprompt, keyframes: readFileSync(join(dir, key1.file)).toString("base64"),
-      aspect_ratio: aspect, duration: plan.duration, resolution: "hd", generate_audio: true, ...(hd ? {} : { draft: true }),
-    };
-    const row = costRow(meta, MODELS.video, "video");
-    const pending = state.get("video-request")?.id;
-    let result;
-    try {
-      ({ result } = pending
-        ? await cfRun(MODELS.video, input, { meta: { ...meta, step: "video" }, resumeRequestId: pending })
-        : await withRetry(() => cfRun(MODELS.video, input, {
-          meta: { ...meta, step: "video" },
-          onRequestId: (rid) => state.set("video-request", { id: rid }),
-        })));
-    } catch (err) {
-      // มี request id แล้วแปลว่าอาจจ่ายไปแล้ว: ไม่ลงเงินซ้ำ รันซ้ำจะตามงานเดิมต่อ
-      logCost(costDir, { ...row, outcome: failOutcome(err), units: { clips: 1, quality, seconds: plan.duration }, usd: null });
-      throw err;
-    }
-    const out = join(clipDir, "clip.mp4");
-    await download(extractMedia(result), out);
-    logCost(costDir, { ...row, outcome: "ok", units: { clips: 1, quality, seconds: plan.duration }, usd: estimate(MODELS.video, { clips: 1, quality }) });
-    return { file: `clips/${id}/clip.mp4`, quality };
+    return makeVideo({
+      dir, state, requestKey: "video-request", keyframe: key1.file, prompt: plan.video_prompt, duration: plan.duration,
+      hd, aspect, meta, out: `clips/${id}/clip.mp4`,
+    });
   });
 
   const vqa = await step(state, "video-qa", async () => {
