@@ -29,7 +29,7 @@ Video QA is not run per shot (it is a weak signal and slow). Inspect a contact s
 
 ## `vf motion` pipeline
 
-1. **plan** (LLM): `scenes[]`: `{duration, characters, place, image_prompt, move, card, caption, sfx_word, narration}`. `move` ∈ `zoom_in, zoom_out, pan_left, pan_right, shake, bounce`. `card` and `sfx_word` are ≤ 14 characters; `caption` is ≤ 60.
+1. **plan** (LLM): `scenes[]`: `{duration, characters, place, image_prompt, move, card, caption, sfx_word, narration}`. `move` ∈ `zoom_in, zoom_out, pan_left, pan_right, tilt_up, crash_zoom, shake, bounce`. A non-empty `sfx_word` marks the scene's peak at 40% of its length: white flash, camera punch-in and an impact (or boing on `bounce`) sound. `card` and `sfx_word` are ≤ 14 characters; `caption` is ≤ 60.
 2. **per scene** (3 at a time): still image (refs + plate, keyframe QA) and narration.
 3. **render** each scene with ffmpeg zoompan (one at a time) → **concat**.
 4. **text** (ASS subtitles via libass): the title over the first scene, a card popping in at each scene start, the caption at the bottom for the whole scene, and the sound word popping at 40 % of the scene. Fonts: `DejaVu Sans`, or `Loma` for Thai; override with `VF_FONT`.

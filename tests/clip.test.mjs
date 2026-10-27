@@ -241,5 +241,10 @@ test("audio: narrationTempo และ mixArgs", () => {
   assert.match(g, /atempo=1.2/);
   assert.match(g, /sidechaincompress/);
   assert.match(g, /amix=inputs=3/);
+  assert.match(g, /loudnorm=I=-14/);
   assert.ok(a.includes("copy"));
+  const s = mixArgs({ video: "v.mp4", duration: 5, sceneAudio: false, sfx: "fx.wav", sfxGain: 0.5, out: "o.mp4" });
+  const gs = s[s.indexOf("-filter_complex") + 1];
+  assert.match(gs, /\[1:a\]volume=0\.5\[sfx\]/);
+  assert.match(gs, /amix=inputs=1/);
 });

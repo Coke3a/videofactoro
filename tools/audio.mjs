@@ -73,8 +73,9 @@ export function narrationTempo(narrationSec, clipSec) {
   return Math.min(MAX_TEMPO, Math.round((narrationSec / room) * 100) / 100);
 }
 
-// ffmpeg args: วิดีโอ copy, เสียงในฉาก + พากย์ (หน่วง 0.3 วิ) + เพลง (fade, หลบใต้เสียงพากย์), ยาวเท่าวิดีโอ
-export function mixArgs({ video, duration, sceneAudio, narration, tempo = 1, music, musicGain, out }) {
+// ffmpeg args: วิดีโอ copy, เสียงในฉาก + พากย์ (หน่วง 0.3 วิ) + เพลง (fade, หลบใต้เสียงพากย์) + เสียงประกอบ, ยาวเท่าวิดีโอ
+// ปรับความดังรวมเป็น -14 LUFS (ระดับของแพลตฟอร์มคลิปสั้น) เพราะแต่ละแทร็กมาจากหลายแหล่ง ดังไม่เท่ากัน
+export function mixArgs({ video, duration, sceneAudio, narration, tempo = 1, music, musicGain, sfx = null, sfxGain = 0.55, out }) {
   const inputs = ["-i", video];
   const filters = [];
   const parts = [];
@@ -97,9 +98,14 @@ export function mixArgs({ video, duration, sceneAudio, narration, tempo = 1, mus
     else filters.push("[musicraw]anull[music]");
     n++;
   }
-  const labels = [...(sceneAudio ? ["[scene]"] : []), ...(voiceLabel ? ["[voice]"] : []), ...(music ? ["[music]"] : [])];
+  if (sfx) {
+    inputs.push("-i", sfx);
+    filters.push(`[${n}:a]volume=${sfxGain}[sfx]`);
+    n++;
+  }
+  const labels = [...(sceneAudio ? ["[scene]"] : []), ...(voiceLabel ? ["[voice]"] : []), ...(music ? ["[music]"] : []), ...(sfx ? ["[sfx]"] : [])];
   if (!labels.length) throw new VfError("INTERNAL", "mix ต้องมีเสียงอย่างน้อยหนึ่งแทร็ก");
-  const graph = [...parts, ...filters, `${labels.join("")}amix=inputs=${labels.length}:normalize=0:duration=longest,atrim=0:${duration.toFixed(2)}[aout]`].join(";");
+  const graph = [...parts, ...filters, `${labels.join("")}amix=inputs=${labels.length}:normalize=0:duration=longest,atrim=0:${duration.toFixed(2)},loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000[aout]`].join(";");
   return ["-loglevel", "error", "-y", ...inputs, "-filter_complex", graph, "-map", "0:v", "-map", "[aout]",
     "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-t", duration.toFixed(2), out];
 }

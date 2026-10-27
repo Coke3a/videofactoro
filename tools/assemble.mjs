@@ -8,7 +8,7 @@ import { VfError } from "./out.mjs";
 const execFileP = promisify(execFile);
 
 export const FPS = 24;
-export const MOVES = ["zoom_in", "zoom_out", "pan_left", "pan_right", "shake", "bounce"];
+export const MOVES = ["zoom_in", "zoom_out", "pan_left", "pan_right", "tilt_up", "crash_zoom", "shake", "bounce"];
 
 export function frameSize(aspect) {
   if (aspect === "16:9") return { w: 1280, h: 720 };
@@ -51,24 +51,33 @@ export function normalizeArgs({ input, out, w, h, hasAudio, seconds }) {
 }
 
 // ภาพนิ่ง → คลิปเคลื่อนไหว seconds วินาที (ขยายภาพ 2 เท่าก่อน zoompan เพื่อไม่ให้สั่นเป็นขั้นบันได)
-export function stillMotionArgs({ image, out, w, h, seconds, move }) {
+// กล้องเคลื่อนแบบ smoothstep + ขยับเบาๆ แบบถือกล้อง; hit (วินาที) = จังหวะพีก: punch-in และภาพสั่นที่ค่อยๆ หยุด + แฟลชขาว
+// ตัดชนกันตรงๆ ไม่ fade จากดำ (เคยกระพริบดำทุกฉาก) ยกเว้นฉากแรกของคลิป
+export function stillMotionArgs({ image, out, w, h, seconds, move, hit = null, first = false }) {
   const n = Math.max(1, Math.round(seconds * FPS));
-  const cx = "iw/2-(iw/zoom/2)";
-  const cy = "ih/2-(ih/zoom/2)";
-  const s0 = Math.round(n * 0.35);
-  const s1 = Math.round(n * 0.6);
+  const e = `(on/${n})*(on/${n})*(3-2*on/${n})`;
+  const k = hit === null ? Math.round(n * 0.35) : Math.min(n - 1, Math.round(hit * FPS));
+  const q = Math.max(1, Math.round(n * 0.2));
+  const cx = "iw/2-(iw/zoom/2)+6*sin(on/9)";
+  const cy = "ih/2-(ih/zoom/2)+5*cos(on/13)";
+  const decay = (tau) => `exp(-(on-${k})/${tau})`;
   const expr = {
-    zoom_in: [`1+0.18*on/${n}`, cx, cy],
-    zoom_out: [`1.18-0.18*on/${n}`, cx, cy],
-    pan_left: ["1.15", `(iw-iw/zoom)*(1-on/${n})`, cy],
-    pan_right: ["1.15", `(iw-iw/zoom)*on/${n}`, cy],
-    shake: ["1.12", `${cx}+if(between(on,${s0},${s1}),36*sin(on*2.3),0)`, `${cy}+if(between(on,${s0},${s1}),28*cos(on*3.1),0)`],
+    zoom_in: [`1.04+0.16*${e}`, cx, cy],
+    zoom_out: [`1.2-0.16*${e}`, cx, cy],
+    pan_left: ["1.15", `(iw-iw/zoom)*(1-${e})`, cy],
+    pan_right: ["1.15", `(iw-iw/zoom)*${e}`, cy],
+    tilt_up: ["1.15", cx, `(ih-ih/zoom)*(1-${e})`],
+    crash_zoom: [`1.04+0.3*(1-pow(1-min(on/${q},1),3))+0.03*on/${n}`, cx, cy],
+    shake: ["1.12", `${cx}+if(gte(on,${k}),40*${decay(8)}*sin(on*2.3),0)`, `${cy}+if(gte(on,${k}),30*${decay(8)}*cos(on*3.1),0)`],
     bounce: [`1.06+0.05*abs(sin(on*PI*2/${FPS}))`, cx, cy],
-  }[move] ?? [`1+0.18*on/${n}`, cx, cy];
-  const [z, x, y] = expr;
+  }[move] ?? [`1.04+0.16*${e}`, cx, cy];
+  const [z0, x, y] = expr;
+  const z = hit === null ? z0 : `${z0}+if(gte(on,${k}),0.08*${decay(5)},0)`;
+  const hitEnd = Math.round((hit + 0.1) * 1000) / 1000;
+  const flash = hit === null ? "" : `,eq=brightness='if(between(t,${hit},${hitEnd}),0.45*(1-(t-${hit})/0.1),0)':eval=frame`;
   return [
     "-i", image,
-    "-vf", `${fit(w * 2, h * 2)},zoompan=z='${z}':x='${x}':y='${y}':d=${n}:s=${w}x${h}:fps=${FPS},fade=t=in:st=0:d=0.15,format=yuv420p`,
+    "-vf", `${fit(w * 2, h * 2)},zoompan=z='${z}':x='${x}':y='${y}':d=${n}:s=${w}x${h}:fps=${FPS}${flash}${first ? ",fade=t=in:st=0:d=0.3" : ""},format=yuv420p`,
     "-frames:v", String(n), "-an", ...VIDEO_OUT, out,
   ];
 }

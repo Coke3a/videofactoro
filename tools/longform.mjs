@@ -8,6 +8,7 @@ import { riskFindings } from "./risk.mjs";
 import { music as makeMusic, mix, mediaInfo, narrationTempo, MUSIC_GAIN, MUSIC_GAIN_UNDER_VOICE, MUSIC_LOOP_SEC } from "./audio.mjs";
 import { narrationBudget, narrationSize } from "./clip.mjs";
 import { ffmpeg, narrationTrackArgs, loopMusicArgs } from "./assemble.mjs";
+import { sfxSynthArgs, SFX_GAIN } from "./fx.mjs";
 
 export const MIN_TOTAL = 20;
 export const MAX_TOTAL = 180;
@@ -82,7 +83,8 @@ export function validateParts(plan, { characters, places, lang = "en" }, { total
 }
 
 // segments: [{seconds, narration: {file, seconds} | null}] เรียงตามเวลา; video = ไฟล์ที่ต่อแล้ว
-export async function finishAudio({ state, dir, base, video, segments, musicPrompt, wantMusic, sceneAudio, meta, out }) {
+// cues: เสียงประกอบ [{kind, at}] (motion) — ว่าง = ไม่มีรางเสียงประกอบ
+export async function finishAudio({ state, dir, base, video, segments, musicPrompt, wantMusic, sceneAudio, cues = [], meta, out }) {
   const costDir = join(dir, ".vf");
   const total = segments.reduce((s, x) => s + x.seconds, 0);
   const track = await step(state, "narration-track", async () => {
@@ -113,20 +115,34 @@ export async function finishAudio({ state, dir, base, video, segments, musicProm
     await ffmpeg(loopMusicArgs({ src: join(dir, loopRel), srcSec, duration: need, out: join(dir, rel) }), "วนเพลง");
     return { file: rel, looped: true };
   });
+  const fx = await step(state, "sfx-track", async () => {
+    if (!cues.length) return { file: null };
+    log("ขั้นเสียงประกอบ");
+    const kinds = {};
+    for (const kind of new Set(cues.map((c) => c.kind))) {
+      kinds[kind] = join(dir, base, `sfx-${kind}.wav`);
+      await ffmpeg(sfxSynthArgs(kind, kinds[kind]), `สร้างเสียง ${kind}`);
+    }
+    const rel = `${base}/sfx.wav`;
+    const items = cues.filter((c) => c.at < total).map((c) => ({ file: kinds[c.kind], at: c.at }));
+    await ffmpeg(narrationTrackArgs({ items, duration: total, out: join(dir, rel) }), "รวมเสียงประกอบ");
+    return { file: rel };
+  });
   return await step(state, "mix", async () => {
     mkdirSync(join(dir, "renders"), { recursive: true });
     const dest = join(dir, out);
-    if (!track.file && !bgm.file) {
+    if (!track.file && !bgm.file && !fx.file) {
       copyFileSync(join(dir, video), dest);
-      return { file: out, narration: false, music: false };
+      return { file: out, narration: false, music: false, sfx: false };
     }
     log("ขั้น mix");
     const info = await mediaInfo(join(dir, video));
     await mix({
       video: join(dir, video), duration: info.duration, sceneAudio: sceneAudio && info.hasAudio,
       narration: track.file ? join(dir, track.file) : null, tempo: 1,
-      music: bgm.file ? join(dir, bgm.file) : null, musicGain: track.file ? MUSIC_GAIN_UNDER_VOICE : MUSIC_GAIN, out: dest,
+      music: bgm.file ? join(dir, bgm.file) : null, musicGain: track.file ? MUSIC_GAIN_UNDER_VOICE : MUSIC_GAIN,
+      sfx: fx.file ? join(dir, fx.file) : null, sfxGain: SFX_GAIN, out: dest,
     });
-    return { file: out, narration: Boolean(track.file), music: Boolean(bgm.file), ...(track.sped ? { sped_up_lines: track.sped } : {}) };
+    return { file: out, narration: Boolean(track.file), music: Boolean(bgm.file), sfx: Boolean(fx.file), ...(track.sped ? { sped_up_lines: track.sped } : {}) };
   });
 }

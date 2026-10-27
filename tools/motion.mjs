@@ -1,6 +1,6 @@
 // vf motion: คลิป motion-comic (20–180 วินาที) จากภาพนิ่ง AI ของตัวละครใน project — ไม่ใช้โมเดลวิดีโอ
-// LLM เขียนฉาก → ภาพนิ่งต่อฉาก (ref ตัวละคร + QA) → ffmpeg ขยับภาพ (zoom/pan/shake/bounce) → ต่อ
-// → ตัวหนังสือ ASS (ชื่อเรื่อง, การ์ดอันดับ, คำบรรยายใต้ภาพ, คำเสียง) → พากย์ + เพลง → mix
+// LLM เขียนฉาก → ภาพนิ่งต่อฉาก (ref ตัวละคร + QA) → ffmpeg ขยับภาพ (กล้อง ease + จังหวะพีก punch-in/แฟลช) → ต่อ
+// → ตัวหนังสือ ASS (ชื่อเรื่อง, การ์ดอันดับ, คำบรรยายใต้ภาพ, คำเสียง) → พากย์ + เพลง + เสียงประกอบ → mix
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse, VfError, log } from "./out.mjs";
@@ -15,6 +15,7 @@ import { tts, MUSIC_LOOP_SEC } from "./audio.mjs";
 import { WORDS_PER_SEC, CHARS_PER_SEC } from "./clip.mjs";
 import { makeKeyframe, pool, keyframeModel, reuseStill } from "./shots.mjs";
 import { ffmpeg, frameSize, stillMotionArgs, concatArgs, concatList, hasFilter, writeAss, burnArgs, fontFor, MOVES } from "./assemble.mjs";
+import { motionCues, HIT_AT } from "./fx.mjs";
 import { COMMON_OPTIONS, parseCommon, validateParts, finishAudio } from "./longform.mjs";
 import { pinInput, pinRun, costSince, contextMessage, loadProject, planRows, llmRow, imageRow, qaRow, runEntity } from "./entities.mjs";
 
@@ -62,10 +63,10 @@ export function motionSystemPrompt(lang, total, { narrator = false, musicStyle =
     `- scenes: ประมาณ ${n} ฉาก ฉากละ ${SCENE_MIN}–${SCENE_MAX} วินาที ผลรวม duration ต้องใกล้ ${total} วินาที (คลาดได้ไม่เกิน 10%) จังหวะเร็ว ตัดบ่อย`,
     "- characters: id ตัวละคร 1–3 ตัวต่อฉาก จาก id ที่มีอยู่เท่านั้น · place: id สถานที่ที่มีอยู่ หรือ \"\"",
     "- image_prompt (ภาษาอังกฤษ): ภาพนิ่งของฉาก ท่าทางและสีหน้าที่ชัดและเกินจริงแบบการ์ตูน จับจังหวะพีกของมุก มุมกล้องหลากหลาย ห้ามมีตัวอักษร ป้าย หรือโลโก้ในภาพ",
-    `- move: การขยับกล้อง หนึ่งใน ${MOVES.join(", ")} (shake = ตอนชน/ตกใจ, bounce = ตอนดีใจ/เต้น, zoom_in = เน้นสีหน้า, pan = เผยของในฉาก) อย่าใช้ซ้ำติดกันเกิน 2 ฉาก`,
+    `- move: การขยับกล้อง หนึ่งใน ${MOVES.join(", ")} (shake = ตอนชน/ตกใจ, bounce = ตอนดีใจ/เต้น, zoom_in = เน้นสีหน้า, pan = เผยของในฉาก, tilt_up = เผยของสูงหรือตัวละครยืนตระหง่าน, crash_zoom = พุ่งเข้าหาตอนเปิดเผย/หักมุม) อย่าใช้ซ้ำติดกันเกิน 2 ฉาก`,
     `- card: ป้ายใหญ่ตอนเริ่มฉาก เช่น "#5" หรือ "ROUND 2" ไม่เกิน ${TAG_MAX} ตัวอักษร หรือ "" ถ้าไม่ต้องการ`,
     `- caption: ข้อความใต้ภาพสั้นๆ ภาษา ${lang} ไม่เกิน ${CAPTION_MAX} ตัวอักษร ตลกหรือเล่าเรื่อง (ไม่ซ้ำกับ narration คำต่อคำ)`,
-    `- sfx_word: คำเสียงแบบการ์ตูนตอนพีก เช่น "BONK!", "CRASH!", "NOPE!" ไม่เกิน ${TAG_MAX} ตัวอักษร หรือ ""`,
+    `- sfx_word: คำเสียงแบบการ์ตูนตอนพีก เช่น "BONK!", "CRASH!", "NOPE!" ไม่เกิน ${TAG_MAX} ตัวอักษร หรือ "" — ใส่แล้วฉากนั้นจะมีแฟลช กล้องกระแทก และเสียงตอนพีก จึงใส่เฉพาะฉากที่มีจังหวะมุกจริง ไม่ใช่ทุกฉาก`,
     "- ห้ามใช้ชื่อคนจริง แบรนด์ หรือตัวละครมีลิขสิทธิ์",
     narrator
       ? `- narration: คำพากย์ ภาษา ${lang} ของแต่ละฉาก 0–2 ประโยคสั้น เล่าต่อเนื่องและมีจังหวะมุก พูดจบในเวลาฉากลบ 1 วินาที: ไม่เกิน ${WORDS_PER_SEC} คำ/วินาที (ภาษาไม่เว้นวรรค ${CHARS_PER_SEC} ตัวอักษร/วินาที)`
@@ -102,7 +103,7 @@ export function motionEvents(title, scenes) {
     if (s.card) events.push({ start: at, end: Math.min(at + 1.3, end), text: s.card, style: "Card" });
     if (s.caption) events.push({ start: at + 0.2, end: end - 0.1, text: s.caption, style: "Caption" });
     if (s.sfx_word) {
-      const t = at + s.seconds * 0.4;
+      const t = at + s.seconds * HIT_AT;
       events.push({ start: t, end: Math.min(t + 0.9, end), text: s.sfx_word, style: "Sfx" });
     }
     at = end;
@@ -204,7 +205,8 @@ async function work({ dir, ctx, state, key, prompt, total, maxRerolls, audio, re
     const clip = await step(state, `scene-${n}-render`, async () => {
       log(`ฉาก ${n}: render (${scene.move} ${scene.duration} วินาที)`);
       const rel = `${base}/scene-${n}.mp4`;
-      await ffmpeg(stillMotionArgs({ image: join(dir, still.file), out: join(dir, rel), w, h, seconds: scene.duration, move: scene.move }), `ฉาก ${n}`);
+      const hit = scene.sfx_word ? scene.duration * HIT_AT : null;
+      await ffmpeg(stillMotionArgs({ image: join(dir, still.file), out: join(dir, rel), w, h, seconds: scene.duration, move: scene.move, hit, first: i === 0 }), `ฉาก ${n}`);
       return { file: rel };
     });
     scenes.push({ ...scene, n, seconds: scene.duration, file: clip.file, narration: voice });
@@ -231,7 +233,7 @@ async function work({ dir, ctx, state, key, prompt, total, maxRerolls, audio, re
 
   const final = await finishAudio({
     state, dir, base, video: texted.file, segments: scenes, musicPrompt: plan.music_prompt, wantMusic: audio.music,
-    sceneAudio: false, meta, out: `renders/${id}.mp4`,
+    sceneAudio: false, cues: motionCues(scenes), meta, out: `renders/${id}.mp4`,
   });
 
   await step(state, "files", async () => {
@@ -246,7 +248,7 @@ async function work({ dir, ctx, state, key, prompt, total, maxRerolls, audio, re
     motion: {
       id, title: plan.title, seconds: scenes.reduce((s, x) => s + x.seconds, 0), scenes: scenes.length,
       reused_stills: made.filter((m) => m.still.reused).length,
-      file: join(dir, final.file), dir: join(dir, base), text: texted.text, narration: final.narration, music: final.music,
+      file: join(dir, final.file), dir: join(dir, base), text: texted.text, narration: final.narration, music: final.music, sfx: final.sfx,
       ...(warnings.length ? { warnings } : {}),
     },
     cost: { usd: costSince(costDir, run) },

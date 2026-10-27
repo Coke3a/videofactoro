@@ -12,7 +12,8 @@ import { VfError } from "../tools/out.mjs";
 import { main as create } from "../tools/project-create.mjs";
 import { main as film, validateFilmPlan } from "../tools/film.mjs";
 import { main as motion, validateMotionPlan, motionEvents } from "../tools/motion.mjs";
-import { assScript, hasFilter, narrationTrackArgs, stillMotionArgs, frameSize, loopMusicArgs } from "../tools/assemble.mjs";
+import { assScript, hasFilter, narrationTrackArgs, stillMotionArgs, frameSize, loopMusicArgs, ffmpeg, MOVES } from "../tools/assemble.mjs";
+import { motionCues, sfxSynthArgs } from "../tools/fx.mjs";
 import { pool, reuseCandidates } from "../tools/shots.mjs";
 import { goodBible } from "./fixtures/bible.mjs";
 import { bodyOf } from "./fixtures/body.mjs";
@@ -266,6 +267,10 @@ test("motion ยาวกว่า 30 วินาที: จ่ายเพล�
   assert.ok(Math.abs(sec - 41) < 0.3, `เพลงยาว ${sec}`);
   const row = readCosts(path.join(dir, ".vf")).find((x) => x.model === MODELS.music);
   assert.ok(Math.abs(row.usd - 30 * 0.0025) < 1e-9);
+  const sfx = path.join(dir, "motions", r.motion.id, "sfx.wav");
+  assert.ok(fs.existsSync(sfx), "มีรางเสียงประกอบ (whoosh ตอนตัด + ding ตอนการ์ด)");
+  assert.ok(Math.abs(Number(probe(sfx).format.duration) - 40) < 0.3);
+  assert.equal(r.motion.sfx, true);
 });
 
 test("reuseCandidates: ตัวละคร/ฉาก/อัตราส่วนต้องตรง, ข้ามภาพที่ถูกปัดตก ใช้ครบโควตา หรือมาจากคลิปนี้, เรียงตามคำที่ซ้ำ", () => {
@@ -390,6 +395,35 @@ test("narrationTrackArgs / stillMotionArgs: หน่วงตามเวลา
   const s = stillMotionArgs({ image: "i.jpg", out: "o.mp4", w: 720, h: 1280, seconds: 5, move: "pan_left" });
   assert.equal(s[s.indexOf("-frames:v") + 1], "120");
   assert.match(s[s.indexOf("-vf") + 1], /zoompan=z='1\.15'.*s=720x1280:fps=24/);
+});
+
+test("stillMotionArgs: ไม่กระพริบดำตอนตัด (ยกเว้นฉากแรก), easing, จังหวะ hit = punch-in + แฟลช", () => {
+  const vf = (o) => { const a = stillMotionArgs({ image: "i.jpg", out: "o.mp4", w: 720, h: 1280, seconds: 5, ...o }); return a[a.indexOf("-vf") + 1]; };
+  assert.doesNotMatch(vf({ move: "zoom_in" }), /fade/);
+  assert.match(vf({ move: "zoom_in", first: true }), /fade=t=in:st=0:d=0\.3/);
+  assert.match(vf({ move: "zoom_in" }), /\(3-2\*/, "smoothstep");
+  assert.doesNotMatch(vf({ move: "zoom_in" }), /eq=/);
+  const hit = vf({ move: "shake", hit: 2 });
+  assert.match(hit, /gte\(on,48\)/, "punch-in/shake เริ่มที่เฟรม hit");
+  assert.match(hit, /exp\(-\(on-48\)/, "ค่อยๆ หยุด");
+  assert.match(hit, /eq=brightness='if\(between\(t,2,2\.1\)/);
+  for (const m of ["tilt_up", "crash_zoom"]) assert.ok(MOVES.includes(m), m);
+});
+
+test("sfx: สังเคราะห์เสียงได้จริงด้วย ffmpeg และ motionCues วาง whoosh/ding/impact ตามเวลา", async () => {
+  const cues = motionCues([
+    { seconds: 5, card: "#2", sfx_word: "BONK!", move: "shake" },
+    { seconds: 4, card: "", sfx_word: "YAY!", move: "bounce" },
+    { seconds: 3, card: "", sfx_word: "", move: "zoom_in" },
+  ]);
+  assert.deepEqual(cues.map((c) => c.kind), ["ding", "impact", "whoosh", "boing", "whoosh"]);
+  assert.equal(cues[1].at, 2);
+  assert.equal(cues[2].at, 4.8);
+  const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "vf-sfx-")), "impact.wav");
+  await ffmpeg(sfxSynthArgs("impact", out), "sfx");
+  const d = Number(probe(out).format.duration);
+  assert.ok(d > 0.3 && d < 0.7, `impact ยาว ${d}`);
+  assert.throws(() => sfxSynthArgs("nope", out), /sfx/);
 });
 
 test("pool: จำกัดงานพร้อมกัน คืนผลตามลำดับ และโยน error แรก", async () => {
