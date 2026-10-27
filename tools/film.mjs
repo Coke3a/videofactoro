@@ -19,6 +19,8 @@ import { pinInput, pinRun, costSince, contextMessage, loadProject, planRows, llm
 
 export const SHOT_MIN = 5;
 export const SHOT_MAX = 10;
+// ราคาวิดีโอ (ยังไม่ยืนยัน) คิดต่อคลิป และทุกช็อตต้องมี keyframe: ช็อตยาวใกล้ SHOT_MAX = จ่ายน้อยคลิปลง
+export const SHOT_TARGET = 9;
 export const CONCURRENCY = 3;
 export const VIDEO_BLOCK_RETRIES = 2;
 const SOFTEN = "Gentle, family-friendly cartoon tone: playful and harmless, no injury, no peril, no scary moments.";
@@ -51,11 +53,11 @@ export const FILM_SCHEMA = {
 };
 
 export function filmSystemPrompt(lang, total, { narrator = false, musicStyle = "" } = {}) {
-  const n = Math.round(total / 7);
+  const n = Math.round(total / SHOT_TARGET);
   return [
     `คุณคือผู้กำกับหนังสั้น ${total} วินาทีจาก project วิดีโอที่มีอยู่แล้ว เขียนรายการช็อตเป็น JSON ตาม schema เท่านั้น`,
     `- โครงเรื่อง: ช็อตแรกเป็น hook ที่ดึงคนดูใน 3 วินาที แล้วไต่ระดับ มีจุดพลิก และจบด้วย payoff ที่ตลกหรือน่าจดจำ`,
-    `- shots: ประมาณ ${n} ช็อต ช็อตละ ${SHOT_MIN}–${SHOT_MAX} วินาที ผลรวม duration ต้องใกล้ ${total} วินาที (คลาดได้ไม่เกิน 10%)`,
+    `- shots: ประมาณ ${n} ช็อต ช็อตละ 8–${SHOT_MAX} วินาทีเป็นหลัก (สั้นสุด ${SHOT_MIN} วินาทีเฉพาะจังหวะที่ต้องตัดเร็วจริงๆ) ผลรวม duration ต้องใกล้ ${total} วินาที (คลาดได้ไม่เกิน 10%)`,
     "- แต่ละช็อตมีการกระทำชัดเจนหนึ่งอย่าง ต่อเนื่องจากช็อตก่อนหน้า (ตำแหน่ง ของในมือ สถานที่) เปลี่ยนมุมกล้องระหว่างช็อตให้ดูมีชีวิต",
     "- characters: id ตัวละคร 1–3 ตัวต่อช็อต จาก id ที่มีอยู่เท่านั้น · place: id สถานที่ที่มีอยู่ หรือ \"\"",
     "- first_frame_prompt (ภาษาอังกฤษ): ภาพนิ่งเฟรมแรกของช็อต บอกตำแหน่ง ท่าทาง สีหน้า มุมกล้อง ไม่มีตัวอักษร ป้าย หรือโลโก้",
@@ -75,7 +77,7 @@ export const validateFilmPlan = (plan, ctx, { total }) => validateParts(plan, ct
 
 function dryRun(total, hd, audio, pj) {
   const quality = hd ? "hd" : "draft";
-  const n = Math.round(total / 7);
+  const n = Math.round(total / SHOT_TARGET);
   return {
     dry_run: true,
     ...planRows([
@@ -87,7 +89,7 @@ function dryRun(total, hd, audio, pj) {
       ...(audio.music ? [{ step: "music", model: MODELS.music, count: 1, usd: estimate(MODELS.music, { seconds: total + 1 }) }] : []),
     ]),
     assumptions: [
-      `ประมาณ ${n} ช็อต (ช็อตละ ~7 วินาที) · keyframe ช็อตละ 1 ภาพ (ไม่มี reroll)`,
+      `ประมาณ ${n} ช็อต (ช็อตละ ~${SHOT_TARGET} วินาที) · keyframe ช็อตละ 1 ภาพ (ไม่มี reroll)`,
       `วิดีโอ ${quality} ${n} คลิป — ราคาวิดีโอยังไม่ยืนยัน (คิดต่อคลิป)`,
       audio.narrator ? `พากย์ทุกช็อตรวม ≈ ${total} วินาที` : "ไม่มีพากย์",
       audio.music ? `เพลงเดียวทั้งเรื่อง ${total + 1} วินาที` : "ไม่มีเพลง (--no-music)",

@@ -223,7 +223,7 @@ test("keyframe ใช้ klein-4b เป็นค่าเริ่มต้น;
 test("film --dry-run และ --duration นอกช่วง ไม่เรียก API", async () => {
   const d = await film(["demo", "--prompt", "x", "--duration", "90", "--dry-run"]);
   assert.equal(d.dry_run, true);
-  assert.equal(d.planned.find((p) => p.step === "video").count, 13);
+  assert.equal(d.planned.find((p) => p.step === "video").count, 10);
   assert.ok(d.estimated_usd > 0.7);
   await assert.rejects(film(["demo", "--prompt", "x", "--duration", "10"]), (e) => e instanceof VfError && e.code === "USAGE");
   assert.equal(calls.length, 0);
