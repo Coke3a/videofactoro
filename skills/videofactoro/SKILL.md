@@ -120,8 +120,9 @@ stdout is always one JSON object: `{ok:true,...}` or `{ok:false,error:{code,mess
 
 Both take `--prompt`, `--duration 20-180` (default 60), `--no-narration`, `--no-music`, `--id`, `--max-rerolls` (default 1), `--foreground` and `--dry-run`, and run as a job (`vf wait`). Details are in `references/longform.md`.
 
-- `vf film <slug> --prompt "..." --duration 90`: a **generative AI** short film. The LLM writes a shot list (5–10 s shots, hook → build → payoff), and each shot gets a keyframe and a flux-3-video clip (3 shots at a time). The shots are joined, with one narration track and one music bed over the whole film. Draft by default, `--hd` for final. About $0.12–0.15 per draft shot, so 90 s ≈ $1.5–2, taking 10–20 min.
-- `vf motion <slug> --prompt "..." --duration 90`: a **motion-comic** with no video model. Each scene is an AI still of the characters, animated by ffmpeg (zoom, pan, shake, bounce), with text overlays (title, rank cards like `#3`, captions, comic sound words), narration and music. Good for countdowns ("Top 5…"), stories and explainers. About $0.03 per scene, so 90 s ≈ $0.6–0.8. Text needs ffmpeg with libass; without it you get a warning and a clip with no text.
+- `vf film <slug> --prompt "..." --duration 90`: a **generative AI** short film. The LLM writes a shot list (mostly 8–10 s shots, hook → build → payoff), and each shot gets a keyframe and a flux-3-video clip (3 shots at a time). The shots are joined, with one narration track and one music bed over the whole film. Draft by default, `--hd` for final. About $0.07 per draft shot (video $0.06 + keyframe), so 90 s ≈ $0.7–0.9, taking 10–20 min.
+- `vf motion <slug> --prompt "..." --duration 90`: a **motion-comic** with no video model. Each scene is an AI still of the characters, animated by ffmpeg (zoom, pan, shake, bounce), with text overlays (title, rank cards like `#3`, captions, comic sound words), narration and music. Good for countdowns ("Top 5…"), stories and explainers. About $0.005 per scene, so 90 s ≈ $0.2–0.3. Text needs ffmpeg with libass; without it you get a warning and a clip with no text.
+- Cost defaults: keyframes and stills use the cheap `flux-2-klein-4b` (character refs stay on 9b). If characters drift or the action is wrong across many shots, set `"keyframe_quality": "high"` in `project.json` (about 10x the image cost). Music for videos over 30 s is one 30 s loopable track, crossfaded to length.
 - Output: `renders/<id>.mp4`; working files are in `films/<id>/` or `motions/<id>/`.
 
 Pick by what the user asked for: "AI video / realistic motion" → film; "motion graphics / ranking / countdown / cheap and fast" → motion; a single moment → clip.
@@ -144,7 +145,7 @@ Pick by what the user asked for: "AI video / realistic motion" → film; "motion
 | Going straight to `--hd` | ~3× the price for a clip nobody approved | Draft, show, then HD |
 | Famous names in prompts | BLOCKED, or a legal problem | A generic description |
 | Treating a video QA warning as failure | False negatives on camera moves | Inspect frames, then decide |
-| Rerunning a crashed clip with a new `--id` | Pays again for finished steps | Run `resume` |
+| Rerunning a crashed or blocked job with a new `--id` | Pays again for the plan and every finished shot | Run `resume`; for a blocked shot, edit `plan.json` first |
 | Editing inside `vf:auto` blocks or the json files by hand | Overwritten, or breaks the state | Edit outside the blocks; use `--replace` |
 | Asking the user to paste API keys | Secrets in chat | `bash tools/set-env.sh` in their Terminal |
 

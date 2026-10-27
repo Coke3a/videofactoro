@@ -10,7 +10,7 @@ import { recordEpisode } from "./bible.mjs";
 import { MODELS } from "./models.mjs";
 import { estimate } from "./pricing.mjs";
 import { sha } from "./project-create.mjs";
-import { tts, mediaInfo } from "./audio.mjs";
+import { tts, mediaInfo, MUSIC_LOOP_SEC } from "./audio.mjs";
 import { WORDS_PER_SEC, CHARS_PER_SEC } from "./clip.mjs";
 import { makeKeyframe, makeVideo, pool, keyframeModel } from "./shots.mjs";
 import { ffmpeg, frameSize, normalizeArgs, concatArgs, concatList } from "./assemble.mjs";
@@ -66,7 +66,7 @@ export function filmSystemPrompt(lang, total, { narrator = false, musicStyle = "
     narrator
       ? `- narration: คำบรรยาย ภาษา ${lang} ของแต่ละช็อต 0–2 ประโยคสั้น เล่าเรื่องต่อเนื่องกันทั้งเรื่อง (ไม่บรรยายภาพตรงๆ) พูดจบในเวลาช็อตลบ 1 วินาที: ไม่เกิน ${WORDS_PER_SEC} คำ/วินาที (ภาษาไม่เว้นวรรค ${CHARS_PER_SEC} ตัวอักษร/วินาที) เว้นว่างบางช็อตได้ให้ภาพเล่าเอง`
       : '- narration: "" ทุกช็อต (project นี้ไม่มีผู้บรรยาย)',
-    `- music_prompt (ภาษาอังกฤษ): เพลงประกอบเพลงเดียวทั้งเรื่อง ยึดแนวของ project${musicStyle ? ` (${musicStyle})` : ""} บอกอารมณ์ เครื่องดนตรี BPM และการไต่ระดับ ไม่มีเสียงร้อง`,
+    `- music_prompt (ภาษาอังกฤษ): เพลงประกอบเพลงเดียวทั้งเรื่อง ยึดแนวของ project${musicStyle ? ` (${musicStyle})` : ""} บอกอารมณ์ เครื่องดนตรี และ BPM จังหวะคงที่ทั้งเพลง (จะถูกวนซ้ำ) ไม่มีเสียงร้อง`,
     `- title และ summary เป็นภาษา ${lang}`,
   ].join("\n");
 }
@@ -86,13 +86,13 @@ function dryRun(total, hd, audio, pj) {
       qaRow(n),
       { step: "video", model: MODELS.video, count: n, usd: estimate(MODELS.video, { clips: n, quality }) },
       ...(audio.narrator ? [{ step: "narration", model: MODELS.tts, count: n, usd: estimate(MODELS.tts, { seconds: total }) }] : []),
-      ...(audio.music ? [{ step: "music", model: MODELS.music, count: 1, usd: estimate(MODELS.music, { seconds: total + 1 }) }] : []),
+      ...(audio.music ? [{ step: "music", model: MODELS.music, count: 1, usd: estimate(MODELS.music, { seconds: Math.min(total + 1, MUSIC_LOOP_SEC) }) }] : []),
     ]),
     assumptions: [
       `ประมาณ ${n} ช็อต (ช็อตละ ~${SHOT_TARGET} วินาที) · keyframe ช็อตละ 1 ภาพ (ไม่มี reroll)`,
       `วิดีโอ ${quality} ${n} คลิป — ราคาวิดีโอยังไม่ยืนยัน (คิดต่อคลิป)`,
       audio.narrator ? `พากย์ทุกช็อตรวม ≈ ${total} วินาที` : "ไม่มีพากย์",
-      audio.music ? `เพลงเดียวทั้งเรื่อง ${total + 1} วินาที` : "ไม่มีเพลง (--no-music)",
+      audio.music ? total + 1 > MUSIC_LOOP_SEC ? `เพลงท่อนเดียว ${MUSIC_LOOP_SEC} วินาที วนให้ยาวทั้งเรื่อง` : `เพลงเดียวทั้งเรื่อง ${total + 1} วินาที` : "ไม่มีเพลง (--no-music)",
       `ใช้เวลาราว ${Math.ceil(n / CONCURRENCY) * 2}–${Math.ceil(n / CONCURRENCY) * 4} นาที (ทำพร้อมกัน ${CONCURRENCY} ช็อต)`,
     ],
   };

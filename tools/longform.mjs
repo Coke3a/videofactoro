@@ -5,9 +5,9 @@ import { VfError, log } from "./out.mjs";
 import { step } from "./state.mjs";
 import { ID_RE } from "./bible.mjs";
 import { riskFindings } from "./risk.mjs";
-import { music as makeMusic, mix, mediaInfo, narrationTempo, MUSIC_GAIN, MUSIC_GAIN_UNDER_VOICE } from "./audio.mjs";
+import { music as makeMusic, mix, mediaInfo, narrationTempo, MUSIC_GAIN, MUSIC_GAIN_UNDER_VOICE, MUSIC_LOOP_SEC } from "./audio.mjs";
 import { narrationBudget, narrationSize } from "./clip.mjs";
-import { ffmpeg, narrationTrackArgs } from "./assemble.mjs";
+import { ffmpeg, narrationTrackArgs, loopMusicArgs } from "./assemble.mjs";
 
 export const MIN_TOTAL = 20;
 export const MAX_TOTAL = 180;
@@ -101,8 +101,16 @@ export async function finishAudio({ state, dir, base, video, segments, musicProm
     if (!wantMusic) return { file: null };
     log("ขั้น music");
     const rel = `${base}/music.mp3`;
-    await makeMusic({ prompt: musicPrompt, seconds: total + 1, out: join(dir, rel), meta, costDir });
-    return { file: rel };
+    const need = total + 1;
+    if (need <= MUSIC_LOOP_SEC) {
+      await makeMusic({ prompt: musicPrompt, seconds: need, out: join(dir, rel), meta, costDir });
+      return { file: rel };
+    }
+    const loopRel = `${base}/music-loop.mp3`;
+    const info = await makeMusic({ prompt: musicPrompt, seconds: MUSIC_LOOP_SEC, out: join(dir, loopRel), meta, costDir, loop: true });
+    const srcSec = info?.duration ?? (await mediaInfo(join(dir, loopRel)))?.duration ?? MUSIC_LOOP_SEC;
+    await ffmpeg(loopMusicArgs({ src: join(dir, loopRel), srcSec, duration: need, out: join(dir, rel) }), "วนเพลง");
+    return { file: rel, looped: true };
   });
   return await step(state, "mix", async () => {
     mkdirSync(join(dir, "renders"), { recursive: true });

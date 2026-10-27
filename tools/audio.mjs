@@ -11,6 +11,8 @@ const execFileP = promisify(execFile);
 
 // ElevenLabs Music v2 รับความยาว 10 วินาทีขึ้นไป
 export const MUSIC_MIN_SEC = 10;
+// คลิปยาวกว่านี้: สร้างเพลงแค่ท่อนเดียวแล้ววนต่อ (เพลงคิดเงินต่อวินาที)
+export const MUSIC_LOOP_SEC = 30;
 export const MUSIC_GAIN = 0.6;
 export const MUSIC_GAIN_UNDER_VOICE = 0.4;
 export const NARRATION_DELAY_SEC = 0.3;
@@ -51,10 +53,11 @@ export function tts({ text, voice, out, meta, costDir }) {
   });
 }
 
-export function music({ prompt, seconds, out, meta, costDir }) {
+export function music({ prompt, seconds, out, meta, costDir, loop = false }) {
   const secs = Math.max(MUSIC_MIN_SEC, Math.ceil(seconds));
+  const loopNote = loop ? " Seamless loop: steady groove from the first beat, no intro, no build-up, no ending." : "";
   return paid(MODELS.music, {
-    prompt: `${prompt} Instrumental background music for a short video, no vocals, no loud lead melody.`,
+    prompt: `${prompt} Instrumental background music for a short video, no vocals, no loud lead melody.${loopNote}`,
     music_length_ms: secs * 1000, force_instrumental: true, output_format: "mp3_44100_128",
   }, {
     meta, costDir, step: "music", out,

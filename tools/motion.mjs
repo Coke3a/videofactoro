@@ -11,7 +11,7 @@ import { recordEpisode } from "./bible.mjs";
 import { MODELS } from "./models.mjs";
 import { estimate } from "./pricing.mjs";
 import { sha } from "./project-create.mjs";
-import { tts } from "./audio.mjs";
+import { tts, MUSIC_LOOP_SEC } from "./audio.mjs";
 import { WORDS_PER_SEC, CHARS_PER_SEC } from "./clip.mjs";
 import { makeKeyframe, pool, keyframeModel } from "./shots.mjs";
 import { ffmpeg, frameSize, stillMotionArgs, concatArgs, concatList, hasFilter, writeAss, burnArgs, fontFor, MOVES } from "./assemble.mjs";
@@ -117,12 +117,12 @@ function dryRun(total, audio, pj) {
       imageRow("still", n, keyframeModel(pj)),
       qaRow(n),
       ...(audio.narrator ? [{ step: "narration", model: MODELS.tts, count: n, usd: estimate(MODELS.tts, { seconds: total }) }] : []),
-      ...(audio.music ? [{ step: "music", model: MODELS.music, count: 1, usd: estimate(MODELS.music, { seconds: total + 1 }) }] : []),
+      ...(audio.music ? [{ step: "music", model: MODELS.music, count: 1, usd: estimate(MODELS.music, { seconds: Math.min(total + 1, MUSIC_LOOP_SEC) }) }] : []),
     ]),
     assumptions: [
       `ประมาณ ${n} ฉาก (ฉากละ ~5 วินาที) · ภาพนิ่งฉากละ 1 ภาพ (ไม่มี reroll) · ไม่ใช้โมเดลวิดีโอ`,
       audio.narrator ? `พากย์ทุกฉากรวม ≈ ${total} วินาที` : "ไม่มีพากย์",
-      audio.music ? `เพลงเดียวทั้งคลิป ${total + 1} วินาที` : "ไม่มีเพลง (--no-music)",
+      audio.music ? total + 1 > MUSIC_LOOP_SEC ? `เพลงท่อนเดียว ${MUSIC_LOOP_SEC} วินาที วนให้ยาวทั้งคลิป` : `เพลงเดียวทั้งคลิป ${total + 1} วินาที` : "ไม่มีเพลง (--no-music)",
       hasFilter("ass") ? "ตัวหนังสือ: ffmpeg มี libass" : "คำเตือน: ffmpeg เครื่องนี้ไม่มี libass จะไม่มีตัวหนังสือในคลิป",
       `render ด้วย ffmpeg ในเครื่องราว ${Math.ceil(total / 20)}–${Math.ceil(total / 8)} นาที`,
     ],

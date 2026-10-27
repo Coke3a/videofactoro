@@ -35,7 +35,7 @@ The parts the tool writes (character and place tables, file map, cost table) sit
 
 ## json files
 
-- `project.json`: `slug`, `lang`, `aspect`, `title`, `logline`, `premise`, `world`, `style_prompt` (appended verbatim to every image prompt), `palette`, `visual_rules`, `narrator` (bool), `narrator_voice` (a Gemini TTS voice such as `Leda`, `Puck`, `Kore`), `tone`, `music_style`, `story_rules`, `characters`, `places`, `created_at`, `version`.
+- `project.json`: `slug`, `lang`, `aspect`, `title`, `logline`, `premise`, `world`, `style_prompt` (appended verbatim to every image prompt), `palette`, `visual_rules`, `narrator` (bool), `narrator_voice` (a Gemini TTS voice such as `Leda`, `Puck`, `Kore`), `tone`, `music_style`, `story_rules`, optional `keyframe_quality` (`"high"` = klein-9b keyframes/stills; default is the cheaper klein-4b), `characters`, `places`, `created_at`, `version`.
 - `characters/<id>/character.json`: `id`, `name`, `role`, `look` (appearance, used verbatim in prompts), `personality`, `voice` (`{tts_voice, description}`), `ref` (main image path `ref/main.png`), `extra_refs` (`ref/extra-<n>.png` if any).
 - `places/<id>/place.json`: `id`, `name`, `desc` (scene description), `plate` (image path such as `plates/main.jpg`).
 

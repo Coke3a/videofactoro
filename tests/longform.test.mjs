@@ -12,7 +12,7 @@ import { VfError } from "../tools/out.mjs";
 import { main as create } from "../tools/project-create.mjs";
 import { main as film, validateFilmPlan } from "../tools/film.mjs";
 import { main as motion, validateMotionPlan, motionEvents } from "../tools/motion.mjs";
-import { assScript, hasFilter, narrationTrackArgs, stillMotionArgs, frameSize } from "../tools/assemble.mjs";
+import { assScript, hasFilter, narrationTrackArgs, stillMotionArgs, frameSize, loopMusicArgs } from "../tools/assemble.mjs";
 import { pool } from "../tools/shots.mjs";
 import { goodBible } from "./fixtures/bible.mjs";
 import { bodyOf } from "./fixtures/body.mjs";
@@ -218,6 +218,28 @@ test("keyframe ใช้ klein-4b เป็นค่าเริ่มต้น;
   const rows = fs.readFileSync(path.join(dir, ".vf", "costs.jsonl"), "utf8").trim().split("\n").map(JSON.parse);
   const fast = rows.find((r) => r.model === MODELS.imageFast && r.outcome === "ok");
   assert.ok(fast.usd > 0 && fast.usd < 0.005, `4b ภาพละไม่ถึงครึ่งเซนต์ (${fast.usd})`);
+});
+
+test("loopMusicArgs: เพลงท่อนสั้นวน crossfade ได้ยาวตามที่ขอ", () => {
+  const out = path.join(root, "loop.mp3");
+  execFileSync("ffmpeg", ["-loglevel", "error", "-y", ...loopMusicArgs({ src: MP3, srcSec: 3, duration: 20, out })]);
+  const sec = Number(execFileSync("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", out]).toString());
+  assert.ok(Math.abs(sec - 20) < 0.2, `ยาว ${sec}`);
+  assert.equal(loopMusicArgs({ src: "a.mp3", srcSec: 30, duration: 25, out: "o.mp3" }).filter((a) => a === "-i").length, 1);
+});
+
+test("motion ยาวกว่า 30 วินาที: จ่ายเพลงท่อนเดียว 30 วินาที แล้ววนให้ยาวทั้งคลิป", async () => {
+  plan = MOTION();
+  plan.scenes = Array.from({ length: 5 }, (_, i) => scene(8, { card: `#${5 - i}` }));
+  const r = await motion(["demo", "--prompt", "เพลงวน", "--duration", "40", "--foreground"]);
+  const [m] = posts(MODELS.music);
+  assert.equal(m.body.input.music_length_ms, 30000);
+  assert.match(m.body.input.prompt, /Seamless loop/);
+  const musicFile = path.join(dir, "motions", r.motion.id, "music.mp3");
+  const sec = Number(execFileSync("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", musicFile]).toString());
+  assert.ok(Math.abs(sec - 41) < 0.3, `เพลงยาว ${sec}`);
+  const row = readCosts(path.join(dir, ".vf")).find((x) => x.model === MODELS.music);
+  assert.ok(Math.abs(row.usd - 30 * 0.0025) < 1e-9);
 });
 
 test("film --dry-run และ --duration นอกช่วง ไม่เรียก API", async () => {

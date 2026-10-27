@@ -60,7 +60,7 @@ Exit codes: `0` ok · `1` INTERNAL · `2` USAGE · `3` CONFIG · `4` BLOCKED (co
 ## How a clip is made
 
 1. **Plan:** an LLM (Gemini 3.8 Flash, falling back to Claude Haiku 5.5) picks characters and a place and writes the first-frame prompt, a timed video prompt with diegetic sound, narration and a music brief.
-2. **Keyframe:** FLUX.2 klein 9B renders the first frame from the character reference images and the place plate. A vision model (clef-omni) checks it and it is rerolled if needed.
+2. **Keyframe:** FLUX.2 klein 4B (9B for character references, or with `keyframe_quality: "high"`) renders the first frame from the character reference images and the place plate. A vision model (clef-omni) checks it and it is rerolled if needed.
 3. **Video:** FLUX.3 Video animates the keyframe (image-to-video, with scene audio).
 4. **Narration:** Gemini TTS reads the line in the project narrator's voice.
 5. **Music:** ElevenLabs Music v2 writes an instrumental bed when the shot needs one.

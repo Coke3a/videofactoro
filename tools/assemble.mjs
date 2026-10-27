@@ -94,6 +94,22 @@ export function narrationTrackArgs({ items, duration, out }) {
   return [...inputs, "-filter_complex", graph, "-map", "[out]", "-ar", "48000", "-ac", "2", out];
 }
 
+// เพลงสั้นวนต่อกันด้วย crossfade จนยาวถึง duration (จ่ายเพลงแค่ท่อนเดียว)
+export function loopMusicArgs({ src, srcSec, duration, out, xfade: want = 2 }) {
+  if (!(srcSec > 0.5)) throw new VfError("INTERNAL", `เพลงสั้นเกินกว่าจะวน (${srcSec} วินาที)`);
+  const xfade = Math.min(want, srcSec / 4);
+  const copies = Math.max(1, Math.ceil((duration - xfade) / (srcSec - xfade)));
+  const inputs = Array.from({ length: copies }, () => ["-i", src]).flat();
+  const chain = [];
+  let last = "[0:a]";
+  for (let i = 1; i < copies; i++) {
+    chain.push(`${last}[${i}:a]acrossfade=d=${xfade}:c1=tri:c2=tri[x${i}]`);
+    last = `[x${i}]`;
+  }
+  const graph = [...chain, `${last}atrim=0:${duration.toFixed(3)}[out]`].join(";");
+  return [...inputs, "-filter_complex", graph, "-map", "[out]", "-c:a", "libmp3lame", "-b:a", "128k", out];
+}
+
 // ---------- ตัวหนังสือ (ASS) ----------
 
 const assTime = (t) => {
