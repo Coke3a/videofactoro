@@ -12,7 +12,7 @@ import { estimate } from "./pricing.mjs";
 import { sha } from "./project-create.mjs";
 import { tts, mediaInfo, MUSIC_LOOP_SEC } from "./audio.mjs";
 import { WORDS_PER_SEC, CHARS_PER_SEC } from "./clip.mjs";
-import { makeKeyframe, makeVideo, pool, keyframeModel } from "./shots.mjs";
+import { makeKeyframe, makeVideo, pool, keyframeModel, SOFTEN } from "./shots.mjs";
 import { ffmpeg, frameSize, normalizeArgs, concatArgs, concatList } from "./assemble.mjs";
 import { COMMON_OPTIONS, parseCommon, validateParts, finishAudio } from "./longform.mjs";
 import { pinInput, pinRun, costSince, contextMessage, loadProject, planRows, llmRow, imageRow, qaRow, runEntity } from "./entities.mjs";
@@ -23,7 +23,6 @@ export const SHOT_MAX = 10;
 export const SHOT_TARGET = 9;
 export const CONCURRENCY = 3;
 export const VIDEO_BLOCK_RETRIES = 2;
-const SOFTEN = "Gentle, family-friendly cartoon tone: playful and harmless, no injury, no peril, no scary moments.";
 
 const OPTIONS = { ...COMMON_OPTIONS, hd: { type: "boolean" } };
 

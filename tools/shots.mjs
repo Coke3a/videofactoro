@@ -14,6 +14,7 @@ import { baseSeed, seedAt } from "./project-create.mjs";
 
 export const NO_MUSIC = "No background music.";
 export const OUTPUT_FLAG_RETRIES = 3;
+export const SOFTEN = "Gentle, family-friendly cartoon tone: playful and harmless, no injury, no peril, no scary moments.";
 
 // project.json "keyframe_quality": "high" ใช้ klein-9b กับ keyframe/ภาพนิ่ง (ค่าเริ่มต้นใช้ 4b ที่ถูกกว่า)
 export const keyframeModel = (pj) => (pj?.keyframe_quality === "high" ? MODELS.image : MODELS.imageFast);
@@ -38,18 +39,25 @@ export async function makeKeyframe({ dir, pj, slug, cast, place, prompt, seedKey
   const res = await generateWithQa({
     maxRerolls,
     generate: async (attempt) => {
-      // klein บางครั้ง flag ภาพที่สร้างออกมา (3030 "output has been flagged") แบบสุ่มตาม seed: เปลี่ยน seed แล้วลองใหม่
-      for (let k = 0; ; k++) {
-        try {
-          return await generateImage({
-            projectDir: dir, prompt: imgPrompt, refs, aspect: pj.aspect ?? "9:16", seed: seedAt(base, attempt + k * 100), need,
-            kind, characters: cast.map((c) => c.id), place: place?.id ?? null, meta: { ...meta, step: kind }, model,
-          });
-        } catch (err) {
-          if (!(isOutputFlag(err) && k < OUTPUT_FLAG_RETRIES)) throw err;
-          log(`${kind}: ภาพถูก flag เปลี่ยน seed แล้วลองใหม่ (${k + 1}/${OUTPUT_FLAG_RETRIES})`);
+      // klein บางครั้ง flag ภาพที่สร้างออกมา (3030 "output has been flagged") แบบสุ่มตาม seed แม้ prompt ไม่มีอะไรผิด
+      // seed ตายตัว (resume ได้ผลเดิม) จึงไล่ระดับเองในรอบเดียว: seed ใหม่ → prompt ที่อ่อนลง → klein-9b
+      const tiers = flagTiers(model);
+      for (let t = 0; t < tiers.length; t++) {
+        const tier = tiers[t];
+        for (let k = 0; k < tier.seeds; k++) {
+          try {
+            return await generateImage({
+              projectDir: dir, prompt: tier.soften ? `${imgPrompt} ${SOFTEN}` : imgPrompt, refs, aspect: pj.aspect ?? "9:16",
+              seed: seedAt(base, attempt + (t * 10 + k) * 100), need,
+              kind, characters: cast.map((c) => c.id), place: place?.id ?? null, meta: { ...meta, step: kind }, model: tier.model,
+            });
+          } catch (err) {
+            if (!isOutputFlag(err) || (t === tiers.length - 1 && k === tier.seeds - 1)) throw err;
+            log(`${kind}: ภาพถูก flag (${tier.label} ${k + 1}/${tier.seeds}) ลองใหม่`);
+          }
         }
       }
+      throw new VfError("INTERNAL", "flagTiers ว่าง");
     },
     check: async (c) => {
       log(`QA ${kind}`);
@@ -74,6 +82,15 @@ export async function makeKeyframe({ dir, pj, slug, cast, place, prompt, seedKey
     qa: res.best.qa,
     ...(res.passed ? {} : { warning: `${kind} ไม่ผ่าน QA: ${res.verdict.reasons.join(", ")} — ใช้ภาพคะแนนสูงสุด` }),
   };
+}
+
+// ลำดับการลองเมื่อภาพถูก flag: รวม OUTPUT_FLAG_RETRIES + 1 seed ในระดับแรก
+export function flagTiers(model) {
+  return [
+    { label: "seed ใหม่", model, soften: false, seeds: OUTPUT_FLAG_RETRIES + 1 },
+    { label: "prompt อ่อนลง", model, soften: true, seeds: 2 },
+    ...(model === MODELS.image ? [] : [{ label: "klein-9b", model: MODELS.image, soften: true, seeds: 2 }]),
+  ];
 }
 
 // เขียนผล QA ลงคลัง (ให้ reuse เลือกได้) — คลังพังไม่ควรทำให้ภาพที่ได้แล้วเสีย
