@@ -92,4 +92,16 @@ Projects live in `$VF_PROJECTS` (default `./projects/`, git-ignored). Start read
 npm test    # node --test, no network
 ```
 
-The design spec is [docs/superpowers/specs/2026-10-26-videofactoro-design.md](docs/superpowers/specs/2026-10-26-videofactoro-design.md). Live probe results are in [spikes/RESULTS.md](spikes/RESULTS.md).
+Logs, error messages and the internal LLM prompts are in Thai; the JSON output, the docs and the agent skill are in English.
+
+## Self-hosting
+
+videofactoro is a tool you run yourself. There is no hosted service and no shared account:
+
+- You bring your own Cloudflare account, API token and AI Gateway credits. Every paid call is billed to your account. Prices in `skills/videofactoro/references/costs.md` are estimates; some are unverified, so check your Cloudflare bill.
+- You are responsible for what you generate and how you use it, including the terms of the models it calls (Black Forest Labs FLUX, ElevenLabs Music, Google Gemini and others on Cloudflare), especially for commercial use.
+- Keep your token to yourself. Nothing in this repo needs anyone else's keys.
+
+## License
+
+[MIT](LICENSE). Provided as is, without warranty. The author does not run, support or pay for any deployment.

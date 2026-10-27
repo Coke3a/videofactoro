@@ -1,6 +1,6 @@
 # videofactoro docs
 
-The overview and quick start are in the [main README](../README.md). The full design is the [spec](superpowers/specs/2026-10-26-videofactoro-design.md).
+The overview and quick start are in the [main README](../README.md).
 
 ## Setup
 
@@ -17,7 +17,7 @@ You never copy `.env.example` or type keys by hand; it only lists the variable n
 | `bin/vf.mjs` | Entry point and command router |
 | `tools/cf.mjs` | Workers AI / AI Gateway client: run, retry, async polling, media download, redaction |
 | `tools/llm.mjs` | Structured JSON from Gemini/Haiku with schema validation and repair rounds |
-| `tools/images.mjs` | FLUX.2 klein 9B with inline reference images; sizes per aspect |
+| `tools/images.mjs` | FLUX.2 klein 9B (refs, plates) and 4B (keyframes, stills) with inline reference images; sizes per aspect |
 | `tools/qa.mjs`, `tools/qa-rules.mjs` | clef-omni vision QA and the pass/fail rules per asset type |
 | `tools/bible.mjs` | Project bible schema, PROJECT.md/EPISODES.md rendering, cost table |
 | `tools/project-create.mjs`, `character-add.mjs`, `place-add.mjs` | Project building commands |
@@ -33,7 +33,6 @@ You never copy `.env.example` or type keys by hand; it only lists the variable n
 | `tools/risk.mjs` | Prompt risk check (protected names) before paid calls |
 | `tools/pricing.mjs`, `cost.mjs` | Price table and cost log |
 | `skills/videofactoro/` | Agent skill (SKILL.md + references) |
-| `spikes/` | Live probes of each provider; results in `spikes/RESULTS.md` |
 
 ## Conventions
 

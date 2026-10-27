@@ -6,3 +6,5 @@ spikes/out/
 *.log
 .DS_Store
 .vf-setup/
+docs/superpowers/
+spikes/

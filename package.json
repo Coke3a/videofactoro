@@ -1,1 +1,1 @@
-{"name":"videofactoro","type":"module","private":true,"engines":{"node":">=22"},"bin":{"vf":"bin/vf.mjs"},"scripts":{"test":"node --test \"tests/**/*.test.mjs\""}}
+{"name": "videofactoro", "type": "module", "private": true, "engines": {"node": ">=22"}, "bin": {"vf": "bin/vf.mjs"}, "scripts": {"test": "node --test \"tests/**/*.test.mjs\""}, "license": "MIT"}
