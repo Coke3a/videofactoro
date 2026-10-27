@@ -13,7 +13,7 @@ import { estimate } from "./pricing.mjs";
 import { sha } from "./project-create.mjs";
 import { tts, MUSIC_LOOP_SEC } from "./audio.mjs";
 import { WORDS_PER_SEC, CHARS_PER_SEC } from "./clip.mjs";
-import { makeKeyframe, pool, keyframeModel } from "./shots.mjs";
+import { makeKeyframe, pool, keyframeModel, reuseStill } from "./shots.mjs";
 import { ffmpeg, frameSize, stillMotionArgs, concatArgs, concatList, hasFilter, writeAss, burnArgs, fontFor, MOVES } from "./assemble.mjs";
 import { COMMON_OPTIONS, parseCommon, validateParts, finishAudio } from "./longform.mjs";
 import { pinInput, pinRun, costSince, contextMessage, loadProject, planRows, llmRow, imageRow, qaRow, runEntity } from "./entities.mjs";
@@ -21,6 +21,8 @@ import { pinInput, pinRun, costSince, contextMessage, loadProject, planRows, llm
 export const SCENE_MIN = 3;
 export const SCENE_MAX = 8;
 export const CONCURRENCY = 3;
+
+const OPTIONS = { ...COMMON_OPTIONS, "no-reuse": { type: "boolean" } };
 const CAPTION_MAX = 60;
 const TAG_MAX = 14;
 
@@ -129,7 +131,7 @@ function dryRun(total, audio, pj) {
   };
 }
 
-async function work({ dir, ctx, state, key, prompt, total, maxRerolls, audio, run: fresh }) {
+async function work({ dir, ctx, state, key, prompt, total, maxRerolls, audio, reuse, run: fresh }) {
   const { pj, slug, lang, characters, places } = ctx;
   const run = pinRun(state, fresh);
   const costDir = join(dir, ".vf");
@@ -163,6 +165,7 @@ async function work({ dir, ctx, state, key, prompt, total, maxRerolls, audio, ru
   const meta = { project: slug, motion: id, item: id, run };
   const { w, h } = frameSize(aspect);
   const warnings = [];
+  const reserved = new Set();
 
   const made = await pool(plan.scenes, CONCURRENCY, async (scene, i) => {
     const n = String(i + 1).padStart(2, "0");
@@ -170,6 +173,13 @@ async function work({ dir, ctx, state, key, prompt, total, maxRerolls, audio, ru
     const place = scene.place ? places.find((p) => p.id === scene.place) : null;
     const smeta = { ...meta, item: `${id}#${n}` };
     const still = await step(state, `scene-${n}-still`, async () => {
+      if (reuse) {
+        const old = await reuseStill({ dir, pj, cast, place, prompt: scene.image_prompt, use: `${id}#${n}`, reserved, skipNeed: `still:${id}#`, meta: smeta, out: `${base}/scene-${n}.jpg` });
+        if (old) {
+          log(`ฉาก ${n}: ใช้ภาพเก่า ${old.reused}`);
+          return old;
+        }
+      }
       log(`ฉาก ${n}: ภาพนิ่ง`);
       return makeKeyframe({
         dir, pj, slug, cast, place, prompt: scene.image_prompt, seedKey: `motion:${id}:${n}`, need: `still:${id}#${n}`,
@@ -235,6 +245,7 @@ async function work({ dir, ctx, state, key, prompt, total, maxRerolls, audio, ru
   return {
     motion: {
       id, title: plan.title, seconds: scenes.reduce((s, x) => s + x.seconds, 0), scenes: scenes.length,
+      reused_stills: made.filter((m) => m.still.reused).length,
       file: join(dir, final.file), dir: join(dir, base), text: texted.text, narration: final.narration, music: final.music,
       ...(warnings.length ? { warnings } : {}),
     },
@@ -244,7 +255,7 @@ async function work({ dir, ctx, state, key, prompt, total, maxRerolls, audio, ru
 }
 
 export async function main(argv) {
-  const { values, positionals } = parse(argv, COMMON_OPTIONS);
+  const { values, positionals } = parse(argv, OPTIONS);
   const { prompt, total, id, maxRerolls } = parseCommon(values);
   const dir = resolveProject(positionals[0]);
   const ctx = loadProject(dir);
@@ -266,10 +277,11 @@ export async function main(argv) {
     return state;
   };
 
+  const reuse = !values["no-reuse"];
   const command = ["motion", dir, `--prompt=${prompt}`, `--duration=${total}`, `--max-rerolls=${maxRerolls}`,
-    ...(id ? [`--id=${id}`] : []), ...(values["no-narration"] ? ["--no-narration"] : []), ...(values["no-music"] ? ["--no-music"] : [])];
+    ...(id ? [`--id=${id}`] : []), ...(values["no-narration"] ? ["--no-narration"] : []), ...(values["no-music"] ? ["--no-music"] : []), ...(reuse ? [] : ["--no-reuse"])];
   return await runEntity({
     dir, projectRef: positionals[0], slug: ctx.slug, command, label: `motion ${key}`, foreground: values.foreground,
-    work: ({ run }) => work({ dir, ctx, state: openRun(), key, prompt, total, maxRerolls, audio, run }),
+    work: ({ run }) => work({ dir, ctx, state: openRun(), key, prompt, total, maxRerolls, audio, reuse, run }),
   });
 }

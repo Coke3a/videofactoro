@@ -13,7 +13,7 @@ Both make a 20–180 s video from an existing project's characters and places, r
 
 ## Common flags
 
-`--prompt` (required), `--duration 20-180` (default 60), `--no-narration`, `--no-music`, `--id <id>`, `--max-rerolls 0-5` (default 2, per image), `--foreground`, `--dry-run`. `vf film` also takes `--hd`.
+`--prompt` (required), `--duration 20-180` (default 60), `--no-narration`, `--no-music`, `--id <id>`, `--max-rerolls 0-5` (default 2, per image), `--foreground`, `--dry-run`. `vf film` also takes `--hd`; `vf motion` also takes `--no-reuse` (see Reuse below).
 
 Narration is on only when the project has a narrator (`project.json` → `narrator: true`). Music is always on unless you pass `--no-music`: one instrumental bed for the whole video, ducked under the voice.
 
@@ -41,6 +41,10 @@ Say the format, the beats, and the tone. The planner handles the rest.
 
 - Film: "Biscuit tries to bake a birthday cake for Marmalade; every step goes wrong; ending: the cat loves the burnt one."
 - Motion: "Top 5 times Biscuit the dog panicked over nothing, countdown from #5 to #1, punchy and silly."
+
+## Reuse (motion)
+
+Before making a scene's still, `vf motion` checks `library/index.json` for up to 3 old stills/keyframes with the same character set, the same place and the same aspect whose prompt shares at least 30 % of the scene's content words (character descriptions and the style prompt don't count). clef checks each with the keyframe questions; it is used only if the characters match and `fits_shot` ≥ 0.75. Images that failed QA earlier (`status: rejected`), images made in the same video, and images already used 3 times are skipped. A reused still costs only the clef check (~$0.0002) and is logged as a $0 `still` row with `reused: <entry id>`. The library entry's `used_in` records where it went.
 
 ## Resume and repeats
 

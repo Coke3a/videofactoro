@@ -13,7 +13,7 @@ import { main as create } from "../tools/project-create.mjs";
 import { main as film, validateFilmPlan } from "../tools/film.mjs";
 import { main as motion, validateMotionPlan, motionEvents } from "../tools/motion.mjs";
 import { assScript, hasFilter, narrationTrackArgs, stillMotionArgs, frameSize, loopMusicArgs } from "../tools/assemble.mjs";
-import { pool } from "../tools/shots.mjs";
+import { pool, reuseCandidates } from "../tools/shots.mjs";
 import { goodBible } from "./fixtures/bible.mjs";
 import { bodyOf } from "./fixtures/body.mjs";
 
@@ -41,7 +41,7 @@ const MOTION = () => ({
   scenes: [scene(5, { card: "#4", move: "zoom_in" }), scene(5, { card: "#3" }), scene(5, { card: "#2", move: "bounce" }), scene(5, { card: "#1", narration: "" })],
 });
 
-let MP4, WAV, MP3, root, dir, saved, calls, origWrite, plan, pollFail, flagImages, blockVideos;
+let MP4, WAV, MP3, root, dir, saved, calls, origWrite, plan, pollFail, flagImages, blockVideos, fitsScore;
 const reply = (result) => ({ ok: true, status: 200, text: async () => JSON.stringify({ success: true, result }) });
 const posts = (model) => calls.filter((c) => c.method === "POST" && c.body?.model === model);
 const probe = (f) => JSON.parse(execFileSync("ffprobe", ["-v", "error", "-show_entries", "stream=codec_type:format=duration", "-of", "json", f], { encoding: "utf8" }));
@@ -65,6 +65,7 @@ beforeEach(async () => {
   pollFail = false;
   flagImages = 0;
   blockVideos = 0;
+  fitsScore = 0.9;
   calls = [];
   cf.setFetch(async (url, init = {}) => {
     const u = String(url);
@@ -79,7 +80,7 @@ beforeEach(async () => {
     const body = bodyOf(url, init);
     calls.push({ url: u, method, body });
     if (u.includes("clef-omni")) {
-      const answers = Object.fromEntries(Object.keys(body.questions).map((k) => [k, { noul: /text/.test(k) || k === "has_people_or_animals" ? 0 : 0.9 }]));
+      const answers = Object.fromEntries(Object.keys(body.questions).map((k) => [k, { noul: /text/.test(k) || k === "has_people_or_animals" ? 0 : k === "fits_shot" ? fitsScore : 0.9 }]));
       return reply({ answers, usage: { prompt_tokens: 1500 } });
     }
     if (body?.model === MODELS.image || body?.model === MODELS.imageFast) {
@@ -240,6 +241,52 @@ test("motion ยาวกว่า 30 วินาที: จ่ายเพล�
   assert.ok(Math.abs(sec - 41) < 0.3, `เพลงยาว ${sec}`);
   const row = readCosts(path.join(dir, ".vf")).find((x) => x.model === MODELS.music);
   assert.ok(Math.abs(row.usd - 30 * 0.0025) < 1e-9);
+});
+
+test("reuseCandidates: ตัวละคร/ฉาก/อัตราส่วนต้องตรง, ข้ามภาพที่ถูกปัดตก ใช้ครบโควตา หรือมาจากคลิปนี้, เรียงตามคำที่ซ้ำ", () => {
+  const e = (id, extra = {}) => ({
+    id, kind: "still", blob: `library/${id}.jpg`, aspect: "9:16", place: "kitchen", characters: ["dog", "cat"], status: "candidate",
+    prompt: "The dog jumps in surprise next to the cake.", need: "still:old-1234#01", used_in: [], ...extra,
+  });
+  const lib = { entries: [
+    e("weaker", { prompt: "The dog jumps by the window near the cake." }),
+    e("best", { status: "selected" }),
+    e("other-cast", { characters: ["dog"] }),
+    e("other-place", { place: "garden" }),
+    e("wide", { aspect: "16:9" }),
+    e("rejected", { status: "rejected" }),
+    e("worn-out", { used_in: ["a", "b", "c"] }),
+    e("this-clip", { need: "still:new-abcd#02" }),
+    e("plate", { kind: "place-plate" }),
+    e("unrelated", { prompt: "Rain on a quiet street at night." }),
+  ] };
+  const got = reuseCandidates(lib, {
+    cast: [{ id: "cat" }, { id: "dog" }], place: { id: "kitchen" }, aspect: "9:16", prompt: "The dog jumps in surprise beside a cake.",
+    skipNeed: "still:new-abcd#", exclude: new Set(),
+  }).map((x) => x.id);
+  assert.deepEqual(got, ["best", "weaker"]);
+});
+
+test("motion reuse: clef ให้ผ่าน → ใช้ภาพเก่าในคลังแทนการสร้างใหม่; fits ต่ำกว่าเกณฑ์ reuse หรือ --no-reuse → สร้างใหม่", async () => {
+  plan = MOTION();
+  await motion(["demo", "--prompt", "รอบแรก", "--duration", "20", "--foreground"]);
+  assert.equal(posts(MODELS.imageFast).length, 4);
+  calls.length = 0;
+  const r = await motion(["demo", "--prompt", "รอบสอง", "--duration", "20", "--foreground", "--id", "again"]);
+  assert.equal(posts(MODELS.imageFast).length, 0, "ใช้ภาพเก่าทุกฉาก");
+  assert.equal(r.motion.reused_stills, 4);
+  const lib = JSON.parse(fs.readFileSync(path.join(dir, "library", "index.json"), "utf8"));
+  assert.equal(lib.entries.filter((x) => (x.used_in ?? []).length === 1).length, 4, "ภาพเก่าแต่ละภาพใช้ครั้งเดียวต่อคลิป");
+  calls.length = 0;
+  fitsScore = 0.6; // ผ่านเกณฑ์ภาพใหม่ (0.5) แต่ไม่ถึงเกณฑ์ reuse (0.75)
+  const r2 = await motion(["demo", "--prompt", "รอบสาม", "--duration", "20", "--foreground", "--id", "third"]);
+  assert.equal(r2.motion.reused_stills, 0);
+  assert.equal(posts(MODELS.imageFast).length, 4);
+  calls.length = 0;
+  fitsScore = 0.9;
+  const r3 = await motion(["demo", "--prompt", "รอบสี่", "--duration", "20", "--foreground", "--id", "fourth", "--no-reuse"]);
+  assert.equal(r3.motion.reused_stills, 0);
+  assert.equal(posts(MODELS.imageFast).length, 4);
 });
 
 test("film --dry-run และ --duration นอกช่วง ไม่เรียก API", async () => {
