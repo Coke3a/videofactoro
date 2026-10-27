@@ -9,6 +9,13 @@ import { logCost, readCosts, summarize, renderCostTable } from "../tools/cost.mj
 
 const near = (a, b) => assert.ok(Math.abs(a - b) < 1e-9, `${a} != ${b}`);
 
+test("estimate klein-4b: ต่อช่อง 512x512 ของภาพที่ได้ + ภาพอ้างอิง", () => {
+  // 768x1360 = 2x3 = 6 ช่อง, ref 1024x1024 สองภาพ = 8 ช่อง
+  near(estimate(MODELS.imageFast, { tiles: 6, refTiles: 8 }), 6 * 0.000287 + 8 * 0.000059);
+  near(estimate(MODELS.imageFast, { images: 2, tiles: 6, refTiles: 0 }), 2 * 6 * 0.000287);
+  assert.equal(estimate(MODELS.imageFast, { tiles: "x" }), null);
+});
+
 test("estimate klein-9b 1MP = 0.015", () => {
   near(estimate(MODELS.image, { mp: 1 }), 0.015);
   near(estimate(MODELS.image, { images: 2, mp: 1 }), 0.03);

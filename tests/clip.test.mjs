@@ -29,7 +29,7 @@ const PLAN = () => ({
 let MP4, WAV, MP3, root, dir, saved, calls, origWrite, plan, pollFail, needsMusic;
 const reply = (result) => ({ ok: true, status: 200, text: async () => JSON.stringify({ success: true, result }) });
 const videoPosts = () => calls.filter((c) => c.method === "POST" && c.body?.model === MODELS.video);
-const imagePosts = () => calls.filter((c) => c.body?.model === MODELS.image);
+const imagePosts = () => calls.filter((c) => c.body?.model === MODELS.imageFast);
 const ttsPosts = () => calls.filter((c) => c.body?.model === MODELS.tts);
 const musicPosts = () => calls.filter((c) => c.body?.model === MODELS.music);
 const streams = (f) => JSON.parse(execFileSync("ffprobe", ["-v", "error", "-show_entries", "stream=codec_type:format=duration", "-of", "json", f], { encoding: "utf8" }));
@@ -63,7 +63,7 @@ function install() {
       const answers = Object.fromEntries(Object.keys(body.questions).map((k) => [k, { noul: /text/.test(k) || k === "has_people_or_animals" || k === "dialogue_heavy" ? 0 : k === "needs_music" ? needsMusic : 0.9 }]));
       return reply({ answers, usage: { prompt_tokens: 1500 } });
     }
-    if (body?.model === MODELS.image) return reply({ image: B64 });
+    if (body?.model === MODELS.image || body?.model === MODELS.imageFast) return reply({ image: B64 });
     if (body?.model === MODELS.video) return reply({ state: "queued", request_id: "req-1" });
     if (body?.model === MODELS.tts) return reply({ audio: "data:audio/wav;base64," + fs.readFileSync(WAV).toString("base64") });
     if (body?.model === MODELS.music) return reply({ state: "Completed", result: { audio: "https://cdn.example/m.mp3" } });

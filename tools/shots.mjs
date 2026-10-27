@@ -14,6 +14,9 @@ import { baseSeed, seedAt } from "./project-create.mjs";
 export const NO_MUSIC = "No background music.";
 export const OUTPUT_FLAG_RETRIES = 3;
 
+// project.json "keyframe_quality": "high" ใช้ klein-9b กับ keyframe/ภาพนิ่ง (ค่าเริ่มต้นใช้ 4b ที่ถูกกว่า)
+export const keyframeModel = (pj) => (pj?.keyframe_quality === "high" ? MODELS.image : MODELS.imageFast);
+
 // flag ที่ผลลัพธ์ (ไม่ใช่ที่ prompt): เปลี่ยน seed แล้วมักผ่าน
 export const isOutputFlag = (err) => err instanceof VfError && err.code === "BLOCKED" && /output has been flagged|"code":\s*3030/i.test(err.message);
 
@@ -30,6 +33,7 @@ export async function makeKeyframe({ dir, pj, slug, cast, place, prompt, seedKey
   const qaRefs = await Promise.all(charRefs.map((f) => toQaImage(f)));
   const qctx = { characters: cast, shot: prompt, style: pj.style_prompt ?? "" };
   const base = baseSeed(slug, seedKey);
+  const model = keyframeModel(pj);
   const res = await generateWithQa({
     maxRerolls,
     generate: async (attempt) => {
@@ -38,7 +42,7 @@ export async function makeKeyframe({ dir, pj, slug, cast, place, prompt, seedKey
         try {
           return await generateImage({
             projectDir: dir, prompt: imgPrompt, refs, aspect: pj.aspect ?? "9:16", seed: seedAt(base, attempt + k * 100), need,
-            kind, characters: cast.map((c) => c.id), place: place?.id ?? null, meta: { ...meta, step: kind },
+            kind, characters: cast.map((c) => c.id), place: place?.id ?? null, meta: { ...meta, step: kind }, model,
           });
         } catch (err) {
           if (!(isOutputFlag(err) && k < OUTPUT_FLAG_RETRIES)) throw err;
@@ -59,7 +63,7 @@ export async function makeKeyframe({ dir, pj, slug, cast, place, prompt, seedKey
   });
   for (const a of res.attempts) {
     if (a.verdict.pass || a.candidate === res.best) continue;
-    logCost(costDir, { ...costRow(meta, MODELS.image, kind), outcome: "qa_reject", units: {}, usd: 0, reject_of: a.candidate.entry.id });
+    logCost(costDir, { ...costRow(meta, model, kind), outcome: "qa_reject", units: {}, usd: 0, reject_of: a.candidate.entry.id });
   }
   copyFileSync(res.best.file, join(dir, out));
   return {

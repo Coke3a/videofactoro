@@ -12,7 +12,7 @@ import { estimate } from "./pricing.mjs";
 import { sha } from "./project-create.mjs";
 import { tts, mediaInfo } from "./audio.mjs";
 import { WORDS_PER_SEC, CHARS_PER_SEC } from "./clip.mjs";
-import { makeKeyframe, makeVideo, pool } from "./shots.mjs";
+import { makeKeyframe, makeVideo, pool, keyframeModel } from "./shots.mjs";
 import { ffmpeg, frameSize, normalizeArgs, concatArgs, concatList } from "./assemble.mjs";
 import { COMMON_OPTIONS, parseCommon, validateParts, finishAudio } from "./longform.mjs";
 import { pinInput, pinRun, costSince, contextMessage, loadProject, planRows, llmRow, imageRow, qaRow, runEntity } from "./entities.mjs";
@@ -73,14 +73,14 @@ export const validateFilmPlan = (plan, ctx, { total }) => validateParts(plan, ct
   total, listKey: "shots", minSec: SHOT_MIN, maxSec: SHOT_MAX, textKeys: ["first_frame_prompt", "video_prompt"],
 });
 
-function dryRun(total, hd, audio) {
+function dryRun(total, hd, audio, pj) {
   const quality = hd ? "hd" : "draft";
   const n = Math.round(total / 7);
   return {
     dry_run: true,
     ...planRows([
       llmRow(5000, 2500),
-      imageRow("keyframe", n),
+      imageRow("keyframe", n, keyframeModel(pj)),
       qaRow(n),
       { step: "video", model: MODELS.video, count: n, usd: estimate(MODELS.video, { clips: n, quality }) },
       ...(audio.narrator ? [{ step: "narration", model: MODELS.tts, count: n, usd: estimate(MODELS.tts, { seconds: total }) }] : []),
@@ -240,7 +240,7 @@ export async function main(argv) {
   const ctx = loadProject(dir);
   if (!ctx.characters.length) throw new VfError("USAGE", "project นี้ยังไม่มีตัวละคร");
   const audio = { narrator: Boolean(ctx.pj.narrator) && !values["no-narration"], music: !values["no-music"] };
-  if (values["dry-run"]) return dryRun(total, hd, audio);
+  if (values["dry-run"]) return dryRun(total, hd, audio, ctx.pj);
 
   const key = id ?? `h${sha(`film\0${prompt}\0${total}\0${hd}\0${audio.narrator}\0${audio.music}`).slice(0, 8)}`;
   const stateDir = join(dir, ".vf");

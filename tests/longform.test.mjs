@@ -82,7 +82,7 @@ beforeEach(async () => {
       const answers = Object.fromEntries(Object.keys(body.questions).map((k) => [k, { noul: /text/.test(k) || k === "has_people_or_animals" ? 0 : 0.9 }]));
       return reply({ answers, usage: { prompt_tokens: 1500 } });
     }
-    if (body?.model === MODELS.image) {
+    if (body?.model === MODELS.image || body?.model === MODELS.imageFast) {
       if (flagImages > 0) {
         flagImages--;
         const err = JSON.stringify({ errors: [{ message: "AiError: AiError: Your output has been flagged. Please choose another prompt / input image combination (x)", code: 3030 }], success: false });
@@ -125,7 +125,7 @@ test("film: ช็อตละ keyframe + วิดีโอ draft, ต่อก
   const id = r.film.id;
   assert.match(id, /^cake-day-[0-9a-f]{4}$/);
   assert.equal(r.film.shots, 3);
-  assert.equal(posts(MODELS.image).length, 3);
+  assert.equal(posts(MODELS.imageFast).length, 3);
   assert.equal(posts(MODELS.video).length, 3);
   for (const p of posts(MODELS.video)) {
     assert.equal(p.body.input.draft, true);
@@ -165,7 +165,7 @@ test("film: ภาพที่ถูก flag (3030) เปลี่ยน seed �
   flagImages = 2;
   const r = await film(["demo", "--prompt", "ภาพโดน flag", "--duration", "20", "--foreground"]);
   assert.ok(fs.existsSync(r.film.file));
-  const seeds = posts(MODELS.image).map((p) => p.body.input.seed);
+  const seeds = posts(MODELS.imageFast).map((p) => p.body.input.seed);
   assert.equal(seeds.length, 4);
   assert.equal(new Set(seeds).size, 4, "ทุกครั้งที่ลองใหม่ใช้ seed ใหม่");
   flagImages = 99;
@@ -181,7 +181,7 @@ test("film: วิดีโอช็อตเดียวโดน moderation �
   const vids = posts(MODELS.video);
   assert.equal(vids.length, 4, "2 ครั้งที่โดนบล็อก + 2 ช็อตที่ผ่าน");
   assert.match(vids.at(-1).body.input.prompt, /family-friendly/);
-  assert.equal(posts(MODELS.image).length, 3, "keyframe ใหม่ 1 ภาพในรอบที่ 2");
+  assert.equal(posts(MODELS.imageFast).length, 3, "keyframe ใหม่ 1 ภาพในรอบที่ 2");
   assert.match(r.film.warnings.join(" "), /โดนบล็อก 2 ครั้ง/);
   blockVideos = 99;
   await assert.rejects(film(["demo", "--prompt", "วิดีโอโดนบล็อกตลอด", "--duration", "20", "--foreground"]), (e) => e.code === "BLOCKED");
@@ -203,6 +203,21 @@ test("film: แก้ video_prompt ใน plan.json แล้วรันซ้�
   assert.ok(fs.existsSync(r.film.file));
   assert.ok(posts(MODELS.video).some((c) => c.body.input.prompt.startsWith("A calm, quiet moment edited by hand.")));
   assert.equal(JSON.parse(fs.readFileSync(planFile, "utf8")).shots[1].video_prompt, "A calm, quiet moment edited by hand.");
+});
+
+test("keyframe ใช้ klein-4b เป็นค่าเริ่มต้น; project.json keyframe_quality=high → klein-9b", async () => {
+  plan = FILM();
+  plan.shots = [shot(10), shot(10)];
+  await film(["demo", "--prompt", "รุ่นภาพปกติ", "--duration", "20", "--foreground"]);
+  assert.equal(posts(MODELS.imageFast).length, 2);
+  assert.equal(posts(MODELS.image).length, 0);
+  const pjFile = path.join(dir, "project.json");
+  fs.writeFileSync(pjFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(pjFile, "utf8")), keyframe_quality: "high" }));
+  await film(["demo", "--prompt", "รุ่นภาพคุณภาพสูง", "--duration", "20", "--foreground"]);
+  assert.equal(posts(MODELS.image).length, 2);
+  const rows = fs.readFileSync(path.join(dir, ".vf", "costs.jsonl"), "utf8").trim().split("\n").map(JSON.parse);
+  const fast = rows.find((r) => r.model === MODELS.imageFast && r.outcome === "ok");
+  assert.ok(fast.usd > 0 && fast.usd < 0.005, `4b ภาพละไม่ถึงครึ่งเซนต์ (${fast.usd})`);
 });
 
 test("film --dry-run และ --duration นอกช่วง ไม่เรียก API", async () => {
@@ -233,7 +248,7 @@ test("motion: ภาพนิ่งต่อฉาก ไม่ใช้โม�
   const id = r.motion.id;
   assert.match(id, /^top-4-oops-[0-9a-f]{4}$/);
   assert.equal(posts(MODELS.video).length, 0);
-  assert.equal(posts(MODELS.image).length, 4);
+  assert.equal(posts(MODELS.imageFast).length, 4);
   assert.equal(posts(MODELS.tts).length, 3);
   assert.equal(posts(MODELS.music).length, 1);
   const out = probe(r.motion.file);

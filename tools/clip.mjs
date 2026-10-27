@@ -16,7 +16,7 @@ import { MODELS } from "./models.mjs";
 import { estimate } from "./pricing.mjs";
 import { sha } from "./project-create.mjs";
 import { tts, music as makeMusic, mix, mediaInfo, narrationTempo, MUSIC_GAIN, MUSIC_GAIN_UNDER_VOICE } from "./audio.mjs";
-import { makeKeyframe, makeVideo } from "./shots.mjs";
+import { makeKeyframe, makeVideo, keyframeModel } from "./shots.mjs";
 import { pinInput, pinRun, costSince, contextMessage, loadProject, planRows, llmRow, imageRow, qaRow, runEntity } from "./entities.mjs";
 
 const execFileP = promisify(execFile);
@@ -128,14 +128,14 @@ async function toQaVideo(file) {
   }
 }
 
-function dryRun(duration, hd, audio) {
+function dryRun(duration, hd, audio, pj) {
   const quality = hd ? "hd" : "draft";
   const secs = duration ?? 6;
   return {
     dry_run: true,
     ...planRows([
       llmRow(4000, 600),
-      imageRow("keyframe", 1),
+      imageRow("keyframe", 1, keyframeModel(pj)),
       qaRow(2),
       { step: "video", model: MODELS.video, count: 1, usd: estimate(MODELS.video, { clips: 1, quality }) },
       ...(audio.narrator ? [{ step: "narration", model: MODELS.tts, count: 1, usd: estimate(MODELS.tts, { seconds: secs }) }] : []),
@@ -298,7 +298,7 @@ export async function main(argv) {
     narrator: Boolean(ctx.pj.narrator) && !values["no-narration"],
     music: values.music ? true : values["no-music"] ? false : undefined,
   };
-  if (values["dry-run"]) return dryRun(duration, hd, audio);
+  if (values["dry-run"]) return dryRun(duration, hd, audio, ctx.pj);
 
   const promptSha = sha(prompt);
   const key = id ?? `h${sha(`${prompt}\0${duration ?? ""}\0${hd}\0${audio.narrator}\0${audio.music ?? "auto"}`).slice(0, 8)}`;

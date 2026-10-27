@@ -13,7 +13,7 @@ import { estimate } from "./pricing.mjs";
 import { sha } from "./project-create.mjs";
 import { tts } from "./audio.mjs";
 import { WORDS_PER_SEC, CHARS_PER_SEC } from "./clip.mjs";
-import { makeKeyframe, pool } from "./shots.mjs";
+import { makeKeyframe, pool, keyframeModel } from "./shots.mjs";
 import { ffmpeg, frameSize, stillMotionArgs, concatArgs, concatList, hasFilter, writeAss, burnArgs, fontFor, MOVES } from "./assemble.mjs";
 import { COMMON_OPTIONS, parseCommon, validateParts, finishAudio } from "./longform.mjs";
 import { pinInput, pinRun, costSince, contextMessage, loadProject, planRows, llmRow, imageRow, qaRow, runEntity } from "./entities.mjs";
@@ -108,13 +108,13 @@ export function motionEvents(title, scenes) {
   return events;
 }
 
-function dryRun(total, audio) {
+function dryRun(total, audio, pj) {
   const n = Math.round(total / 5);
   return {
     dry_run: true,
     ...planRows([
       llmRow(5000, 3000),
-      imageRow("still", n),
+      imageRow("still", n, keyframeModel(pj)),
       qaRow(n),
       ...(audio.narrator ? [{ step: "narration", model: MODELS.tts, count: n, usd: estimate(MODELS.tts, { seconds: total }) }] : []),
       ...(audio.music ? [{ step: "music", model: MODELS.music, count: 1, usd: estimate(MODELS.music, { seconds: total + 1 }) }] : []),
@@ -250,7 +250,7 @@ export async function main(argv) {
   const ctx = loadProject(dir);
   if (!ctx.characters.length) throw new VfError("USAGE", "project นี้ยังไม่มีตัวละคร");
   const audio = { narrator: Boolean(ctx.pj.narrator) && !values["no-narration"], music: !values["no-music"] };
-  if (values["dry-run"]) return dryRun(total, audio);
+  if (values["dry-run"]) return dryRun(total, audio, ctx.pj);
 
   const key = id ?? `h${sha(`motion\0${prompt}\0${total}\0${audio.narrator}\0${audio.music}`).slice(0, 8)}`;
   const stateDir = join(dir, ".vf");

@@ -45,6 +45,11 @@ export function sizeFor(aspect, resolution) {
   return { width: snap(Math.sqrt(mp * 2 ** 20 * ratio)), height: snap(Math.sqrt((mp * 2 ** 20) / ratio)) };
 }
 
+const tilesOf = (d) => (d && d.w > 0 && d.h > 0 ? Math.ceil(d.w / 512) * Math.ceil(d.h / 512) : 4);
+
+// 4b คิดต่อช่อง 512x512 ของภาพที่ได้ + ภาพอ้างอิง (9b คิดต่อ MP)
+const fastUsd = (out, refBytes) => estimate(MODELS.imageFast, { tiles: tilesOf(out), refTiles: refBytes.reduce((s, b) => s + tilesOf(dimensions(b)), 0) });
+
 function megapixels(bytes, resolution) {
   const d = dimensions(bytes);
   if (d && d.w > 0 && d.h > 0) return Math.round(((d.w * d.h) / 1e6) * 100) / 100;
@@ -66,14 +71,14 @@ function scrubUrls(err) {
 
 export async function generateImage({
   projectDir, prompt, refs = [], aspect = "9:16", resolution = "1k", seed, need, kind,
-  characters = [], place = null, tags = [], meta = {}, status = "candidate",
+  characters = [], place = null, tags = [], meta = {}, status = "candidate", model = MODELS.image,
 }) {
   if (!kind) throw new VfError("USAGE", "generateImage ต้องระบุ kind");
   if (refs.length > MAX_REFS) throw new VfError("INTERNAL", `klein รับภาพอ้างอิงได้ไม่เกิน ${MAX_REFS} ภาพ (ส่งมา ${refs.length})`);
   const costDir = join(projectDir, ".vf");
-  const row = costRow(meta, MODELS.image, meta.step ?? "image");
+  const row = costRow(meta, model, meta.step ?? "image");
   const finalPrompt = prompt + SUFFIX;
-  const key = cacheKey({ model: MODELS.image, prompt: finalPrompt, refs, aspect, resolution, seed });
+  const key = cacheKey({ model, prompt: finalPrompt, refs, aspect, resolution, seed });
 
   const hit = libFindByKey(libLoad(projectDir), key);
   if (hit && existsSync(join(projectDir, hit.blob))) {
@@ -96,17 +101,19 @@ export async function generateImage({
     const { width, height } = sizeFor(aspect, resolution);
     const input = { prompt: finalPrompt, width: String(width), height: String(height), seed: String(usedSeed) };
     refBytes.forEach((b, i) => { input[`input_image_${i}`] = b; });
-    log(`klein: refs=${refs.length} ${width}x${height} model=${MODELS.image}`);
+    log(`klein: refs=${refs.length} ${width}x${height} model=${model}`);
     let paid = false;
     try {
-      const { result } = await withRetry(() => run(MODELS.image, input, { meta, multipart: true }));
+      const { result } = await withRetry(() => run(model, input, { meta, multipart: true }));
       paid = true;
       const out = join(tmp, "out");
       await download(extractMedia(result), out);
       bytes = readFileSync(out);
     } catch (err) {
       // run สำเร็จแล้ว (จ่ายแล้ว) แต่ได้ไฟล์ไม่ครบ: ลงราคาประเมินจากขนาดที่ขอ
-      const usd = paid ? estimate(MODELS.image, { images: 1, mp: (width * height) / 1e6, refMp }) : null;
+      const usd = !paid ? null
+        : model === MODELS.imageFast ? fastUsd({ w: width, h: height }, refBytes)
+          : estimate(model, { images: 1, mp: (width * height) / 1e6, refMp });
       logCost(costDir, { ...row, outcome: failOutcome(err), units: { images: 1 }, usd });
       throw scrubUrls(err);
     }
@@ -115,9 +122,10 @@ export async function generateImage({
   }
 
   const mp = megapixels(bytes, resolution);
-  const usd = mp === null ? null : estimate(MODELS.image, { images: 1, mp, refMp });
+  const usd = model === MODELS.imageFast ? fastUsd(dimensions(bytes), refBytes)
+    : mp === null ? null : estimate(model, { images: 1, mp, refMp });
   const added = libAdd(projectDir, {
-    id: `${kind}-${key.slice(0, 12)}`, kind, key, prompt, need, model: MODELS.image, refs, characters, place, tags,
+    id: `${kind}-${key.slice(0, 12)}`, kind, key, prompt, need, model, refs, characters, place, tags,
     tag_p: {}, qa: null, status, used_in: [], cost_usd: usd, seed: usedSeed, aspect, resolution,
   }, bytes, sniffExt(bytes));
   const entry = libUpdate(projectDir, added.id, { file: added.blob });

@@ -165,7 +165,10 @@ export function planRows(rows) {
 }
 
 export const llmRow = (tokensIn, tokensOut) => ({ step: "design", model: MODELS.llm[0], count: 1, usd: estimate(MODELS.llm[0], { tokensIn, tokensOut }) });
-export const imageRow = (step, n) => ({ step, model: MODELS.image, count: n, usd: estimate(MODELS.image, { images: n, mp: 1 }) });
+export const imageRow = (step, n, model = MODELS.image) => ({
+  step, model, count: n,
+  usd: model === MODELS.imageFast ? estimate(model, { images: n, tiles: 6, refTiles: 12 }) : estimate(model, { images: n, mp: 1 }),
+});
 export const qaRow = (n) => ({ step: "qa", model: MODELS.qa, count: n, usd: estimate(MODELS.qa, { tokensIn: 1500 * n, tokensOut: 0 }) });
 
 // ไม่มี --foreground → job; มี → รัน work ในโปรเซสนี้ โดยลงทะเบียนเป็น job ใต้ lock เดียวกับ startJob

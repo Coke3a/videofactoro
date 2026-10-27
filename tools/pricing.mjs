@@ -3,6 +3,7 @@ import { MODELS } from "./models.mjs";
 export const PRICES = {
   asOf: "2026-10-27",
   [MODELS.image]: { firstMp: 0.015, extraMp: 0.002, refMp: 0.002, source: "Cloudflare Workers AI pricing" },
+  [MODELS.imageFast]: { inTile: 0.000059, outTile: 0.000287, source: "Cloudflare Workers AI pricing (ต่อช่อง 512x512)" },
   [MODELS.video]: { hd: 0.17, fhd: 0.29, draft: 0.06, unit: "clip", verified: false, source: "Cloudflare AI Gateway pricing (ยังไม่ยืนยัน)" },
   [MODELS.qa]: { inPerM: 0.15, source: "Cloudflare Workers AI pricing" },
   [MODELS.llm[0]]: { inPerM: 0.75, outPerM: 3.75, source: "Cloudflare AI Gateway pricing" },
@@ -27,6 +28,13 @@ export function estimate(model, units = {}) {
     const refMp = u.refMp ?? 0;
     if (!num(mp) || !num(images) || !num(refMp)) return null;
     return (p.firstMp + Math.max(0, mp - 1) * p.extraMp + refMp * (p.refMp ?? 0)) * images;
+  }
+  if (p.outTile !== undefined) {
+    const tiles = u.tiles ?? 4;
+    const refTiles = u.refTiles ?? 0;
+    const images = u.images ?? 1;
+    if (!num(tiles) || !num(refTiles) || !num(images)) return null;
+    return (tiles * p.outTile + refTiles * p.inTile) * images;
   }
   if (p.unit === "clip") {
     if (!QUALITIES.includes(u.quality) || !num(p[u.quality]) || !num(u.clips)) return null;
