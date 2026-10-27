@@ -213,7 +213,8 @@ export async function download(urlOrMedia, file) {
 const RETRY = {
   TIMEOUT: { retries: 2, delays: [0, 0] },
   PROVIDER_BUSY: { retries: 3, delays: [10_000, 20_000, 30_000] },
-  PROVIDER_DOWN: { retries: 3, delays: [10_000, 20_000, 30_000] },
+  // flux-2 มีช่วง 500 ติดกันหลายนาที (live 2026-10-27): ลอง 5 ครั้งรวม ~2.7 นาทีก่อนยอมแพ้
+  PROVIDER_DOWN: { retries: 5, delays: [10_000, 20_000, 30_000, 45_000, 60_000] },
 };
 
 export async function withRetry(fn) {

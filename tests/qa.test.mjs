@@ -174,7 +174,7 @@ test("pickBest ส่ง state และ look ใน body; default state เม�
 });
 
 test("pickBest ข้ามภาพที่ provider error แล้วทำต่อ", async () => {
-  fake(ok(place(0.6)), reply("boom", 500), reply("boom", 500), reply("boom", 500), reply("boom", 500), ok(place(0.8)));
+  fake(ok(place(0.6)), ...Array(6).fill(reply("boom", 500)), ok(place(0.8)));
   const r = await pickBest(files(), RULES.placePlate, ctx, { meta: {}, costDir: dir });
   assert.equal(r.best.id, "c");
   const bad = r.ranked.find((x) => x.candidate.id === "b");

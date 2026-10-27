@@ -127,11 +127,11 @@ test("withRetry ลอง TIMEOUT 3 ครั้งรวม แล้วยอ�
   assert.equal(n, 3);
 });
 
-test("withRetry BUSY/DOWN หน่วง 10/20/30 วิ", async () => {
+test("withRetry DOWN หน่วง 10/20/30/45/60 วิ", async () => {
   let n = 0;
   await assert.rejects(cf.withRetry(async () => { n++; throw Object.assign(new Error("x"), { status: 503, body: "" }); }), (e) => e.code === "PROVIDER" && e.details.kind === "PROVIDER_DOWN");
-  assert.equal(n, 4);
-  assert.deepEqual(sleeps, [10000, 20000, 30000]);
+  assert.equal(n, 6);
+  assert.deepEqual(sleeps, [10000, 20000, 30000, 45000, 60000]);
 });
 
 test("withRetry ไม่ลอง CONTENT_BLOCKED ซ้ำ", async () => {
