@@ -49,5 +49,6 @@ Split: video 39 %, images 37 %, music 18 %, LLM + TTS + QA 6 %. 32 video attempt
 - Keyframes/stills on klein-4b: about $0.0025 instead of $0.023 each. `"keyframe_quality": "high"` in `project.json` switches back to 9b.
 - Film shots aim for ~9 s (90 s ≈ 10 shots instead of 13): the video price is per clip.
 - Videos over 30 s pay for one 30 s music loop ($0.075) instead of the full length ($0.23 for 90 s).
-- Expected after these: film 90 s ≈ $0.7–0.9, motion 90 s ≈ $0.2–0.3 (estimate, not yet measured live).
+- Measured live on Hermes after these changes (2026-10-27): motion 60 s = $0.151 (12 scenes, 22 klein-4b images ≈ $0.002 each incl. 5 QA rerolls, music loop $0.075); film 30 s = $0.284 (3 shots of 10 s, video $0.18). So film 90 s ≈ $0.7–0.8, motion 90 s ≈ $0.2.
+- Seen with klein-4b: characters are smaller in frame and an accessory can jump between characters (the cat wearing the dog's bandana). Use `keyframe_quality: "high"` for hero shots or when this shows up often.
 - Blocked or crashed jobs: `resume` (editing `plan.json` if needed) instead of a new `--id`, which pays for the plan and every finished shot again.
