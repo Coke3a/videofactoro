@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- Node.js 22+ (no npm dependencies; nothing to install)
+- Node.js 22+. `vf setup` installs the pinned `hyperframes` and `gsap` packages (`npm ci`) and Chrome (`hyperframes browser ensure`) for `vf motion`; `vf doctor` checks them. GSAP has its own Standard License (see `NOTICE`), not MIT.
 - `ffmpeg` and `ffprobe` on PATH (clip mixing and media checks)
 - A Cloudflare account with Workers AI, an API token with Workers AI Read + Edit, and AI Gateway Unified Billing credits loaded
 

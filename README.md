@@ -13,7 +13,7 @@ It is designed for automation:
 
 ## Quick start
 
-Requirements: Node.js 22+, `ffmpeg`/`ffprobe` on PATH (built with libass for motion text), and a Cloudflare account with Workers AI, an API token (Workers AI Read + Edit), and AI Gateway Unified Billing credits.
+Requirements: Node.js 22+, `ffmpeg`/`ffprobe` on PATH, and a Cloudflare account with Workers AI, an API token (Workers AI Read + Edit), and AI Gateway Unified Billing credits. `vf setup` also installs HyperFrames and GSAP (`npm ci`) and Chrome for `vf motion`; `vf doctor` checks them.
 
 Run these in your own Terminal (you never type keys into files or a chat):
 
@@ -47,11 +47,12 @@ open projects/catdog/renders/*.mp4
 | `vf character add <slug> --prompt "..."` | Add a character (`--image` to use your own art, `--replace --id` to redo one) |
 | `vf character poses <slug> <id>` | Make cut-out pose sprites + talk twins for motion (`--poses idle,happy`, `--replace`) |
 | `vf place add <slug> --prompt "..."` | Add a place (background plate) |
+| `vf prop add <slug> --prompt "..."` | Make a cut-out prop sprite for motion (`--id`; ~$0.001) |
 | `vf asset find <slug> <terms...>` | Search the project library |
 | `vf music list <slug>` / `vf music add <slug> <file.mp3> --prompt "..."` | Show or extend the shared music library (`_music/`, reused across projects; clef-omni picks a fitting track, new 90 s tracks are generated only when none fits) |
 | `vf clip <slug> --prompt "..."` | One 5–20 s shot with narration and music (draft by default, `--hd` for final) |
 | `vf film <slug> --prompt "..." --duration 90` | Multi-shot generative AI video, 20–180 s |
-| `vf motion <slug> --prompt "..." --duration 90` | Motion-comic (AI stills + camera moves + text), 20–180 s, no video model |
+| `vf motion <slug> --prompt "..." --duration 60` | Cartoon from pose sprites (HyperFrames + GSAP), 20–180 s, 9:16, no video model; needs `vf character poses` first |
 | `vf wait <slug> [job-id]` | Wait for a background job |
 | `vf status <slug>` | Recent jobs |
 
@@ -68,7 +69,7 @@ Exit codes: `0` ok · `1` INTERNAL · `2` USAGE · `3` CONFIG · `4` BLOCKED (co
 5. **Music:** ElevenLabs Music v2 writes an instrumental bed when the shot needs one.
 6. **Mix:** ffmpeg combines scene audio, narration and music, with the music ducked under the voice.
 
-Typical costs: a new project with two characters and three places is about $0.16; a 6 s draft clip with narration is about $0.11; a 90 s film draft is about $1.5–2; a 90 s motion-comic is about $0.6–0.8. See [costs](skills/videofactoro/references/costs.md).
+Typical costs: a new project with two characters and three places is about $0.16; a 6 s draft clip with narration is about $0.11; a 90 s film draft is about $1.5–2; a motion cartoon is about $0.02–0.03 per clip plus music (poses about $0.04 per character, once). See [costs](skills/videofactoro/references/costs.md).
 
 ## Project files
 
@@ -86,7 +87,7 @@ Projects live in `$VF_PROJECTS` (default `./projects/`, git-ignored). Start read
 | Project, characters, places, library, jobs, costs | done |
 | `vf clip` single shot + narration + music | done |
 | `vf film` multi-shot AI video (20–180 s) | done |
-| `vf motion` motion-comic (20–180 s) | done |
+| `vf motion` pose-sprite cartoon (20–180 s) | done |
 
 ## Development
 

@@ -25,7 +25,7 @@ You never copy `.env.example` or type keys by hand; it only lists the variable n
 | `tools/audio.mjs` | TTS, music and the ffmpeg mix |
 | `tools/shots.mjs` | Shared keyframe/video steps and a small concurrency pool |
 | `tools/film.mjs`, `motion.mjs`, `longform.mjs` | Long videos: multi-shot AI film, motion-comic, shared validation and audio finish |
-| `tools/assemble.mjs` | ffmpeg helpers: normalize, concat, still-image motion, narration track, ASS text |
+| `tools/assemble.mjs` | ffmpeg helpers: normalize, concat, narration track |
 | `tools/jobs.mjs`, `wait.mjs`, `status.mjs` | Background jobs, heartbeat, resume |
 | `tools/state.mjs` | Per-command checkpoints (pay-once resume) |
 | `tools/cache.mjs`, `asset-find.mjs` | Project asset library (cache keys, Thai search words) and search |

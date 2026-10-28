@@ -74,3 +74,18 @@ test("references/project.md และ README ตรงกับโค้ด: .vf
   const ex = readFileSync(join(root, ".env.example"), "utf8");
   for (const line of ex.split("\n").filter((l) => l.trim() && !l.startsWith("#"))) assert.match(line, /^[A-Z0-9_]+=$/);
 });
+
+test("SKILL.md และ references อธิบาย motion v2: poses ก่อน, prop add, ไม่มี reuse/Top-N", () => {
+  const long = readFileSync(join(root, "skills/videofactoro/references/longform.md"), "utf8");
+  const cmds = readFileSync(join(root, "skills/videofactoro/references/commands.md"), "utf8");
+  for (const t of [skill, long]) {
+    assert.match(t, /vf character poses/);
+    assert.match(t, /vf prop add/);
+    assert.match(t, /9:16/);
+    assert.match(t, /deprecated/);
+    assert.doesNotMatch(t, /reused_stills ≥|Top 5|countdown|Ken Burns|zoompan/i);
+  }
+  assert.match(cmds, /### `vf character poses/);
+  assert.match(cmds, /### `vf prop add/);
+  assert.match(skill, /cartoon gag \/ story with our characters, cheap/);
+});

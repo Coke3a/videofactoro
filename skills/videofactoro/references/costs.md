@@ -52,3 +52,11 @@ Split: video 39 %, images 37 %, music 18 %, LLM + TTS + QA 6 %. 32 video attempt
 - Measured live on Hermes after these changes (2026-10-27): motion 60 s = $0.151 (12 scenes, 22 klein-4b images ≈ $0.002 each incl. 5 QA rerolls, music loop $0.075); film 30 s = $0.284 (3 shots of 10 s, video $0.18). So film 90 s ≈ $0.7–0.8, motion 90 s ≈ $0.2.
 - Seen with klein-4b: characters are smaller in frame and an accessory can jump between characters (the cat wearing the dog's bandana). Use `keyframe_quality: "high"` for hero shots or when this shows up often.
 - Blocked or crashed jobs: `resume` (editing `plan.json` if needed) instead of a new `--id`, which pays for the plan and every finished shot again.
+
+## Motion v2 (HyperFrames + GSAP pose sprites)
+
+- `vf character poses`: about $0.04 per character, once (6 poses and their talk twins, with QA).
+- `vf prop add`: about $0.001 per prop. Stage spots: one cheap clef call per place, cached.
+- `vf motion`: about $0.02–0.03 per clip (story and scene LLM, TTS, staging checks) + music: $0 from the shared library, $0.2275 for a new 90 s track. `--dry-run` prices the worst case (new track).
+- Render time is CPU, not money: about 3.5× the clip length on 2 vCPU; one render at a time.
+- The older motion figures above (stills per scene, 18 scenes ≈ $0.7) describe the removed ffmpeg engine.

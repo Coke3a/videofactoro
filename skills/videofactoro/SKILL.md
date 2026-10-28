@@ -20,7 +20,7 @@ This file is the map. Details live in `references/`:
 | Every command, flag, default and output field | `references/commands.md` |
 | Project folder layout, json files, PROJECT.md rules | `references/project.md` |
 | Clip pipeline, prompt craft, narration and music, QA | `references/clip.md` |
-| Long videos: `vf film` (AI video) and `vf motion` (motion-comic) | `references/longform.md` |
+| Long videos: `vf film` (AI video) and `vf motion` (cartoon pose sprites) | `references/longform.md` |
 | Prices, measured costs, how to budget | `references/costs.md` |
 | First-time setup, env vars, security rules | `references/setup.md` |
 | Known failure patterns and what fixed them | `references/lessons.md` |
@@ -55,7 +55,8 @@ Whichever track you take, the iron rules below do not change.
 | "make a clip of X doing Y" | `vf clip <slug> --prompt "..."` (draft) → `vf wait` → inspect → report |
 | "make it HD / final" | rerun the approved clip prompt with `--hd` |
 | "longer AI video (30 s – 3 min)" | `vf film <slug> --prompt "..." --duration N` → `vf wait` (loop) |
-| "motion graphics / Top 5 / countdown / explainer" | `vf motion <slug> --prompt "..." --duration N` → `vf wait` (loop) |
+| "cartoon gag / story with our characters, cheap" | `vf character poses <slug> <id>` once per character (skip if it already has poses), then `vf motion <slug> --prompt "..." --duration N` → `vf wait` (loop) |
+| "add a prop (ball, phone…) for motion" | `vf prop add <slug> --prompt "..." [--id <id>]` → `vf wait` |
 | "how much will it cost?" | add `--dry-run` to the command; it costs nothing |
 | "what's going on / is it done?" | `vf status <slug>` or `vf wait <slug>` |
 | a command exits 3 (CONFIG) | stop and hand the user the setup steps (section 4) |
@@ -76,12 +77,12 @@ vf clip <slug> --prompt "..."                                      # draft clip,
 
 - **Always pass `--name <ascii-slug>`** (a-z, 0-9, `-`). A pure-Thai prompt without `--name` gets `project-<8 hex>`. The same prompt always maps to the same slug, so rerunning a command continues it instead of starting over.
 - `project create` options: `--lang` (default `en`), `--aspect 9:16|16:9|1:1` (default `9:16`), `--max-rerolls 0-5` (default 2), `--image <character-name>=<path>` (repeatable).
-- `--dry-run` works on `project create`, `character add`, `place add`, `clip`, `film` and `motion`.
+- `--dry-run` works on `project create`, `character add`, `character poses`, `place add`, `prop add`, `clip`, `film` and `motion`.
 - `vf status <slug>` lists the latest jobs.
 
 ## 4. Long jobs: job and wait
 
-`project create`, `character add`, `place add`, `clip`, `film` and `motion` return `{job, next}` at once (unless you pass `--foreground`), and the work runs in the background.
+`project create`, `character add`, `character poses`, `place add`, `prop add`, `clip`, `film` and `motion` return `{job, next}` at once (unless you pass `--foreground`), and the work runs in the background.
 
 1. `vf wait <slug> [job-id]` blocks for at most 540 seconds (change with `--timeout <sec>`). If your shell tool kills commands sooner (many agent sandboxes cap a command at 120–180 s), pass a smaller `--timeout`, for example `--timeout 150`.
 2. If it times out while the job is still going (`status:"running"`), call `vf wait` again. **Loop until status is `done` or `failed`.**
@@ -118,15 +119,21 @@ stdout is always one JSON object: `{ok:true,...}` or `{ok:false,error:{code,mess
 
 ### Long videos (20–180 s): `vf film` and `vf motion`
 
-Both take `--prompt`, `--duration 20-180` (default 60), `--no-narration`, `--no-music`, `--id`, `--max-rerolls` (default 2), `--foreground` and `--dry-run`, and run as a job (`vf wait`). Details are in `references/longform.md`.
+`vf film` and `vf motion` both take `--prompt`, `--duration 20-180` (default 60), `--no-narration`, `--no-music`, `--id`, `--foreground` and `--dry-run`; `vf film` also takes `--hd` and `--max-rerolls` (default 2). They run as a job (`vf wait`). Details are in `references/longform.md`.
 
 - `vf film <slug> --prompt "..." --duration 90`: a **generative AI** short film. The LLM writes a shot list (mostly 15–20 s shots, each telling 2–3 timed beats with a new action and camera change, hook → build → payoff), and each shot gets a keyframe and a flux-3-video clip (3 shots at a time). flux-3-video is priced per clip whatever its length, so long shots keep the cost down. The shots are joined, with one narration track and one music bed over the whole film. Draft by default, `--hd` for final. About $0.065 per draft shot (video $0.06 + keyframe), so 90 s ≈ 5 shots ≈ $0.35 plus music.
-- `vf motion <slug> --prompt "..." --duration 90`: a **motion-comic** with no video model. Each scene is an AI still of the characters, animated by ffmpeg with eased camera moves (zoom, pan, tilt, crash zoom, shake, bounce) and a flash plus punch-in on each scene's peak, with text overlays (title, rank cards like `#3`, captions, comic sound words), narration, music and synthesized sound effects (whoosh on cuts, ding on cards, impact on peaks). Audio is normalized to -14 LUFS. Good for countdowns ("Top 5…"), stories and explainers. About $0.005 per scene, so 90 s ≈ $0.2–0.3. Text needs ffmpeg with libass; without it you get a warning and a clip with no text.
+- `vf motion <slug> --prompt "..." --duration 60`: a **cartoon gag / story with our characters**, rendered by HyperFrames + GSAP from reusable **cut-out pose sprites** (no video model, no per-scene image). Characters hop, slide and flip between poses on a place plate with props, camera moves, hit flashes, captions, mouth flaps while they speak, narration (when the project has a narrator), music and synthesized sound effects. Audio is normalized to -14 LUFS. It is **9:16 only** for now (other project aspects = USAGE).
+  - **Prerequisite:** run `vf character poses <slug> <id>` **once per character** (≈ $0.04 each, one job; `--poses idle,happy` picks a subset, `--replace` redoes it). `vf motion` refuses with USAGE, naming the missing command, until **every** character of the project has poses. The project also needs at least one place with a plate.
+  - **Props:** `vf prop add <slug> --prompt "a red rubber ball" [--id ball]` makes a cut-out prop sprite (≈ $0.001). The default id is the first 3 words of the prompt, slugified; a prompt with no a-z0-9 words (Thai) needs `--id`. Props the story plan names are created automatically, so you only add one by hand to control how it looks.
+  - Stage spots (where characters may stand on each place) are worked out once per place by clef and cached in `place.json`.
+  - Narration follows the project `narrator` setting and `--no-narration`, exactly as in `film`. Without a narrator the characters speak their own lines.
+  - `--no-reuse` and `--max-rerolls` are **deprecated for motion**: still accepted, ignored, and a warning says so. Don't pass them.
+  - Cost ≈ $0.02–0.03 per clip for LLM + TTS + checks, plus music ($0 from the library, $0.2275 for a new track). Render takes ≈ 3.5× the clip length on 2 vCPU (60 s ≈ 3.5 min) and **one render runs at a time**. Needs HyperFrames and Chrome, which `vf setup` installs (`vf doctor` checks them).
+  - It has no rank cards and no stills of scenes: it only animates the project's own characters, so it is the wrong tool for text-only explainers.
 - Cost defaults: keyframes and stills use the cheap `flux-2-klein-4b` (character refs stay on 9b). If characters drift or the action is wrong across many shots, set `"keyframe_quality": "high"` in `project.json` (about 10x the image cost). Music for film and motion comes from a **shared music library** (`_music/` next to the projects, or `VF_MUSIC_LIBRARY`): clef-omni listens to the tracks that are long enough and reuses the best one if it scores at least 0.6 for the story and the wanted mood (no music cost). If none fits, a new 90 s track is generated (about $0.225), saved to the library and described in `_music/MUSIC.md` (style, what it was made for, every clip that used it). `vf music list <slug>` shows the library; `vf music add <slug> <file.mp3> --prompt "style, mood, instruments, BPM"` imports an instrumental track.
-- `vf motion` reuses old stills: before drawing a scene it looks in the project library for stills with the same characters, place and aspect and similar prompt words, and asks clef whether one fits (stricter than for new images, `fits_shot` ≥ 0.75). One old still is used once per video and at most 3 times overall. `--no-reuse` turns it off. The result reports `reused_stills`.
 - Output: `renders/<id>.mp4`; working files are in `films/<id>/` or `motions/<id>/`.
 
-Pick by what the user asked for: "AI video / realistic motion" → film; "motion graphics / ranking / countdown / cheap and fast" → motion; a single moment → clip.
+Pick by what the user asked for: "AI video / realistic motion" → film; "cartoon gag or story with our characters, cheap and fast" → poses + motion; a single moment → clip.
 
 ## 6. Director rules (what makes clips good)
 

@@ -4,18 +4,18 @@ Both make a 20–180 s video from an existing project's characters and places, r
 
 | | `vf film` | `vf motion` |
 |---|---|---|
-| Look | Generative AI video: real motion, acting, scene sound | Motion-comic: AI stills + camera moves + bold text |
-| Unit | shot, 5–20 s, mostly 15–20 s with 2–3 timed beats (one flux-3-video clip each) | scene, 3–8 s (one still each) |
-| Text on screen | none | title, rank cards, captions, comic sound words |
-| Cost, 90 s | ≈ $1.5–2 draft (13 shots) · HD ≈ +$1.4 | ≈ $0.6–0.8 (18 scenes) |
-| Time, 90 s | 10–20 min (3 shots at a time) | 5–12 min (CPU-bound ffmpeg) |
-| Best for | skits, stories, "AI video" channels | Top-N countdowns, explainers, quick daily content |
+| Look | Generative AI video: real motion, acting, scene sound | Cartoon: reusable cut-out pose sprites animated by HyperFrames + GSAP on a place plate, with props, camera, hit flashes, captions |
+| Unit | shot, 5–20 s, mostly 15–20 s with 2–3 timed beats (one flux-3-video clip each) | scene with several beats; characters change pose and move between stage spots |
+| Needs first | characters and places | `vf character poses` for every character (once), a place with a plate; 9:16 only |
+| Cost, 90 s | ≈ $1.5–2 draft (13 shots) · HD ≈ +$1.4 | ≈ $0.02–0.03 per clip + music ($0 from library, $0.2275 new track) |
+| Time | 10–20 min for 90 s (3 shots at a time) | render ≈ 3.5× clip length on 2 vCPU, one render at a time |
+| Best for | skits, stories, "AI video" channels | cheap cartoon gags and stories with our own characters |
 
 ## Common flags
 
-`--prompt` (required), `--duration 20-180` (default 60), `--no-narration`, `--no-music`, `--id <id>`, `--max-rerolls 0-5` (default 2, per image), `--foreground`, `--dry-run`. `vf film` also takes `--hd`; `vf motion` also takes `--no-reuse` (see Reuse below).
+`--prompt` (required), `--duration 20-180` (default 60), `--no-narration`, `--no-music`, `--id <id>`, `--foreground`, `--dry-run`. `vf film` also takes `--hd` and `--max-rerolls 0-5` (default 2, per image). `vf motion` accepts `--no-reuse` and `--max-rerolls` only for old callers: both are ignored and a warning is returned (deprecated).
 
-Narration is on only when the project has a narrator (`project.json` → `narrator: true`). Music is always on unless you pass `--no-music`: one instrumental bed for the whole video, ducked under the voice.
+Narration is on only when the project has a narrator (`project.json` → `narrator: true`) and you did not pass `--no-narration`; this holds for film and motion. Music is always on unless you pass `--no-music`: one instrumental bed for the whole video, ducked under the voice.
 
 ## `vf film` pipeline
 
@@ -27,32 +27,38 @@ Narration is on only when the project has a narrator (`project.json` → `narrat
 
 Video QA is not run per shot (it is a weak signal and slow). Inspect a contact sheet instead (see `clip.md`).
 
+## `vf motion` setup (before the first run)
+
+1. `vf character poses <project> <character>`: once per character, a background job (`vf wait`). It draws 6 poses (idle, happy, scared, sad, curious, run), cuts each out to a transparent png and makes a mouth-open "talk" twin. About $0.04 per character. `--poses idle,happy` makes a subset, `--replace` redoes the set (the old one is kept as `poses-old-*`). Files: `characters/<id>/poses/` (`poses.json`, `<pose>.png`, `<pose>-talk.png`).
+2. `vf prop add <project> --prompt "a red rubber ball" [--id ball]`: optional, about $0.001 per prop, files in `props/<id>/`. Default id = first 3 words of the prompt, slugified; a prompt with no Latin words (Thai) needs `--id` (a-z, 0-9, `-`). A duplicate id = USAGE. Props named by the story plan are created automatically during `vf motion`.
+3. Stage spots: where characters may stand on a place. Computed once per place by clef (cheap) and cached in `places/<id>/place.json`; never asked again.
+
+`vf motion` fails fast with USAGE, before any paid call, when: the project has no character, no place with a plate, the project is not 9:16, or any character of the project has no poses (the message names the `vf character poses` command to run).
+
 ## `vf motion` pipeline
 
-1. **plan** (LLM): `scenes[]`: `{duration, characters, place, image_prompt, move, card, caption, sfx_word, narration}`. `move` ∈ `zoom_in, zoom_out, pan_left, pan_right, tilt_up, crash_zoom, shake, bounce`. A non-empty `sfx_word` marks the scene's peak at 40% of its length: white flash, camera punch-in and an impact (or boing on `bounce`) sound. `card` and `sfx_word` are ≤ 14 characters; `caption` is ≤ 60.
-2. **per scene** (3 at a time): still image (refs + plate, keyframe QA) and narration.
-3. **render** each scene with ffmpeg zoompan (one at a time) → **concat**.
-4. **text** (ASS subtitles via libass): the title over the first scene, a card popping in at each scene start, the caption at the bottom for the whole scene, and the sound word popping at 40 % of the scene. Fonts: `DejaVu Sans`, or `Loma` for Thai; override with `VF_FONT`.
-5. **narration track** + **music** → **mix** → `renders/<id>.mp4`.
+1. **story** (LLM) from the prompt and the cast (characters with their poses, places, existing props) → **props** missing ones are made → **stage** spots per place.
+2. **scenes** (LLM): scenes with beats that use only existing pose names, stage spots, props and sound effects. Lines of dialogue are spoken by the character's own voice, narration by the narrator voice.
+3. **tts** for every line (3 at a time), silence trimmed; the real speech length decides each scene's length and the mouth flaps.
+4. **compose** `motions/<id>/hf/index.html` (HyperFrames + GSAP, 1080×1920 @ 30 fps) → **lint** (errors stop the job with INTERNAL; warnings go to `warnings`) → **check**: one snapshot per scene, clef looks for staging problems (a hit becomes a warning `ฉาก N: ...`).
+5. **render** with HyperFrames (Chrome) → `video.mp4`, then narration track, music, synthesized sound effects and a -14 LUFS **mix** → `renders/<id>.mp4`.
+
+`motions/<id>/plan.json` holds the plan (with `characters`, `title`, `summary`). A crash or a failed lint resumes from the saved plan without new LLM or TTS cost.
 
 ## Writing the prompt
 
 Say the format, the beats, and the tone. The planner handles the rest.
 
 - Film: "Biscuit tries to bake a birthday cake for Marmalade; every step goes wrong; ending: the cat loves the burnt one."
-- Motion: "Top 5 times Biscuit the dog panicked over nothing, countdown from #5 to #1, punchy and silly."
-
-## Reuse (motion)
-
-Before making a scene's still, `vf motion` checks `library/index.json` for up to 3 old stills/keyframes with the same character set, the same place and the same aspect whose prompt shares at least 30 % of the scene's content words (character descriptions and the style prompt don't count). clef checks each with the keyframe questions; it is used only if the characters match and `fits_shot` ≥ 0.75. Images that failed QA earlier (`status: rejected`), images made in the same video, and images already used 3 times are skipped. A reused still costs only the clef check (~$0.0002) and is logged as a $0 `still` row with `reused: <entry id>`. The library entry's `used_in` records where it went.
+- Motion: "Biscuit the dog chases a ball, the cat watches, scared at first then happy; funny and short, 30 seconds."
 
 ## Resume and repeats
 
-- The key is `--id`, or a hash of the inputs; state lives in `.vf/film-<key>-state.json` / `.vf/motion-<key>-state.json`.
+- The key is `--id`, or a hash of the inputs; state lives in `.vf/film-<key>-state.json` / `.vf/motion2-<key>-state.json`.
 - A crash or a dead worker: run `resume` from `vf wait`. Finished shots/scenes are skipped; in-flight videos are polled, not re-bought.
 - The same prompt after success = USAGE. Use `--id` for another take.
 - A film shot whose video is blocked is retried twice inside the tool (softer prompt, then a new keyframe). If the job still fails BLOCKED, edit that shot's `video_prompt` (and/or `first_frame_prompt`) in `films/<film-id>/plan.json` to something milder, then run `resume`. Finished shots stay as they are; only unfinished shots read the edited prompts. Keep the number of shots the same. Never edit `.vf/*-state.json` by hand.
 
 ## Requirements
 
-`ffmpeg` with `libx264`; for motion text, ffmpeg built with `libass` plus fonts (`fonts-dejavu-core`, `fonts-thai-tlwg` for Thai). `vf doctor` checks ffmpeg; `vf motion --dry-run` says whether libass is present.
+`ffmpeg` with `libx264`. Motion also needs `hyperframes` and `gsap` (pinned npm packages) and Chrome: `vf setup` runs `npm ci` and `hyperframes browser ensure`, and `vf doctor` checks them. Caption fonts: `fonts-dejavu-core`, `fonts-thai-tlwg` for Thai (override with `VF_HF_FONT=<font file>`); no font found = CONFIG. GSAP is under its own Standard License (see `NOTICE`), not MIT.
