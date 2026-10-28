@@ -19,7 +19,8 @@ export const DEFAULT_POSES = {
 };
 export const POSE_FRAME = "Full body, centered, whole character visible with space around it. The character is isolated on a perfectly flat, uniform light cream background: no ground, no floor line, no cast shadow under the feet, no props, no other characters.";
 // prompt แก้ภาพ (ไม่ใส่ style_prompt เพราะภาพต้นฉบับมีสไตล์อยู่แล้ว และห้ามเพิ่มฉากหลัง)
-export const TALK_PROMPT = "Edit image 1. Keep everything identical: the same character, same pose, same size and position in the frame, same plain flat light cream background with nothing else in it. Change only the mouth: open it slightly as if saying \"ah\". Do not add any room, furniture, window or scenery.";
+// ตาต้องเหมือนเดิมเป๊ะ ไม่งั้นตากระพริบทุกครั้งที่ปากขยับ
+export const TALK_PROMPT = "Edit image 1. Keep everything identical: the same character, same pose, same size and position in the frame, same plain flat light cream background with nothing else in it. Keep the eyes exactly as they are (open or closed, gaze direction, shape and size), and keep the eyebrows, tears, ears, paws, tail, body and every other detail unchanged. Change only the mouth: open it slightly as if saying \"ah\". Do not add any room, furniture, window or scenery.";
 const TALK_ATTEMPT = 8;
 
 export const posesDir = (dir, cid) => join(dir, "characters", cid, "poses");

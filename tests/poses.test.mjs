@@ -8,7 +8,7 @@ import * as cf from "../tools/cf.mjs";
 import { MODELS } from "../tools/models.mjs";
 import { main as create } from "../tools/project-create.mjs";
 import { main as poses } from "../tools/character-poses.mjs";
-import { loadPoses, DEFAULT_POSES } from "../tools/poses.mjs";
+import { loadPoses, DEFAULT_POSES, TALK_PROMPT } from "../tools/poses.mjs";
 import { goodBible } from "./fixtures/bible.mjs";
 import { bodyOf } from "./fixtures/body.mjs";
 
@@ -100,6 +100,12 @@ test("รันจริง: 12 ไฟล์ + poses.json 6 ท่า, talk ใ�
   assert.ok(pose.every((p) => p.includes(style) && p.includes("flat, uniform light cream background")));
   assert.equal(clefCalls().length, 6);
   assert.equal(loadPoses(dir, "dog"), null);
+});
+
+test("TALK_PROMPT คงตา คิ้ว น้ำตา หู อุ้งเท้า ไว้เหมือนเดิม และยังห้ามฉากหลัง", () => {
+  for (const w of ["eyes", "open or closed", "gaze", "eyebrows", "tears", "ears", "paws", "Change only the mouth", "room, furniture, window or scenery"]) {
+    assert.ok(TALK_PROMPT.includes(w), w);
+  }
 });
 
 test("ตัวละครที่ไม่มี → USAGE; รันซ้ำไม่มี --replace → USAGE มีท่าแล้ว", async () => {
