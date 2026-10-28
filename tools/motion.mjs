@@ -102,6 +102,24 @@ function requirePoses(dir, slug, characters) {
   }
 }
 
+// แผนอาจถูกทำไว้ก่อนชุดท่าถูกแก้ (vf character poses --replace): เช็กทุกท่าที่แผนใช้ก่อน compose
+function requirePlanPoses(dir, slug, plan) {
+  const want = {};
+  for (const sc of plan.scenes) {
+    const cast = new Set(sc.cast.map((c) => c.who));
+    for (const c of sc.cast) (want[c.who] ??= new Set()).add(c.pose);
+    for (const b of sc.beats ?? []) if (b.pose && cast.has(b.who)) want[b.who].add(b.pose);
+  }
+  const missing = Object.entries(want).flatMap(([cid, ps]) => {
+    const have = new Set(loadPoses(dir, cid)?.names ?? []);
+    return [...ps].filter((p) => !have.has(p)).map((p) => ({ cid, pose: p }));
+  });
+  if (missing.length) {
+    const cids = [...new Set(missing.map((m) => m.cid))];
+    throw new VfError("USAGE", `แผนนี้ใช้ท่าที่ไม่มีแล้ว: ${missing.map((m) => `${m.cid}/${m.pose}`).join(", ")} รัน ${cids.map((c) => `vf character poses ${slug} ${c}`).join(" และ ")} (หรือใส่ --id ใหม่เพื่อวางแผนใหม่)`, { missing });
+  }
+}
+
 function dryRun(total, audio, places, warnings) {
   const n = Math.round(total / 5);
   return {
@@ -152,7 +170,9 @@ async function work({ dir, ctx, state, key, prompt, total, audio, places, warnin
     const made = [];
     for (const p of story.props_needed) {
       if (have.has(p.id)) continue;
-      await makeProp({ dir, slug, id: p.id, desc: p.desc, run, costDir });
+      // checkpoint แยกต่อ prop: cutout พังแล้วรันซ้ำ ไม่สร้างภาพ (จ่ายเงิน) ใหม่
+      const sub = { get: (k) => state.get(`props/${p.id}/${k}`), set: (k, v) => state.set(`props/${p.id}/${k}`, v) };
+      await makeProp({ dir, slug, id: p.id, desc: p.desc, run, costDir, state: sub });
       have.add(p.id);
       made.push(p.id);
     }
@@ -195,6 +215,8 @@ async function work({ dir, ctx, state, key, prompt, total, audio, places, warnin
   const id = `${slugify(story.title).slice(0, 40).replace(/-+$/, "")}-${key.slice(-4)}`;
   const base = `motions/${id}`;
   const rdir = join(dir, base);
+  // composition ของ HyperFrames อยู่ใน hf/ แยกจากเสียงและวิดีโอ (lint ไม่เห็นไฟล์เสียงที่ไม่ได้ใช้)
+  const hdir = join(rdir, "hf");
   mkdirSync(rdir, { recursive: true });
   writeJsonAtomic(join(rdir, "plan.json"), { prompt, total, ...story, ...plan });
   const meta = { project: slug, motion: id, item: id, run };
@@ -218,25 +240,27 @@ async function work({ dir, ctx, state, key, prompt, total, audio, places, warnin
 
   await step(state, "compose", async () => {
     log("ขั้น compose (index.html)");
-    for (const d of ["assets", "fonts", "vendor"]) mkdirSync(join(rdir, d), { recursive: true });
+    requirePlanPoses(dir, slug, plan);
+    rmSync(hdir, { recursive: true, force: true });
+    for (const d of ["assets", "fonts", "vendor"]) mkdirSync(join(hdir, d), { recursive: true });
     const font = fontFile(lang);
-    copyFileSync(font, join(rdir, "fonts", basename(font)));
-    copyFileSync(gsapFile(), join(rdir, "vendor", "gsap.min.js"));
+    copyFileSync(font, join(hdir, "fonts", basename(font)));
+    copyFileSync(gsapFile(), join(hdir, "vendor", "gsap.min.js"));
     const plates = {};
     for (const pid of new Set(plan.scenes.map((s) => s.place))) {
       const src = platePath(dir, pid);
       plates[pid] = `assets/plate-${pid}${extname(src) || ".png"}`;
-      copyFileSync(src, join(rdir, plates[pid]));
+      copyFileSync(src, join(hdir, plates[pid]));
     }
     for (const cid of new Set(plan.scenes.flatMap((s) => s.cast.map((c) => c.who)))) {
       const ps = loadPoses(dir, cid);
       for (const pose of ps.names) {
-        copyFileSync(ps.file(pose), join(rdir, "assets", `${cid}-${pose}.png`));
-        copyFileSync(ps.file(pose, true), join(rdir, "assets", `${cid}-${pose}-talk.png`));
+        copyFileSync(ps.file(pose), join(hdir, "assets", `${cid}-${pose}.png`));
+        copyFileSync(ps.file(pose, true), join(hdir, "assets", `${cid}-${pose}-talk.png`));
       }
     }
     for (const pid of new Set(plan.scenes.flatMap((s) => (s.props ?? []).map((p) => p.id)))) {
-      copyFileSync(join(dir, "props", pid, "prop.png"), join(rdir, "assets", `prop-${pid}.png`));
+      copyFileSync(join(dir, "props", pid, "prop.png"), join(hdir, "assets", `prop-${pid}.png`));
     }
     const html = composeHtml({
       plan, times, lines, stage: stages, size: SIZE, fps: FPS, lang,
@@ -247,14 +271,18 @@ async function work({ dir, ctx, state, key, prompt, total, audio, places, warnin
         prop: (pid) => `assets/prop-${pid}.png`,
       },
     });
-    writeFileSync(join(rdir, "index.html"), html);
-    return { file: `${base}/index.html`, seconds };
+    writeFileSync(join(hdir, "index.html"), html);
+    return { file: `${base}/hf/index.html`, seconds };
   });
 
   const lint = await step(state, "lint", async () => {
     log("ขั้น lint");
-    const r = await hfLint(rdir);
-    if (r.errors > 0) throw new VfError("INTERNAL", `hyperframes lint พบ ${r.errors} error: ${r.text.slice(0, 1500)}`, { lint: r.text.slice(0, 4000) });
+    const r = await hfLint(hdir);
+    if (r.errors > 0) {
+      // ให้รอบหน้า compose ใหม่จากแผนเดิม (ไม่เรียก LLM/TTS) แทนที่จะ lint HTML เดิมซ้ำ
+      state.set("compose", { status: "stale" });
+      throw new VfError("INTERNAL", `hyperframes lint พบ ${r.errors} error: ${r.text.slice(0, 1500)}`, { lint: r.text.slice(0, 4000) });
+    }
     const codes = [...new Set(r.text.match(/\b[a-z]+(?:_[a-z]+)+\b/g) ?? [])];
     return { warnings: r.warnings, codes };
   });
@@ -267,7 +295,7 @@ async function work({ dir, ctx, state, key, prompt, total, audio, places, warnin
     rmSync(snaps, { recursive: true, force: true });
     mkdirSync(snaps, { recursive: true });
     const at = times.map((t) => r3(t.start + t.dur / 2));
-    const pngs = (await hfSnapshot(rdir, at, snaps)).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    const pngs = (await hfSnapshot(hdir, at, snaps)).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
     if (pngs.length !== at.length) throw new VfError("INTERNAL", `hyperframes snapshot ได้ ${pngs.length} ภาพ (ขอ ${at.length})`);
     const scores = [];
     const found = [];
@@ -295,7 +323,7 @@ async function work({ dir, ctx, state, key, prompt, total, audio, places, warnin
     log(`ขั้น render (${seconds} วินาที)`);
     const rel = `${base}/video.mp4`;
     rmSync(join(dir, rel), { force: true });
-    const r = await hfRender(rdir, join(dir, rel));
+    const r = await hfRender(hdir, join(dir, rel));
     let size = 0;
     try { size = statSync(join(dir, rel)).size; } catch {}
     if (!size) throw new VfError("INTERNAL", "hyperframes render ไม่ได้ไฟล์วิดีโอ (ไม่มีไฟล์หรือไฟล์ว่าง)", { file: rel });
@@ -341,7 +369,7 @@ export async function main(argv) {
   const places = usablePlaces(dir, ctx.places);
   if (!places.length) throw new VfError("USAGE", `project นี้ยังไม่มีสถานที่ที่มีภาพฉาก รัน vf place add ${ctx.slug} --prompt "..."`);
   requirePoses(dir, ctx.slug, ctx.characters);
-  const audio = { narrator: !values["no-narration"], music: !values["no-music"] };
+  const audio = { narrator: Boolean(ctx.pj.narrator) && !values["no-narration"], music: !values["no-music"] };
   const warnings = ignoredWarnings(values);
   if (values["dry-run"]) return dryRun(total, audio, places, warnings);
 

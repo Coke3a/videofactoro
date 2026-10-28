@@ -14,7 +14,7 @@ import { validateScenePlan, validateStory } from "../tools/motion-plan.mjs";
 import { SFX_KINDS } from "../tools/fx.mjs";
 import { goodBible } from "./fixtures/bible.mjs";
 import { bodyOf } from "./fixtures/body.mjs";
-import { TINY, STORY, SCENES, STORY_MARK, SCENES_MARK, STAGING_KEY, prepareMotionProject, stubRunner } from "./fixtures/motion.mjs";
+import { TINY, STORY, SCENES, SILENT_SCENES, STORY_MARK, SCENES_MARK, STAGING_KEY, prepareMotionProject, stubRunner } from "./fixtures/motion.mjs";
 
 const B64 = fs.readFileSync(TINY).toString("base64");
 const ENV = { CLOUDFLARE_AI_ACCOUNT_ID: "acc1", CLOUDFLARE_AI_API_TOKEN: "tok-secret-123456" };
@@ -102,12 +102,15 @@ test("motion: story → props → stage → scenes → tts → compose → lint 
   assert.equal(m.file, path.join(dir, "renders", `${m.id}.mp4`));
   assert.ok(fs.existsSync(m.file));
   assert.equal(m.dir, path.join(dir, "motions", m.id));
-  for (const f of ["index.html", "plan.json", "video.mp4", "vendor/gsap.min.js", "fonts/Test-Bold.ttf", "voice-1-1.wav", "voice-4-2.wav",
-    "assets/plate-kitchen.jpg", "assets/cat-idle.png", "assets/cat-happy-talk.png", "assets/prop-ball.png"]) {
+  for (const f of ["hf/index.html", "plan.json", "video.mp4", "hf/vendor/gsap.min.js", "hf/fonts/Test-Bold.ttf", "voice-1-1.wav", "voice-4-2.wav",
+    "hf/assets/plate-kitchen.jpg", "hf/assets/cat-idle.png", "hf/assets/cat-happy-talk.png", "hf/assets/prop-ball.png"]) {
     assert.ok(fs.existsSync(path.join(m.dir, f)), f);
   }
+  // โฟลเดอร์ของ HyperFrames มีแต่ composition (เสียง/วิดีโออยู่ชั้นนอก)
+  assert.deepEqual(fs.readdirSync(path.join(m.dir, "hf")).sort(), ["assets", "fonts", "index.html", "vendor"]);
+  for (const a of runner.seen) assert.equal(a[1], path.join(m.dir, "hf"), `hyperframes ${a[0]} ได้โฟลเดอร์ hf/`);
   assert.ok(fs.existsSync(path.join(dir, "props", "ball", "prop.png")), "prop ใหม่ถูกสร้างก่อนวางแผนฉาก");
-  const html = fs.readFileSync(path.join(m.dir, "index.html"), "utf8");
+  const html = fs.readFileSync(path.join(m.dir, "hf", "index.html"), "utf8");
   assert.match(html, /src="assets\/plate-kitchen\.jpg"/);
   assert.match(html, /font-family: "Noto Sans"/);
   // 4 ฉาก × (0.45 + 1 + 0.3 + 1 + 0.7) วินาที
@@ -208,4 +211,77 @@ test("motion --dry-run: LLM 2, TTS ≈ ความยาว, clef ≈ ฉาก
   await assert.rejects(motion(["demo", "--prompt", "x", "--duration", "10"]), (e) => e.code === "USAGE");
   await assert.rejects(motion(["demo", "--prompt", "x", "--duration", "181"]), (e) => e.code === "USAGE");
   assert.equal(calls.length, 0);
+});
+
+const llmTts = () => posts(MODELS.llm[0]).length + posts(MODELS.tts).length;
+
+test("motion: project narrator false → prompt บอกว่าไม่มีผู้บรรยาย และไม่มีเสียงผู้บรรยาย", async () => {
+  setRunner(stubRunner());
+  const f = path.join(dir, "project.json");
+  fs.writeFileSync(f, JSON.stringify({ ...JSON.parse(fs.readFileSync(f, "utf8")), narrator: false }));
+  scenes = SCENES({ narrator: false });
+  const r = await motion(ARGS);
+  assert.ok(fs.existsSync(r.motion.file));
+  const sys = posts(MODELS.llm[0]).map((c) => c.body.input.systemInstruction.parts[0].text).find((t) => t.includes(SCENES_MARK));
+  assert.match(sys, /There is no narrator/);
+  assert.equal(posts(MODELS.tts).filter((c) => c.body.input.voice === "Kore").length, 0);
+});
+
+test("motion: cutout ของ prop พัง → รันซ้ำไม่จ่ายค่าภาพ prop ซ้ำ", async () => {
+  setRunner(stubRunner());
+  const blocker = path.join(dir, "props", "ball");
+  fs.mkdirSync(path.dirname(blocker), { recursive: true });
+  fs.writeFileSync(blocker, "not a dir"); // mkdir ของขั้น cut พัง
+  await assert.rejects(motion(ARGS));
+  assert.equal(posts(MODELS.imageFast).length, 1);
+  const sf = fs.readdirSync(path.join(dir, ".vf")).find((f) => f.startsWith("motion2-"));
+  const st = JSON.parse(fs.readFileSync(path.join(dir, ".vf", sf), "utf8"));
+  assert.equal(st["props/ball/prop:gen"].status, "done", "ภาพ prop ถูก checkpoint แยก");
+  assert.equal(st["props/ball/prop:cut"].status, "failed");
+  fs.rmSync(blocker);
+  const r = await motion(ARGS);
+  assert.ok(fs.existsSync(path.join(dir, "props", "ball", "prop.png")));
+  assert.equal(posts(MODELS.imageFast).length, 1, "ไม่สร้างภาพ prop ใหม่");
+  assert.ok(fs.existsSync(r.motion.file));
+});
+
+test("motion: ไม่มีบทพูดเลยทุกฉาก → ไม่มีรางพากย์ แต่คลิปเสร็จ ยาวตามฉาก", async () => {
+  setRunner(stubRunner());
+  scenes = SILENT_SCENES();
+  const r = await motion(ARGS);
+  assert.equal(posts(MODELS.tts).length, 0);
+  assert.equal(r.motion.narration, false);
+  assert.equal(r.motion.sfx, true);
+  assert.ok(Math.abs(r.motion.seconds - 21) < 0.01);
+  assert.ok(Math.abs(Number(probe(r.motion.file).format.duration) - 21) < 0.3);
+});
+
+test("motion: lint พังครั้งแรก → รันซ้ำ compose ใหม่จากแผนเดิม ไม่เรียก LLM/TTS", async () => {
+  let bad = true;
+  const ok = stubRunner();
+  const runner = async (args, o) => (args[0] === "lint" && bad ? { stdout: "◇  1 error(s), 0 warning(s)" } : ok(args, o));
+  setRunner(runner);
+  await assert.rejects(motion(ARGS), (e) => e.code === "INTERNAL");
+  const n = llmTts();
+  const html = path.join(dir, "motions", fs.readdirSync(path.join(dir, "motions"))[0], "hf", "index.html");
+  fs.writeFileSync(html, "stale");
+  bad = false;
+  const r = await motion(ARGS);
+  assert.ok(fs.existsSync(r.motion.file));
+  assert.match(fs.readFileSync(html, "utf8"), /data-composition-id="main"/, "compose ใหม่ ไม่ใช้ HTML เดิมที่ lint ไม่ผ่าน");
+  assert.equal(llmTts(), n, "ไม่เรียก LLM/TTS ใหม่");
+  assert.ok(ok.seen.some((a) => a[0] === "lint"));
+});
+
+test("motion: ท่าที่แผนใช้หายไปก่อน compose → USAGE บอกตัวละคร/ท่า และคำสั่ง", async () => {
+  let bad = true;
+  const ok = stubRunner();
+  setRunner(async (args, o) => (args[0] === "lint" && bad ? { stdout: "◇  1 error(s), 0 warning(s)" } : ok(args, o)));
+  await assert.rejects(motion(ARGS), (e) => e.code === "INTERNAL");
+  const pf = path.join(dir, "characters", "cat", "poses", "poses.json");
+  const pj = JSON.parse(fs.readFileSync(pf, "utf8"));
+  delete pj.poses.happy;
+  fs.writeFileSync(pf, JSON.stringify(pj));
+  bad = false;
+  await assert.rejects(motion(ARGS), (e) => e.code === "USAGE" && /cat/.test(e.message) && /happy/.test(e.message) && e.message.includes("vf character poses demo cat"));
 });
