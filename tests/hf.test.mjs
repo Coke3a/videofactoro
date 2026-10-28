@@ -109,3 +109,10 @@ test("hfEnv: PATH ขึ้นต้นด้วย dir ของ node ที่
   await hfRender("/p", "/o.mp4");
   assert.ok(seen.env.PATH.startsWith(dirname(process.execPath) + delimiter));
 });
+
+test("hfEnv: ตัดคีย์ CLOUDFLARE_* และ VF_* ออก", () => {
+  const e = hfEnv({ PATH: "/usr/bin", HOME: "/h", CLOUDFLARE_API_TOKEN: "x", VF_PAGE_KEY: "y" });
+  assert.equal(e.CLOUDFLARE_API_TOKEN, undefined);
+  assert.equal(e.VF_PAGE_KEY, undefined);
+  assert.equal(e.HOME, "/h");
+});

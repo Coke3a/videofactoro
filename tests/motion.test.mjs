@@ -192,6 +192,14 @@ test("motion: ตัวละครที่ยังไม่มีท่า �
   assert.equal(calls.length, 0);
 });
 
+test("motion: poses.json ชี้ไฟล์ที่ถูก archive ไปแล้ว → USAGE บอกคำสั่ง ไม่ใช่ ENOENT", async () => {
+  setRunner(stubRunner());
+  const pd = path.join(dir, "characters", "dog", "poses");
+  for (const f of fs.readdirSync(pd)) if (f.endsWith(".png")) fs.rmSync(path.join(pd, f));
+  await assert.rejects(motion(ARGS), (e) => e.code === "USAGE" && e.message.includes("vf character poses demo dog"));
+  assert.equal(calls.length, 0);
+});
+
 test("motion: lint มี error → INTERNAL พร้อมข้อความ lint ไม่ render", async () => {
   const runner = stubRunner({ lint: "✖ missing_timeline: no timeline\n◇  2 error(s), 0 warning(s)" });
   setRunner(runner);

@@ -110,3 +110,10 @@ test("listProps ไม่มีโฟลเดอร์ → []; vf project show 
   await run();
   assert.deepEqual((await show(["demo"])).props.map((p) => p.id), ["robot-vacuum"]);
 });
+
+test("listProps ข้าม prop.json ที่เสีย ไม่ throw", async () => {
+  await run(["--id", "good"]);
+  await run(["--id", "bad"]);
+  fs.writeFileSync(path.join(dir, "props", "bad", "prop.json"), "{not json");
+  assert.deepEqual(listProps(dir).map((p) => p.id), ["good"]);
+});

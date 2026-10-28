@@ -69,7 +69,7 @@ Exit codes: `0` ok · `1` INTERNAL · `2` USAGE · `3` CONFIG · `4` BLOCKED (co
 5. **Music:** ElevenLabs Music v2 writes an instrumental bed when the shot needs one.
 6. **Mix:** ffmpeg combines scene audio, narration and music, with the music ducked under the voice.
 
-Typical costs: a new project with two characters and three places is about $0.16; a 6 s draft clip with narration is about $0.11; a 90 s film draft is about $1.5–2; a motion cartoon is about $0.02–0.03 per clip plus music (poses about $0.04 per character, once). See [costs](skills/videofactoro/references/costs.md).
+Typical costs: a new project with two characters and three places is about $0.16; a 6 s draft clip with narration is about $0.11; a 90 s film draft is about $1.5–2; a motion cartoon is about $0.06–0.11 per 60 s clip measured plus music (poses about $0.04 per character, once). See [costs](skills/videofactoro/references/costs.md).
 
 ## Project files
 

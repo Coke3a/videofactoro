@@ -1,5 +1,5 @@
 // ประกอบวิดีโอหลายช็อตด้วย ffmpeg: ปรับทุกช็อตให้ขนาด/fps/เสียงเท่ากัน, ต่อกัน, รางเสียงพากย์ตามเวลา, วนเพลง
-import { execFile, execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { VfError } from "./out.mjs";
 
@@ -23,18 +23,6 @@ export async function ffmpeg(args, what, { timeoutMs = FFMPEG_TIMEOUT_MS } = {})
     if (err?.killed) throw new VfError("INTERNAL", `ffmpeg ${what} ค้างเกิน ${Math.round(timeoutMs / 1000)} วินาที จึงถูกหยุด`, { timeoutMs });
     throw new VfError("INTERNAL", `ffmpeg ${what} ไม่สำเร็จ`, { cause: String(err?.stderr ?? err?.message ?? err).slice(0, 400) });
   }
-}
-
-let filterCache = null;
-export function hasFilter(name) {
-  if (filterCache === null) {
-    try {
-      filterCache = execFileSync("ffmpeg", ["-hide_banner", "-filters"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-    } catch {
-      filterCache = "";
-    }
-  }
-  return new RegExp(`^\\s*\\S+\\s+${name}\\s`, "m").test(filterCache);
 }
 
 const VIDEO_OUT = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p"];

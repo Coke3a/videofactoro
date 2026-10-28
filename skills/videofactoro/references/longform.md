@@ -4,16 +4,16 @@ Both make a 20–180 s video from an existing project's characters and places, r
 
 | | `vf film` | `vf motion` |
 |---|---|---|
-| Look | Generative AI video: real motion, acting, scene sound | Cartoon: reusable cut-out pose sprites animated by HyperFrames + GSAP on a place plate, with props, camera, hit flashes, captions |
+| Look | Generative AI video: real motion, acting, scene sound | Cartoon: reusable cut-out pose sprites animated by HyperFrames + GSAP on a place plate, with props, camera, stamps, screen shake, captions |
 | Unit | shot, 5–20 s, mostly 15–20 s with 2–3 timed beats (one flux-3-video clip each) | scene with several beats; characters change pose and move between stage spots |
 | Needs first | characters and places | `vf character poses` for every character (once), a place with a plate; 9:16 only |
-| Cost, 90 s | ≈ $1.5–2 draft (13 shots) · HD ≈ +$1.4 | ≈ $0.02–0.03 per clip + music ($0 from library, $0.2275 new track) |
-| Time | 10–20 min for 90 s (3 shots at a time) | render ≈ 3.5× clip length on 2 vCPU, one render at a time |
+| Cost, 90 s | ≈ $1.5–2 draft (13 shots) · HD ≈ +$1.4 | ≈ $0.06–0.11 per 60 s clip measured (LLM incl. retries, TTS, clef) + music ($0 from library, $0.2275 new track) |
+| Time | 10–20 min for 90 s (3 shots at a time) | render ≈ 3.5× clip length on 2 vCPU, one render per project at a time |
 | Best for | skits, stories, "AI video" channels | cheap cartoon gags and stories with our own characters |
 
 ## Common flags
 
-`--prompt` (required), `--duration 20-180` (default 60), `--no-narration`, `--no-music`, `--id <id>`, `--foreground`, `--dry-run`. `vf film` also takes `--hd` and `--max-rerolls 0-5` (default 2, per image). `vf motion` accepts `--no-reuse` and `--max-rerolls` only for old callers: both are ignored and a warning is returned (deprecated).
+`--prompt` (required), `--duration 20-180` (default 60), `--no-narration`, `--no-music`, `--id <id>`, `--foreground`, `--dry-run`. In `vf motion`, `--id` becomes the motion id and the render name `renders/<id>.mp4` (film derives the name from title + key). `vf film` also takes `--hd` and `--max-rerolls 0-5` (default 2, per image). `vf motion` accepts `--no-reuse` and `--max-rerolls` only for old callers: both are ignored and a warning is returned (deprecated).
 
 Narration is on only when the project has a narrator (`project.json` → `narrator: true`) and you did not pass `--no-narration`; this holds for film and motion. Music is always on unless you pass `--no-music`: one instrumental bed for the whole video, ducked under the voice.
 
@@ -36,6 +36,8 @@ Video QA is not run per shot (it is a weak signal and slow). Inspect a contact s
 `vf motion` fails fast with USAGE, before any paid call, when: the project has no character, no place with a plate, the project is not 9:16, or any character of the project has no poses (the message names the `vf character poses` command to run).
 
 ## `vf motion` pipeline
+
+The total length of the scenes must be within ±10 % of `--duration` (the LLM is asked to rewrite otherwise). Motion line budget: 2.68 words/s, max 13 words per line.
 
 1. **story** (LLM) from the prompt and the cast (characters with their poses, places, existing props) → **props** missing ones are made → **stage** spots per place.
 2. **scenes** (LLM): scenes with beats that use only existing pose names, stage spots, props and sound effects. Lines of dialogue are spoken by the character's own voice, narration by the narrator voice.

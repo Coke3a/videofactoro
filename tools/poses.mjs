@@ -101,6 +101,7 @@ export function loadPoses(dir, cid) {
     if (e.code === "ENOENT") return null;
     throw e;
   }
-  const names = Object.keys(j.poses ?? {});
+  // --replace ที่ค้างครึ่งทางทิ้ง poses.json ที่ชี้ไปยังไฟล์ที่ถูกเก็บเข้า archive แล้ว → ถือว่าท่านั้นไม่มี
+  const names = Object.keys(j.poses ?? {}).filter((n) => [j.poses[n].file, j.poses[n].talk].every((f) => !f || existsSync(join(d, f))));
   return { names, file: (name, talk = false) => join(d, talk ? j.poses[name].talk : j.poses[name].file) };
 }

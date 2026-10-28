@@ -330,6 +330,19 @@ test("finishAudio voices: วางเสียงตามเวลา at ร�
   }), (e) => e.code === "INTERNAL");
 });
 
+test("finishAudio: sfx cue อยู่ที่ total พอดี → ไม่ throw และไม่มีราง sfx", async () => {
+  const base = "motions/z";
+  fs.mkdirSync(path.join(dir, base), { recursive: true });
+  const video = `${base}/video.mp4`;
+  execFileSync("ffmpeg", ["-loglevel", "error", "-y", "-f", "lavfi", "-i", "color=c=black:s=108x192:r=30:d=4", "-pix_fmt", "yuv420p", path.join(dir, video)]);
+  const r = await finishAudio({
+    state: openState(path.join(dir, ".vf"), "fa3-state.json"), dir, base, video, total: 4, wantMusic: false, sceneAudio: false, meta: { project: "demo" }, out: "renders/z.mp4",
+    voices: [], cues: [{ kind: "pop", at: 4 }],
+  });
+  assert.equal(r.sfx, false);
+  assert.ok(!fs.existsSync(path.join(dir, base, "sfx.wav")));
+});
+
 test("film --dry-run และ --duration นอกช่วง ไม่เรียก API", async () => {
   const d = await film(["demo", "--prompt", "x", "--duration", "90", "--dry-run"]);
   assert.equal(d.dry_run, true);

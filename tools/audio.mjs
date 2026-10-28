@@ -6,6 +6,7 @@ import { MODELS } from "./models.mjs";
 import { estimate } from "./pricing.mjs";
 import { logCost, costRow, failOutcome } from "./cost.mjs";
 import { VfError } from "./out.mjs";
+import { FFMPEG_TIMEOUT_MS } from "./assemble.mjs";
 
 const execFileP = promisify(execFile);
 
@@ -75,8 +76,6 @@ export function narrationTempo(narrationSec, clipSec) {
 
 // ffmpeg args: วิดีโอ copy, เสียงในฉาก + พากย์ (หน่วง 0.3 วิ) + เพลง (fade, หลบใต้เสียงพากย์) + เสียงประกอบ, ยาวเท่าวิดีโอ
 // ปรับความดังรวมเป็น -14 LUFS (ระดับของแพลตฟอร์มคลิปสั้น) เพราะแต่ละแทร็กมาจากหลายแหล่ง ดังไม่เท่ากัน
-const MIX_TIMEOUT_MS = 10 * 60 * 1000;
-
 export function mixArgs({ video, duration, sceneAudio, narration, tempo = 1, music, musicGain, sfx = null, sfxGain = 0.55, out }) {
   const inputs = ["-i", video];
   const filters = [];
@@ -115,9 +114,9 @@ export function mixArgs({ video, duration, sceneAudio, narration, tempo = 1, mus
 
 export async function mix(opts) {
   try {
-    await execFileP("ffmpeg", mixArgs(opts), { maxBuffer: 1 << 24, timeout: MIX_TIMEOUT_MS, killSignal: "SIGKILL" });
+    await execFileP("ffmpeg", mixArgs(opts), { maxBuffer: 1 << 24, timeout: FFMPEG_TIMEOUT_MS, killSignal: "SIGKILL" });
   } catch (err) {
-    if (err?.killed) throw new VfError("INTERNAL", `ผสมเสียงค้างเกิน ${MIX_TIMEOUT_MS / 1000} วินาที จึงถูกหยุด`);
+    if (err?.killed) throw new VfError("INTERNAL", `ผสมเสียงค้างเกิน ${FFMPEG_TIMEOUT_MS / 1000} วินาที จึงถูกหยุด`);
     throw new VfError("INTERNAL", "ผสมเสียงไม่สำเร็จ", { cause: String(err?.stderr ?? err?.message ?? err).slice(0, 300) });
   }
   return opts.out;

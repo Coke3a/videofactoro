@@ -42,9 +42,14 @@ export function listProps(dir) {
   if (!existsSync(root)) return [];
   return readdirSync(root, { withFileTypes: true })
     .filter((e) => e.isDirectory() && existsSync(join(root, e.name, "prop.json")) && existsSync(join(root, e.name, "prop.png")))
-    .map((e) => {
-      const j = JSON.parse(readFileSync(join(root, e.name, "prop.json"), "utf8"));
-      return { id: j.id ?? e.name, desc: j.desc ?? "", file: `props/${e.name}/prop.png` };
+    .flatMap((e) => {
+      let j;
+      try {
+        j = JSON.parse(readFileSync(join(root, e.name, "prop.json"), "utf8"));
+      } catch {
+        return []; // prop.json เสีย → ข้าม
+      }
+      return [{ id: j.id ?? e.name, desc: j.desc ?? "", file: `props/${e.name}/prop.png` }];
     })
     .sort((a, b) => a.id.localeCompare(b.id));
 }

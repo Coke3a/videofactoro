@@ -30,7 +30,7 @@ export function hfBin() {
 export const hfCommand = (args) => ({ cmd: process.execPath, args: [hfBin(), ...args] });
 // tmpDir: /tmp ของ sandbox เป็น tmpfs เล็ก (512 MB) แต่ render เขียนไฟล์ชั่วคราวใหญ่ → ชี้ไปดิสก์โปรเจกต์
 export const hfEnv = (base = process.env, tmpDir) => ({
-  ...base,
+  ...Object.fromEntries(Object.entries(base).filter(([k]) => !/^(CLOUDFLARE_|VF_)/.test(k))),
   ...HF_ENV,
   ...(tmpDir ? { TMPDIR: tmpDir, TMP: tmpDir, TEMP: tmpDir } : {}),
   PATH: [dirname(process.execPath), base.PATH].filter(Boolean).join(delimiter),

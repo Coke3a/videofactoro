@@ -24,7 +24,7 @@ You never copy `.env.example` or type keys by hand; it only lists the variable n
 | `tools/clip.mjs` | Single-shot clip pipeline |
 | `tools/audio.mjs` | TTS, music and the ffmpeg mix |
 | `tools/shots.mjs` | Shared keyframe/video steps and a small concurrency pool |
-| `tools/film.mjs`, `motion.mjs`, `longform.mjs` | Long videos: multi-shot AI film, motion-comic, shared validation and audio finish |
+| `tools/film.mjs`, `motion.mjs`, `longform.mjs` | Long videos: multi-shot AI film, motion (HyperFrames + GSAP cut-out pose sprites cartoon), shared validation and audio finish |
 | `tools/assemble.mjs` | ffmpeg helpers: normalize, concat, narration track |
 | `tools/jobs.mjs`, `wait.mjs`, `status.mjs` | Background jobs, heartbeat, resume |
 | `tools/state.mjs` | Per-command checkpoints (pay-once resume) |

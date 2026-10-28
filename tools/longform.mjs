@@ -136,6 +136,7 @@ export async function finishAudio({ state, dir, base, video, segments, voices, t
     }
     const rel = `${base}/sfx.wav`;
     const items = cues.filter((c) => c.at < total).map((c) => ({ file: kinds[c.kind], at: c.at }));
+    if (!items.length) return { file: null };
     await ffmpeg(narrationTrackArgs({ items, duration: total, out: join(dir, rel) }), "รวมเสียงประกอบ");
     return { file: rel };
   });
