@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   CAMERAS, ENTERS, MOVES, FX, LEAD, GAP, TAIL, SCENE_MIN,
-  STORY_SCHEMA, scenesSchema, storySystemPrompt, scenesSystemPrompt, validateScenePlan, estimateSeconds, validateStory, sceneSeconds,
+  STORY_SCHEMA, scenesSchema, storySystemPrompt, scenesSystemPrompt, validateScenePlan, normalizeScenePlan, estimateSeconds, validateStory, sceneSeconds,
 } from "../tools/motion-plan.mjs";
 import { geminiStrip, anthropicStrip } from "../tools/llm.mjs";
 
@@ -301,4 +301,23 @@ test("unknown speaker is not treated as cast", () => {
   p.scenes[0].lines[1].who = "rex";
   const issues = validateScenePlan(p, ASSETS, OPTS(p));
   assert.ok(issues.some((x) => x.includes("line 2") && x.includes("rex")), issues.join("\n"));
+});
+
+test("normalizeScenePlan ตัด beat ที่ไม่ทำอะไร แล้ว validate ผ่าน", () => {
+  const p = plan();
+  const before = p.scenes[0].beats.length;
+  p.scenes[0].beats.push({ at: "1" }, { at: "line1", who: "cat" }, { at: "2", text: "hi" }, {});
+  normalizeScenePlan(p);
+  assert.equal(p.scenes[0].beats.length, before);
+  assert.deepEqual(validateScenePlan(p, ASSETS, OPTS(p)), []);
+  // ไม่ได้ normalize ก็ไม่ถูกรายงานเป็น issue
+  const q = plan();
+  q.scenes[0].beats.push({ at: "1" });
+  assert.ok(!validateScenePlan(q, ASSETS, OPTS(q)).some((x) => x.includes("does nothing")));
+});
+
+test("scenesSystemPrompt บอกว่าทุก beat ต้องเปลี่ยนอะไรสักอย่างและทุกฉากต้องมี cast", () => {
+  const t = scenesSystemPrompt("en", 60, ASSETS);
+  assert.match(t, /Every beat must change something/);
+  assert.match(t, /Every scene needs 1–\d+ cast characters/);
 });

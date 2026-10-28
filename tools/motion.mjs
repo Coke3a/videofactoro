@@ -22,7 +22,7 @@ import { pool } from "./shots.mjs";
 import { loadPoses } from "./poses.mjs";
 import { listProps, makeProp } from "./props.mjs";
 import { stageFor } from "./stage.mjs";
-import { STORY_SCHEMA, storySystemPrompt, validateStory, scenesSchema, scenesSystemPrompt, validateScenePlan } from "./motion-plan.mjs";
+import { STORY_SCHEMA, storySystemPrompt, validateStory, scenesSchema, scenesSystemPrompt, validateScenePlan, normalizeScenePlan } from "./motion-plan.mjs";
 import { FONT_FOR, fontFile, sceneTimes, audioCues, composeHtml } from "./hf-compose.mjs";
 import { gsapFile, hfLint, hfSnapshot, hfRender } from "./hf.mjs";
 import { COMMON_OPTIONS, parseCommon, finishAudio } from "./longform.mjs";
@@ -206,10 +206,10 @@ async function work({ dir, ctx, state, key, prompt, total, audio, places, warnin
     ].join("\n");
     const { data } = await llmJson({
       system: scenesSystemPrompt(lang, total, assets, { narrator }), user, schema: scenesSchema(assets),
-      validate: (p) => validateScenePlan(p, assets, { total, lang, narrator }), maxTokens: 12000,
+      validate: (p) => validateScenePlan(normalizeScenePlan(p), assets, { total, lang, narrator }), maxTokens: 12000,
       meta: { project: slug, step: "motion-scenes", item: key, run }, costDir,
     });
-    return { scenes: data.scenes };
+    return { scenes: normalizeScenePlan(data).scenes };
   });
 
   const id = `${slugify(story.title).slice(0, 40).replace(/-+$/, "")}-${key.slice(-4)}`;

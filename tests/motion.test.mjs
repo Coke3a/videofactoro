@@ -289,3 +289,12 @@ test("motion: ท่าที่แผนใช้หายไปก่อน co
   bad = false;
   await assert.rejects(motion(ARGS), (e) => e.code === "USAGE" && /cat/.test(e.message) && /happy/.test(e.message) && e.message.includes("vf character poses demo cat"));
 });
+
+test("motion: beat ว่างจาก LLM ถูกตัดก่อน validate และไม่อยู่ใน plan.json", async () => {
+  scenes.scenes[0].beats = [...(scenes.scenes[0].beats ?? []), { at: "1" }, { at: "2", text: "x" }];
+  setRunner(stubRunner());
+  const r = await motion([...ARGS, "--no-reuse"]);
+  const plan = JSON.parse(fs.readFileSync(path.join(r.motion.dir, "plan.json"), "utf8"));
+  for (const sc of plan.scenes) for (const b of sc.beats) assert.ok(b.pose || b.move || b.fx || b.sfx);
+  assert.equal(calls.filter((c) => c.body?.input?.systemInstruction?.parts?.[0]?.text?.includes(SCENES_MARK)).length, 1);
+});

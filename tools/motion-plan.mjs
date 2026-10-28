@@ -147,7 +147,8 @@ export function scenesSystemPrompt(lang, total, raw, { narrator = false } = {}) 
     narrator ? "- The narrator tells the story briefly; characters speak their own short lines." : "- There is no narrator in this project: every line is spoken by a character in the cast.",
     `- beats: { at, who?, pose?, move?, to_spot?, dur?, fx?, sfx?, text? }. at is seconds from scene start as a string ("1.5") or "line<N>" / "line<N>-end" (N counts from 1 within the scene). who is a cast id or a prop id in the scene. move: ${MOVES.join(", ")} (to and run-to need to_spot). fx: stamp (needs text) or shake. sfx: ${(assets.sfx ?? []).join(", ")}.`,
     `- No on-screen text except stamps: a sound word or 1–2 words, at most ${STAMP_MAX} characters (e.g. BONK!, THE END).`,
-    "- Make it move: most scenes need at least one beat (pose change, move, fx or sfx). End on the button gag.",
+    "- Make it move: most scenes need at least one beat. Every beat must change something: a pose, a move, an fx or an sfx (a beat with only text, who or dur is dropped). End on the button gag.",
+    `- Every scene needs 1–${MAX_CAST} cast characters, each standing on a named spot; never leave cast empty.`,
     "- No real people, brands or copyrighted characters.",
   ].join("\n");
 }
@@ -205,6 +206,15 @@ export function validateStory(story) {
     risky(`${label} desc`, p?.desc);
   });
   return issues;
+}
+
+// beat ที่ไม่ทำอะไรเลย (ไม่มี pose/move/fx/sfx) ไม่มีผลต่อภาพ → ตัดทิ้งก่อน validate แก้ plan ในที่เดิม
+export function normalizeScenePlan(plan) {
+  if (plan === null || typeof plan !== "object" || !Array.isArray(plan.scenes)) return plan;
+  for (const sc of plan.scenes) {
+    if (sc && Array.isArray(sc.beats)) sc.beats = sc.beats.filter((b) => b && (b.pose || b.move || b.fx || b.sfx));
+  }
+  return plan;
 }
 
 export function validateScenePlan(plan, raw, { total, lang = "en", narrator = false } = {}) {
@@ -319,7 +329,6 @@ export function validateScenePlan(plan, raw, { total, lang = "en", narrator = fa
         else if ([...t].length > STAMP_MAX) issues.push(`${label}: stamp text "${t}" is ${[...t].length} characters, max ${STAMP_MAX}`);
       }
       if (b?.sfx && !sfx.has(b.sfx)) issues.push(`${label}: sfx "${b.sfx}" must be one of ${[...sfx].join(", ")}`);
-      if (!b?.pose && !b?.move && !b?.fx && !b?.sfx) issues.push(`${label}: beat does nothing (needs pose, move, fx or sfx)`);
       risky(`${label} text`, b?.text);
     });
 
