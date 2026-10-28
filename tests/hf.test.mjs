@@ -4,7 +4,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { HF_ENV, HF_VERSION, renderArgs, lintArgs, snapshotArgs, setRunner, hfLint, hfRender, hfSnapshot, hfBin, gsapFile } from "../tools/hf.mjs";
+import { HF_ENV, HF_VERSION, HF_TIMEOUT_MS, binRunner, renderArgs, lintArgs, snapshotArgs, setRunner, hfLint, hfRender, hfSnapshot, hfBin, gsapFile } from "../tools/hf.mjs";
+import { VfError } from "../tools/out.mjs";
 
 afterEach(() => setRunner(null));
 
@@ -66,4 +67,14 @@ test("hfBin/gsapFile ชี้ใต้ node_modules", () => {
 test("runner ล้มเหลว (ไม่ใช่ lint) → INTERNAL", async () => {
   setRunner(async () => { throw new Error("boom"); });
   await assert.rejects(hfRender("/p", "/o.mp4"), { name: "VfError", code: "INTERNAL" });
+});
+
+test("binRunner: hyperframes ค้างเกินเวลา → SIGKILL แล้วเป็น INTERNAL; hfRender ส่งต่อข้อความเดิม", async () => {
+  const hang = binRunner(process.execPath, 300);
+  const t0 = Date.now();
+  await assert.rejects(hang(["-e", "setInterval(() => {}, 1000)"], { env: process.env }), (e) => e.code === "INTERNAL" && /ค้างเกิน/.test(e.message));
+  assert.ok(Date.now() - t0 < 5000);
+  assert.equal(HF_TIMEOUT_MS, 30 * 60 * 1000);
+  setRunner(async () => { throw new VfError("INTERNAL", "hyperframes render ค้างเกิน 1800 วินาที จึงถูกหยุด"); });
+  await assert.rejects(hfRender("/p", "/o.mp4"), (e) => e.code === "INTERNAL" && /ค้างเกิน/.test(e.message));
 });

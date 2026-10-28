@@ -36,8 +36,19 @@ export const lintArgs = ({ dir }) => ["lint", dir];
 // --no-end: เอาเฉพาะเฟรมที่ขอ ไม่เติมเฟรมท้ายเอง
 export const snapshotArgs = ({ dir, at, outDir }) => ["snapshot", dir, "--at", at.join(","), "-o", outDir, "--no-end"];
 
-const defaultRunner = (args) =>
-  run(hfBin(), args, { env: { ...process.env, ...HF_ENV }, maxBuffer: 64 * 1024 * 1024 });
+// render ที่ค้าง (Chrome ไม่ตอบ) ต้องไม่ถือเครื่องไว้ตลอดไป → หมดเวลาแล้ว SIGKILL
+export const HF_TIMEOUT_MS = 30 * 60 * 1000;
+
+export const binRunner = (bin, timeoutMs = HF_TIMEOUT_MS) => async (args, { env } = {}) => {
+  try {
+    return await run(bin, args, { env, maxBuffer: 64 * 1024 * 1024, timeout: timeoutMs, killSignal: "SIGKILL" });
+  } catch (err) {
+    if (err?.killed) throw new VfError("INTERNAL", `hyperframes ${args[0]} ค้างเกิน ${Math.round(timeoutMs / 1000)} วินาที จึงถูกหยุด`, { timeoutMs });
+    throw err;
+  }
+};
+
+const defaultRunner = (args, opts) => binRunner(hfBin())(args, opts);
 
 let runner = defaultRunner;
 export const setRunner = (fn) => { runner = fn ?? defaultRunner; };
@@ -50,6 +61,7 @@ async function exec(args) {
   try {
     return text(await runner(args, { env }));
   } catch (err) {
+    if (err instanceof VfError) throw err;
     if (args[0] === "lint" && (err?.stdout || err?.stderr)) return text(err);
     throw new VfError("INTERNAL", `hyperframes ${args[0]} ล้มเหลว: ${String(err?.stderr || err?.message || err).slice(0, 400)}`);
   }

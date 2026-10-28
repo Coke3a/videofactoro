@@ -1,11 +1,7 @@
-// เสียงประกอบสังเคราะห์ด้วย ffmpeg (ไม่มีค่า API): whoosh ตอนตัดฉาก, ding ตอนการ์ดเด้ง, impact/boing ตอนพีกของฉาก
-// whirr/pop/bang ใช้ใน motion แบบ HyperFrames (แผนเลือกเองต่อ beat)
+// เสียงประกอบสังเคราะห์ด้วย ffmpeg (ไม่มีค่า API) — แผนของ motion เลือกชนิดเองต่อ beat
 import { VfError } from "./out.mjs";
 
-// จุดพีกของฉาก (สัดส่วนของความยาวฉาก) — คำเสียง ASS, แฟลช/punch-in และเสียง impact ใช้เวลาเดียวกัน
-export const HIT_AT = 0.4;
 export const SFX_GAIN = 0.55;
-const WHOOSH_LEAD = 0.2; // whoosh ดังสุดตรงจุดตัด
 
 const GRAPHS = {
   whoosh: "anoisesrc=d=0.4:c=pink:a=0.5:seed=7,bandpass=f=1200:width_type=o:w=2,afade=t=in:d=0.2:curve=qsin,afade=t=out:st=0.2:d=0.2:curve=qsin[out]",
@@ -21,17 +17,4 @@ export const SFX_KINDS = Object.keys(GRAPHS);
 export function sfxSynthArgs(kind, out) {
   if (!GRAPHS[kind]) throw new VfError("INTERNAL", `ไม่รู้จัก sfx: ${kind}`);
   return ["-filter_complex", GRAPHS[kind], "-map", "[out]", "-ar", "48000", "-ac", "2", out];
-}
-
-// เวลาเสียงประกอบทั้งคลิปจากรายการฉาก ({seconds, card, sfx_word, move})
-export function motionCues(scenes) {
-  const cues = [];
-  let at = 0;
-  scenes.forEach((s, i) => {
-    if (i > 0) cues.push({ kind: "whoosh", at: Math.max(0, Math.round((at - WHOOSH_LEAD) * 100) / 100) });
-    if (s.card) cues.push({ kind: "ding", at: at + 0.05 });
-    if (s.sfx_word) cues.push({ kind: s.move === "bounce" ? "boing" : "impact", at: at + s.seconds * HIT_AT });
-    at += s.seconds;
-  });
-  return cues.sort((a, b) => a.at - b.at);
 }

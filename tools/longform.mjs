@@ -83,16 +83,18 @@ export function validateParts(plan, { characters, places, lang = "en" }, { total
   return issues;
 }
 
-// segments: [{seconds, narration: {file, seconds} | null}] เรียงตามเวลา; video = ไฟล์ที่ต่อแล้ว
-// cues: เสียงประกอบ [{kind, at}] (motion) — ว่าง = ไม่มีรางเสียงประกอบ
+// segments: [{seconds, narration: {file, seconds} | null}] เรียงตามเวลา (film); video = ไฟล์ที่ต่อแล้ว
+// หรือ voices: [{file, at, tempo?}] เวลาเริ่มจริงของแต่ละบท (motion) — ต้องส่ง total มาด้วย
+// cues: เสียงประกอบ [{kind, at}] — ว่าง = ไม่มีรางเสียงประกอบ
 // story: {title, summary} ให้ clef ใช้เลือกเพลงจากคลังกลาง
-export async function finishAudio({ state, dir, base, video, segments, musicPrompt, story = {}, wantMusic, sceneAudio, cues = [], meta, out }) {
+export async function finishAudio({ state, dir, base, video, segments, voices, total: fixed, musicPrompt, story = {}, wantMusic, sceneAudio, cues = [], meta, out }) {
   const costDir = join(dir, ".vf");
-  const total = segments.reduce((s, x) => s + x.seconds, 0);
+  if (voices && !(fixed > 0)) throw new VfError("INTERNAL", "finishAudio: voices ต้องมี total");
+  const total = fixed ?? segments.reduce((s, x) => s + x.seconds, 0);
   const track = await step(state, "narration-track", async () => {
     let at = 0;
-    const items = [];
-    for (const s of segments) {
+    const items = voices ? voices.map((v) => ({ file: join(dir, v.file), at: v.at, tempo: v.tempo })) : [];
+    for (const s of voices ? [] : segments) {
       if (s.narration?.file) items.push({ file: join(dir, s.narration.file), at, tempo: narrationTempo(s.narration.seconds, s.seconds) });
       at += s.seconds;
     }

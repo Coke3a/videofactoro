@@ -11,10 +11,14 @@ import { readCosts } from "../tools/cost.mjs";
 import { VfError } from "../tools/out.mjs";
 import { main as create } from "../tools/project-create.mjs";
 import { main as film, validateFilmPlan } from "../tools/film.mjs";
-import { main as motion, validateMotionPlan, motionEvents } from "../tools/motion.mjs";
-import { assScript, hasFilter, narrationTrackArgs, stillMotionArgs, frameSize, loopMusicArgs, ffmpeg, MOVES } from "../tools/assemble.mjs";
-import { motionCues, sfxSynthArgs } from "../tools/fx.mjs";
-import { pool, reuseCandidates } from "../tools/shots.mjs";
+import { main as motion } from "../tools/motion.mjs";
+import { finishAudio } from "../tools/longform.mjs";
+import { openState } from "../tools/state.mjs";
+import { setRunner } from "../tools/hf.mjs";
+import { narrationTrackArgs, loopMusicArgs, ffmpeg } from "../tools/assemble.mjs";
+import { sfxSynthArgs } from "../tools/fx.mjs";
+import { pool } from "../tools/shots.mjs";
+import { STORY, SCENES, STORY_MARK, SCENES_MARK, prepareMotionProject, stubRunner } from "./fixtures/motion.mjs";
 import { goodBible } from "./fixtures/bible.mjs";
 import { bodyOf } from "./fixtures/body.mjs";
 
@@ -22,7 +26,7 @@ process.env.VF_NO_DOTENV = "1";
 const TINY = fileURLToPath(new URL("./fixtures/tiny.png", import.meta.url));
 const B64 = fs.readFileSync(TINY).toString("base64");
 const ENV = { CLOUDFLARE_AI_ACCOUNT_ID: "acc1", CLOUDFLARE_AI_API_TOKEN: "tok-secret-123456" };
-const ENV_KEYS = [...Object.keys(ENV), "VF_PROJECTS"];
+const ENV_KEYS = [...Object.keys(ENV), "VF_PROJECTS", "VF_HF_FONT"];
 
 const shot = (duration, extra = {}) => ({
   duration, characters: ["cat"], place: "kitchen",
@@ -33,16 +37,7 @@ const FILM = () => ({
   title: "Cake Day", summary: "แมวกับเค้ก", music_prompt: "Playful pizzicato, 110 BPM",
   shots: [shot(7), shot(7, { characters: ["cat", "dog"] }), shot(6, { narration: "" })],
 });
-const scene = (duration, extra = {}) => ({
-  duration, characters: ["dog"], place: "", image_prompt: "The dog jumps in surprise.", move: "shake",
-  card: "", caption: "ถุงเท้าตกใจ", sfx_word: "BONK!", narration: "ถุงเท้าตกใจ", ...extra,
-});
-const MOTION = () => ({
-  title: "Top 4 Oops", summary: "สี่เรื่องพลาด", music_prompt: "Bouncy ukulele, 120 BPM",
-  scenes: [scene(5, { card: "#4", move: "zoom_in" }), scene(5, { card: "#3" }), scene(5, { card: "#2", move: "bounce" }), scene(5, { card: "#1", narration: "" })],
-});
-
-let MP4, WAV, MP3, root, dir, saved, calls, origWrite, plan, pollFail, flagImages, blockVideos, fitsScore, flagFast, musicFit;
+let MP4, WAV, MP3, FONT, root, dir, saved, calls, origWrite, plan, pollFail, flagImages, blockVideos, fitsScore, flagFast, musicFit;
 const reply = (result) => ({ ok: true, status: 200, text: async () => JSON.stringify({ success: true, result }) });
 const posts = (model) => calls.filter((c) => c.method === "POST" && c.body?.model === model);
 const REWRITE_MARK = "image safety filter";
@@ -60,12 +55,14 @@ before(() => {
   MP3 = path.join(fx, "m.mp3");
   // ยาวกว่า LIBRARY_TRACK_SEC: เพลงที่สร้างแล้วเก็บเข้าคลังกลางต้องยาวพอให้คลิปถัดไปเลือกใช้ซ้ำได้
   execFileSync("ffmpeg", ["-loglevel", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=330:duration=95", "-ac", "1", "-b:a", "32k", MP3]);
+  FONT = path.join(fx, "Test-Bold.ttf");
+  fs.writeFileSync(FONT, "font");
 });
 
 beforeEach(async () => {
   saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
   root = fs.mkdtempSync(path.join(os.tmpdir(), "vf-long-"));
-  Object.assign(process.env, ENV, { VF_PROJECTS: root });
+  Object.assign(process.env, ENV, { VF_PROJECTS: root, VF_HF_FONT: FONT });
   cf.setSleep(async () => {});
   pollFail = false;
   flagImages = 0;
@@ -107,7 +104,8 @@ beforeEach(async () => {
     if (body?.model === MODELS.music) return reply({ state: "Completed", result: { audio: "https://cdn.example/m.mp3" } });
     if (body?.model === MODELS.llm[0]) {
       const sys = body.input.systemInstruction.parts[0].text;
-      const data = sys.includes("story bible") ? goodBible() : sys.includes(REWRITE_MARK) ? { prompt: REWRITTEN } : plan;
+      const data = sys.includes("story bible") ? goodBible() : sys.includes(REWRITE_MARK) ? { prompt: REWRITTEN }
+        : sys.includes(STORY_MARK) ? STORY() : sys.includes(SCENES_MARK) ? SCENES() : plan;
       return reply({ candidates: [{ content: { parts: [{ text: JSON.stringify(data) }] } }], usageMetadata: { promptTokenCount: 800, candidatesTokenCount: 300 } });
     }
     throw new Error("unexpected fetch " + u);
@@ -119,6 +117,7 @@ beforeEach(async () => {
   calls.length = 0;
 });
 afterEach(() => {
+  setRunner(null);
   process.stderr.write = origWrite;
   for (const [k, v] of Object.entries(saved)) v === undefined ? delete process.env[k] : (process.env[k] = v);
   cf.setFetch((...a) => globalThis.fetch(...a));
@@ -181,23 +180,23 @@ test("film: ภาพที่ถูก flag (3030) เปลี่ยน seed �
 });
 
 test("ภาพถูก flag ทุก seed ของ 4b → prompt อ่อนลง → LLM เขียนฉากใหม่ → klein-9b ในรอบเดียว (resume ใช้ seed เดิมจึงต้องไล่ระดับเอง)", async () => {
-  plan = MOTION();
+  plan = FILM();
   flagFast = true;
-  const r = await motion(["demo", "--prompt", "4b โดน flag ตลอด", "--duration", "20", "--foreground"]);
-  assert.ok(fs.existsSync(r.motion.file));
+  const r = await film(["demo", "--prompt", "4b โดน flag ตลอด", "--duration", "20", "--foreground"]);
+  assert.ok(fs.existsSync(r.film.file));
   const fast = posts(MODELS.imageFast);
-  assert.equal(fast.length, 4 * 8, "ฉากละ 4 seed + 2 prompt อ่อนลง + 2 ฉากที่เขียนใหม่");
-  assert.equal(fast.filter((p) => /family-friendly/.test(p.body.input.prompt)).length, 4 * 4);
-  assert.equal(fast.filter((p) => p.body.input.prompt.startsWith(REWRITTEN)).length, 4 * 2);
-  assert.equal(rewrites().length, 4, "ฉากละครั้งเดียว");
+  assert.equal(fast.length, 3 * 8, "ช็อตละ 4 seed + 2 prompt อ่อนลง + 2 ฉากที่เขียนใหม่");
+  assert.equal(fast.filter((p) => /family-friendly/.test(p.body.input.prompt)).length, 3 * 4);
+  assert.equal(fast.filter((p) => p.body.input.prompt.startsWith(REWRITTEN)).length, 3 * 2);
+  assert.equal(rewrites().length, 3, "ช็อตละครั้งเดียว");
   const nine = posts(MODELS.image);
-  assert.equal(nine.length, 4);
+  assert.equal(nine.length, 3);
   assert.ok(nine.every((p) => p.body.input.prompt.startsWith(REWRITTEN) && /family-friendly/.test(p.body.input.prompt)));
 });
 
 test("ภาพไม่ถูก flag → ไม่เรียก LLM เขียนฉากใหม่", async () => {
-  plan = MOTION();
-  await motion(["demo", "--prompt", "ปกติ", "--duration", "20", "--foreground"]);
+  plan = FILM();
+  await film(["demo", "--prompt", "ปกติ", "--duration", "20", "--foreground"]);
   assert.equal(rewrites().length, 0);
 });
 
@@ -257,10 +256,15 @@ test("loopMusicArgs: เพลงท่อนสั้นวน crossfade ได
   assert.equal(loopMusicArgs({ src: "a.mp3", srcSec: 30, duration: 25, out: "o.mp3" }).filter((a) => a === "-i").length, 1);
 });
 
+// motion แบบ HyperFrames: hf runner ปลอม render วิดีโอดำยาวตาม data-duration
+const motionRun = async (prompt) => {
+  setRunner(stubRunner());
+  return motion(["demo", "--prompt", prompt, "--duration", "20", "--foreground"]);
+};
+
 test("เพลง: คลังกลางว่าง → สร้างใหม่ 90 วินาที (ไม่วน) เก็บเข้าคลังพร้อม MUSIC.md · คลิปถัดไป clef เลือกเพลงเดิม ไม่จ่ายค่าเพลง", async () => {
-  plan = MOTION();
-  plan.scenes = Array.from({ length: 5 }, (_, i) => scene(8, { card: `#${5 - i}` }));
-  const r = await motion(["demo", "--prompt", "เพลงคลัง", "--duration", "40", "--foreground"]);
+  prepareMotionProject(dir);
+  const r = await motionRun("เพลงคลัง");
   const [m] = posts(MODELS.music);
   assert.equal(m.body.input.music_length_ms, 90000);
   assert.doesNotMatch(m.body.input.prompt, /Seamless loop/);
@@ -272,14 +276,15 @@ test("เพลง: คลังกลางว่าง → สร้างใ�
   assert.equal(idx.tracks.length, 1);
   assert.ok(fs.existsSync(path.join(lib, idx.tracks[0].file)));
   const md = fs.readFileSync(path.join(lib, "MUSIC.md"), "utf8");
-  assert.ok(md.includes(idx.tracks[0].id) && md.includes("Bouncy ukulele") && md.includes("demo · Top 4 Oops"));
+  assert.ok(md.includes(idx.tracks[0].id) && md.includes("Bouncy ukulele") && md.includes("demo · Ball Panic"));
+  const total = r.motion.seconds;
   const sfx = path.join(dir, "motions", r.motion.id, "sfx.wav");
-  assert.ok(fs.existsSync(sfx), "มีรางเสียงประกอบ (whoosh ตอนตัด + ding ตอนการ์ด)");
-  assert.ok(Math.abs(Number(probe(sfx).format.duration) - 40) < 0.3);
-  assert.ok(Math.abs(Number(probe(r.motion.file).format.duration) - 40) < 0.5, "เพลงยาวกว่าคลิปถูกตัดให้เท่าคลิป");
+  assert.ok(fs.existsSync(sfx), "มีรางเสียงประกอบจาก beat sfx");
+  assert.ok(Math.abs(Number(probe(sfx).format.duration) - total) < 0.3);
+  assert.ok(Math.abs(Number(probe(r.motion.file).format.duration) - total) < 0.5, "เพลงยาวกว่าคลิปถูกตัดให้เท่าคลิป");
 
   calls.length = 0;
-  const r2 = await motion(["demo", "--prompt", "เพลงคลังรอบสอง", "--duration", "40", "--foreground"]);
+  const r2 = await motionRun("เพลงคลังรอบสอง");
   assert.equal(posts(MODELS.music).length, 0, "ใช้เพลงจากคลัง ไม่สร้างใหม่");
   const heard = calls.filter((c) => c.url.includes("clef-omni") && c.body?.questions?.fits_story);
   assert.equal(heard.length, 1);
@@ -291,61 +296,38 @@ test("เพลง: คลังกลางว่าง → สร้างใ�
 });
 
 test("เพลง: clef ให้คะแนนต่ำกว่าเกณฑ์ → สร้างเพลงใหม่เพิ่มเข้าคลัง", async () => {
-  plan = MOTION();
-  plan.scenes = Array.from({ length: 5 }, (_, i) => scene(8, { card: `#${5 - i}` }));
-  await motion(["demo", "--prompt", "เพลงหนึ่ง", "--duration", "40", "--foreground"]);
+  prepareMotionProject(dir);
+  await motionRun("เพลงหนึ่ง");
   calls.length = 0;
   musicFit = 0.2;
-  await motion(["demo", "--prompt", "เพลงสอง", "--duration", "40", "--foreground"]);
+  await motionRun("เพลงสอง");
   musicFit = 0.9;
   assert.equal(posts(MODELS.music).length, 1);
   const idx = JSON.parse(fs.readFileSync(path.join(root, "_music", "index.json"), "utf8"));
   assert.equal(idx.tracks.length, 2);
 });
 
-test("reuseCandidates: ตัวละคร/ฉาก/อัตราส่วนต้องตรง, ข้ามภาพที่ถูกปัดตก ใช้ครบโควตา หรือมาจากคลิปนี้, เรียงตามคำที่ซ้ำ", () => {
-  const e = (id, extra = {}) => ({
-    id, kind: "still", blob: `library/${id}.jpg`, aspect: "9:16", place: "kitchen", characters: ["dog", "cat"], status: "candidate",
-    prompt: "The dog jumps in surprise next to the cake.", need: "still:old-1234#01", used_in: [], ...extra,
+test("finishAudio voices: วางเสียงตามเวลา at รวมยาว total ที่ส่งมา + sfx; voices ไม่มี total → INTERNAL", async () => {
+  const base = "motions/x";
+  fs.mkdirSync(path.join(dir, base), { recursive: true });
+  const video = `${base}/video.mp4`;
+  execFileSync("ffmpeg", ["-loglevel", "error", "-y", "-f", "lavfi", "-i", "color=c=black:s=108x192:r=30:d=4", "-pix_fmt", "yuv420p", path.join(dir, video)]);
+  fs.copyFileSync(WAV, path.join(dir, base, "voice-1-1.wav"));
+  fs.copyFileSync(WAV, path.join(dir, base, "voice-1-2.wav"));
+  const state = openState(path.join(dir, ".vf"), "fa-state.json");
+  const r = await finishAudio({
+    state, dir, base, video, total: 4, wantMusic: false, sceneAudio: false, meta: { project: "demo" }, out: "renders/x.mp4",
+    voices: [{ file: `${base}/voice-1-1.wav`, at: 0.45 }, { file: `${base}/voice-1-2.wav`, at: 1.75, tempo: 1.1 }],
+    cues: [{ kind: "pop", at: 1 }, { kind: "bang", at: 3.9 }],
   });
-  const lib = { entries: [
-    e("weaker", { prompt: "The dog jumps by the window near the cake." }),
-    e("best", { status: "selected" }),
-    e("other-cast", { characters: ["dog"] }),
-    e("other-place", { place: "garden" }),
-    e("wide", { aspect: "16:9" }),
-    e("rejected", { status: "rejected" }),
-    e("worn-out", { used_in: ["a", "b", "c"] }),
-    e("this-clip", { need: "still:new-abcd#02" }),
-    e("plate", { kind: "place-plate" }),
-    e("unrelated", { prompt: "Rain on a quiet street at night." }),
-  ] };
-  const got = reuseCandidates(lib, {
-    cast: [{ id: "cat" }, { id: "dog" }], place: { id: "kitchen" }, aspect: "9:16", prompt: "The dog jumps in surprise beside a cake.",
-    skipNeed: "still:new-abcd#", exclude: new Set(),
-  }).map((x) => x.id);
-  assert.deepEqual(got, ["best", "weaker"]);
-});
-
-test("motion reuse: clef ให้ผ่าน → ใช้ภาพเก่าในคลังแทนการสร้างใหม่; fits ต่ำกว่าเกณฑ์ reuse หรือ --no-reuse → สร้างใหม่", async () => {
-  plan = MOTION();
-  await motion(["demo", "--prompt", "รอบแรก", "--duration", "20", "--foreground"]);
-  assert.equal(posts(MODELS.imageFast).length, 4);
-  calls.length = 0;
-  const r = await motion(["demo", "--prompt", "รอบสอง", "--duration", "20", "--foreground", "--id", "again"]);
-  assert.equal(posts(MODELS.imageFast).length, 0, "ใช้ภาพเก่าทุกฉาก");
-  assert.equal(r.motion.reused_stills, 4);
-  const lib = JSON.parse(fs.readFileSync(path.join(dir, "library", "index.json"), "utf8"));
-  assert.equal(lib.entries.filter((x) => (x.used_in ?? []).length === 1).length, 4, "ภาพเก่าแต่ละภาพใช้ครั้งเดียวต่อคลิป");
-  calls.length = 0;
-  fitsScore = 0.6; // ผ่านเกณฑ์ภาพใหม่ (0.5) แต่ไม่ถึงเกณฑ์ reuse (0.75)
-  const r2 = await motion(["demo", "--prompt", "รอบสาม", "--duration", "20", "--foreground", "--id", "third"]);
-  assert.equal(r2.motion.reused_stills, 0);
-  assert.equal(posts(MODELS.imageFast).length, 4);
-  calls.length = 0;
-  const r3 = await motion(["demo", "--prompt", "รอบสี่", "--duration", "20", "--foreground", "--id", "fourth", "--no-reuse"]);
-  assert.equal(r3.motion.reused_stills, 0);
-  assert.equal(posts(MODELS.imageFast).length, 4);
+  assert.equal(r.narration, true);
+  assert.equal(r.sfx, true);
+  assert.equal(r.music, false);
+  assert.ok(Math.abs(Number(probe(path.join(dir, base, "narration.wav")).format.duration) - 4) < 0.05);
+  assert.ok(Math.abs(Number(probe(path.join(dir, "renders/x.mp4")).format.duration) - 4) < 0.3);
+  await assert.rejects(finishAudio({
+    state: openState(path.join(dir, ".vf"), "fa2-state.json"), dir, base, video, voices: [], wantMusic: false, sceneAudio: false, meta: {}, out: "renders/y.mp4",
+  }), (e) => e.code === "INTERNAL");
 });
 
 test("film --dry-run และ --duration นอกช่วง ไม่เรียก API", async () => {
@@ -371,84 +353,14 @@ test("validateFilmPlan: ผลรวมผิด, ช็อตสั้นไป
   assert.match(validateFilmPlan(FILM(), CTX, { total: 40 }).join("\n"), /ผลรวม duration = 20/);
 });
 
-test("motion: ภาพนิ่งต่อฉาก ไม่ใช้โมเดลวิดีโอ, ต่อฉาก + พากย์ + เพลง, ยาวตามแผน", async () => {
-  plan = MOTION();
-  const r = await motion(["demo", "--prompt", "4 เรื่องพลาดของถุงเท้า", "--duration", "20", "--foreground"]);
-  const id = r.motion.id;
-  assert.match(id, /^top-4-oops-[0-9a-f]{4}$/);
-  assert.equal(posts(MODELS.video).length, 0);
-  assert.equal(posts(MODELS.imageFast).length, 4);
-  assert.equal(posts(MODELS.tts).length, 3);
-  assert.equal(posts(MODELS.music).length, 1);
-  const out = probe(r.motion.file);
-  assert.deepEqual(out.streams.map((s) => s.codec_type).sort(), ["audio", "video"]);
-  assert.ok(Math.abs(Number(out.format.duration) - 20) < 0.5, String(out.format.duration));
-  assert.equal(r.motion.text, hasFilter("ass"));
-  if (!hasFilter("ass")) assert.match(r.motion.warnings.join(" "), /libass/);
-  assert.ok(fs.readFileSync(path.join(dir, "EPISODES.md"), "utf8").includes("| motion | Top 4 Oops |"));
-  const imgs = readCosts(path.join(dir, ".vf")).filter((x) => x.step === "still");
-  assert.equal(imgs.length, 4);
-});
-
-test("validateMotionPlan: move ผิด, card ยาว, จำนวนฉากผิด", () => {
-  assert.deepEqual(validateMotionPlan(MOTION(), CTX, { total: 20 }), []);
-  const bad = MOTION();
-  bad.scenes[0].move = "spin";
-  bad.scenes[1].card = "THIS IS WAY TOO LONG";
-  const issues = validateMotionPlan(bad, CTX, { total: 20 }).join("\n");
-  assert.match(issues, /scenes\[0\]\.move/);
-  assert.match(issues, /scenes\[1\]\.card ยาวเกิน/);
-  const few = MOTION();
-  few.scenes = [scene(8)];
-  assert.match(validateMotionPlan(few, CTX, { total: 20 }).join("\n"), /scenes ต้องมี 3–6 ช่วง/);
-});
-
-test("motionEvents + assScript: ชื่อเรื่อง การ์ด คำบรรยาย คำเสียง ตามเวลา, ตัด { } ออก", () => {
-  const ev = motionEvents("Top {4}", [
-    { seconds: 5, card: "#4", caption: "แรก", sfx_word: "BONK!" },
-    { seconds: 4, card: "", caption: "สอง", sfx_word: "" },
-  ]);
-  assert.deepEqual(ev.map((e) => e.style), ["Title", "Card", "Caption", "Sfx", "Caption"]);
-  assert.equal(ev[3].start, 2);
-  assert.equal(ev[4].start, 5.2);
-  const ass = assScript({ ...frameSize("9:16"), font: "DejaVu Sans", events: ev });
-  assert.match(ass, /PlayResX: 720\nPlayResY: 1280/);
-  assert.match(ass, /Dialogue: 0,0:00:00\.00,0:00:02\.50,Title,,0,0,0,,\{\\fad\(200,200\)\}Top 4/);
-  assert.match(ass, /0:00:05\.20,0:00:08\.90,Caption/);
-});
-
-test("narrationTrackArgs / stillMotionArgs: หน่วงตามเวลา, เร่ง tempo, จำนวนเฟรมตรง", () => {
+test("narrationTrackArgs: หน่วงตามเวลา, เร่ง tempo, เงียบรองพื้นยาวพอดี", () => {
   const a = narrationTrackArgs({ items: [{ file: "a.wav", at: 0 }, { file: "b.wav", at: 7.5, tempo: 1.2 }], duration: 20, out: "o.wav" });
   const g = a[a.indexOf("-filter_complex") + 1];
   assert.match(g, /\[1:a\][^;]*atempo=1\.2,adelay=7500\|7500/);
   assert.match(g, /amix=inputs=3:normalize=0[^;]*atrim=0:20\.000/); // 2 เสียง + เงียบรองพื้น
-  const s = stillMotionArgs({ image: "i.jpg", out: "o.mp4", w: 720, h: 1280, seconds: 5, move: "pan_left" });
-  assert.equal(s[s.indexOf("-frames:v") + 1], "120");
-  assert.match(s[s.indexOf("-vf") + 1], /zoompan=z='1\.15'.*s=720x1280:fps=24/);
 });
 
-test("stillMotionArgs: ไม่กระพริบดำตอนตัด (ยกเว้นฉากแรก), easing, จังหวะ hit = punch-in + แฟลช", () => {
-  const vf = (o) => { const a = stillMotionArgs({ image: "i.jpg", out: "o.mp4", w: 720, h: 1280, seconds: 5, ...o }); return a[a.indexOf("-vf") + 1]; };
-  assert.doesNotMatch(vf({ move: "zoom_in" }), /fade/);
-  assert.match(vf({ move: "zoom_in", first: true }), /fade=t=in:st=0:d=0\.3/);
-  assert.match(vf({ move: "zoom_in" }), /\(3-2\*/, "smoothstep");
-  assert.doesNotMatch(vf({ move: "zoom_in" }), /eq=/);
-  const hit = vf({ move: "shake", hit: 2 });
-  assert.match(hit, /gte\(on,48\)/, "punch-in/shake เริ่มที่เฟรม hit");
-  assert.match(hit, /exp\(-\(on-48\)/, "ค่อยๆ หยุด");
-  assert.match(hit, /eq=brightness='if\(between\(t,2,2\.1\)/);
-  for (const m of ["tilt_up", "crash_zoom"]) assert.ok(MOVES.includes(m), m);
-});
-
-test("sfx: สังเคราะห์เสียงได้จริงด้วย ffmpeg และ motionCues วาง whoosh/ding/impact ตามเวลา", async () => {
-  const cues = motionCues([
-    { seconds: 5, card: "#2", sfx_word: "BONK!", move: "shake" },
-    { seconds: 4, card: "", sfx_word: "YAY!", move: "bounce" },
-    { seconds: 3, card: "", sfx_word: "", move: "zoom_in" },
-  ]);
-  assert.deepEqual(cues.map((c) => c.kind), ["ding", "impact", "whoosh", "boing", "whoosh"]);
-  assert.equal(cues[1].at, 2);
-  assert.equal(cues[2].at, 4.8);
+test("sfx: สังเคราะห์เสียงได้จริงด้วย ffmpeg", async () => {
   const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "vf-sfx-")), "impact.wav");
   await ffmpeg(sfxSynthArgs("impact", out), "sfx");
   const d = Number(probe(out).format.duration);
