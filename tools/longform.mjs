@@ -1,13 +1,14 @@
 // ส่วนร่วมของ vf film และ vf motion: ตรวจ argument, ขอบเขตความยาว, รางพากย์ + เพลง + mix ท้ายงาน
 import { copyFileSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { VfError, log } from "./out.mjs";
 import { step } from "./state.mjs";
 import { ID_RE } from "./bible.mjs";
 import { riskFindings } from "./risk.mjs";
-import { music as makeMusic, mix, mediaInfo, narrationTempo, MUSIC_GAIN, MUSIC_GAIN_UNDER_VOICE, MUSIC_LOOP_SEC } from "./audio.mjs";
+import { music as makeMusic, mix, mediaInfo, narrationTempo, MUSIC_GAIN, MUSIC_GAIN_UNDER_VOICE } from "./audio.mjs";
 import { narrationBudget, narrationSize } from "./clip.mjs";
-import { ffmpeg, narrationTrackArgs, loopMusicArgs } from "./assemble.mjs";
+import { ffmpeg, narrationTrackArgs } from "./assemble.mjs";
+import { libraryDir, pickTrack, addTrack, markUsed, LIBRARY_TRACK_SEC } from "./music-lib.mjs";
 import { sfxSynthArgs, SFX_GAIN } from "./fx.mjs";
 
 export const MIN_TOTAL = 20;
@@ -84,7 +85,8 @@ export function validateParts(plan, { characters, places, lang = "en" }, { total
 
 // segments: [{seconds, narration: {file, seconds} | null}] เรียงตามเวลา; video = ไฟล์ที่ต่อแล้ว
 // cues: เสียงประกอบ [{kind, at}] (motion) — ว่าง = ไม่มีรางเสียงประกอบ
-export async function finishAudio({ state, dir, base, video, segments, musicPrompt, wantMusic, sceneAudio, cues = [], meta, out }) {
+// story: {title, summary} ให้ clef ใช้เลือกเพลงจากคลังกลาง
+export async function finishAudio({ state, dir, base, video, segments, musicPrompt, story = {}, wantMusic, sceneAudio, cues = [], meta, out }) {
   const costDir = join(dir, ".vf");
   const total = segments.reduce((s, x) => s + x.seconds, 0);
   const track = await step(state, "narration-track", async () => {
@@ -105,15 +107,22 @@ export async function finishAudio({ state, dir, base, video, segments, musicProm
     log("ขั้น music");
     const rel = `${base}/music.mp3`;
     const need = total + 1;
-    if (need <= MUSIC_LOOP_SEC) {
-      await makeMusic({ prompt: musicPrompt, seconds: need, out: join(dir, rel), meta, costDir });
-      return { file: rel };
+    const lib = libraryDir(dir);
+    const use = { project: basename(dir), title: story.title ?? base };
+    const { pick, ranked } = await pickTrack({ lib, need, summary: story.summary ?? "", musicPrompt, meta, costDir });
+    if (pick) {
+      log(`ใช้เพลงจากคลัง ${pick.track.id} (clef ${pick.score.toFixed(2)})`);
+      copyFileSync(join(lib, pick.track.file), join(dir, rel));
+      markUsed(lib, pick.track.id, { ...use, score: pick.score });
+      return { file: rel, library: pick.track.id, reused: true, score: pick.score, heard: ranked.length };
     }
-    const loopRel = `${base}/music-loop.mp3`;
-    const info = await makeMusic({ prompt: musicPrompt, seconds: MUSIC_LOOP_SEC, out: join(dir, loopRel), meta, costDir, loop: true });
-    const srcSec = info?.duration ?? (await mediaInfo(join(dir, loopRel)))?.duration ?? MUSIC_LOOP_SEC;
-    await ffmpeg(loopMusicArgs({ src: join(dir, loopRel), srcSec, duration: need, out: join(dir, rel) }), "วนเพลง");
-    return { file: rel, looped: true };
+    // ไม่มีเพลงที่เข้ากัน: สร้างใหม่ให้ยาวพอทั้งคลิปที่ยาวที่สุดที่ทำบ่อย แล้วเก็บเข้าคลัง
+    const seconds = Math.max(need, LIBRARY_TRACK_SEC);
+    const info = await makeMusic({ prompt: musicPrompt, seconds, out: join(dir, rel), meta, costDir });
+    const track = addTrack({ lib, src: join(dir, rel), prompt: musicPrompt, seconds: info?.duration || seconds,
+      madeFor: `${use.project} · ${use.title}: ${story.summary ?? ""}`.trim() });
+    markUsed(lib, track.id, { ...use, score: null });
+    return { file: rel, library: track.id, reused: false, heard: ranked.length };
   });
   const fx = await step(state, "sfx-track", async () => {
     if (!cues.length) return { file: null };
@@ -133,7 +142,7 @@ export async function finishAudio({ state, dir, base, video, segments, musicProm
     const dest = join(dir, out);
     if (!track.file && !bgm.file && !fx.file) {
       copyFileSync(join(dir, video), dest);
-      return { file: out, narration: false, music: false, sfx: false };
+      return { file: out, narration: false, music: false, sfx: false, ...musicInfo(bgm) };
     }
     log("ขั้น mix");
     const info = await mediaInfo(join(dir, video));
@@ -143,6 +152,8 @@ export async function finishAudio({ state, dir, base, video, segments, musicProm
       music: bgm.file ? join(dir, bgm.file) : null, musicGain: track.file ? MUSIC_GAIN_UNDER_VOICE : MUSIC_GAIN,
       sfx: fx.file ? join(dir, fx.file) : null, sfxGain: SFX_GAIN, out: dest,
     });
-    return { file: out, narration: Boolean(track.file), music: Boolean(bgm.file), sfx: Boolean(fx.file), ...(track.sped ? { sped_up_lines: track.sped } : {}) };
+    return { file: out, narration: Boolean(track.file), music: Boolean(bgm.file), sfx: Boolean(fx.file), ...musicInfo(bgm), ...(track.sped ? { sped_up_lines: track.sped } : {}) };
   });
 }
+
+const musicInfo = (bgm) => (bgm.library ? { music_track: { id: bgm.library, reused: bgm.reused, ...(bgm.reused ? { score: bgm.score } : {}) } } : {});

@@ -11,7 +11,8 @@ import { recordEpisode } from "./bible.mjs";
 import { MODELS } from "./models.mjs";
 import { estimate } from "./pricing.mjs";
 import { sha } from "./project-create.mjs";
-import { tts, MUSIC_LOOP_SEC } from "./audio.mjs";
+import { tts } from "./audio.mjs";
+import { LIBRARY_TRACK_SEC } from "./music-lib.mjs";
 import { WORDS_PER_SEC, CHARS_PER_SEC } from "./clip.mjs";
 import { makeKeyframe, pool, keyframeModel, reuseStill } from "./shots.mjs";
 import { ffmpeg, frameSize, stillMotionArgs, concatArgs, concatList, hasFilter, writeAss, burnArgs, fontFor, MOVES } from "./assemble.mjs";
@@ -120,12 +121,12 @@ function dryRun(total, audio, pj) {
       imageRow("still", n, keyframeModel(pj)),
       qaRow(n),
       ...(audio.narrator ? [{ step: "narration", model: MODELS.tts, count: n, usd: estimate(MODELS.tts, { seconds: total }) }] : []),
-      ...(audio.music ? [{ step: "music", model: MODELS.music, count: 1, usd: estimate(MODELS.music, { seconds: Math.min(total + 1, MUSIC_LOOP_SEC) }) }] : []),
+      ...(audio.music ? [{ step: "music", model: MODELS.music, count: 1, usd: estimate(MODELS.music, { seconds: Math.max(total + 1, LIBRARY_TRACK_SEC) }), note: "สูงสุด · ถ้า clef เลือกเพลงจากคลังได้ = $0" }] : []),
     ]),
     assumptions: [
       `ประมาณ ${n} ฉาก (ฉากละ ~5 วินาที) · ภาพนิ่งฉากละ 1 ภาพ (ไม่มี reroll) · ไม่ใช้โมเดลวิดีโอ`,
       audio.narrator ? `พากย์ทุกฉากรวม ≈ ${total} วินาที` : "ไม่มีพากย์",
-      audio.music ? total + 1 > MUSIC_LOOP_SEC ? `เพลงท่อนเดียว ${MUSIC_LOOP_SEC} วินาที วนให้ยาวทั้งคลิป` : `เพลงเดียวทั้งคลิป ${total + 1} วินาที` : "ไม่มีเพลง (--no-music)",
+      audio.music ? `เพลงจากคลังกลาง (clef เลือก) · ถ้าไม่มีที่เข้ากัน สร้างใหม่ ${Math.max(total + 1, LIBRARY_TRACK_SEC)} วินาทีแล้วเก็บเข้าคลัง` : "ไม่มีเพลง (--no-music)",
       hasFilter("ass") ? "ตัวหนังสือ: ffmpeg มี libass" : "คำเตือน: ffmpeg เครื่องนี้ไม่มี libass จะไม่มีตัวหนังสือในคลิป",
       `render ด้วย ffmpeg ในเครื่องราว ${Math.ceil(total / 20)}–${Math.ceil(total / 8)} นาที`,
     ],
@@ -232,7 +233,7 @@ async function work({ dir, ctx, state, key, prompt, total, maxRerolls, audio, re
   if (!texted.text) warnings.push("ffmpeg เครื่องนี้ไม่มี libass จึงไม่มีตัวหนังสือในคลิป (ติดตั้ง ffmpeg ที่มี libass แล้วรันใหม่ด้วย --id ใหม่)");
 
   const final = await finishAudio({
-    state, dir, base, video: texted.file, segments: scenes, musicPrompt: plan.music_prompt, wantMusic: audio.music,
+    state, dir, base, video: texted.file, segments: scenes, musicPrompt: plan.music_prompt, story: { title: plan.title, summary: plan.summary }, wantMusic: audio.music,
     sceneAudio: false, cues: motionCues(scenes), meta, out: `renders/${id}.mp4`,
   });
 
@@ -248,7 +249,7 @@ async function work({ dir, ctx, state, key, prompt, total, maxRerolls, audio, re
     motion: {
       id, title: plan.title, seconds: scenes.reduce((s, x) => s + x.seconds, 0), scenes: scenes.length,
       reused_stills: made.filter((m) => m.still.reused).length,
-      file: join(dir, final.file), dir: join(dir, base), text: texted.text, narration: final.narration, music: final.music, sfx: final.sfx,
+      file: join(dir, final.file), dir: join(dir, base), text: texted.text, narration: final.narration, music: final.music, sfx: final.sfx, ...(final.music_track ? { music_track: final.music_track } : {}),
       ...(warnings.length ? { warnings } : {}),
     },
     cost: { usd: costSince(costDir, run) },

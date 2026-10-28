@@ -11,6 +11,8 @@ const COMMANDS = {
   "character add": "character-add",
   "place add": "place-add",
   "asset find": "asset-find",
+  "music list": "music-list",
+  "music add": "music-add",
   clip: "clip",
   film: "film",
   motion: "motion",

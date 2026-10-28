@@ -47,6 +47,7 @@ open projects/catdog/renders/*.mp4
 | `vf character add <slug> --prompt "..."` | Add a character (`--image` to use your own art, `--replace --id` to redo one) |
 | `vf place add <slug> --prompt "..."` | Add a place (background plate) |
 | `vf asset find <slug> <terms...>` | Search the project library |
+| `vf music list <slug>` / `vf music add <slug> <file.mp3> --prompt "..."` | Show or extend the shared music library (`_music/`, reused across projects; clef-omni picks a fitting track, new 90 s tracks are generated only when none fits) |
 | `vf clip <slug> --prompt "..."` | One 5–20 s shot with narration and music (draft by default, `--hd` for final) |
 | `vf film <slug> --prompt "..." --duration 90` | Multi-shot generative AI video, 20–180 s |
 | `vf motion <slug> --prompt "..." --duration 90` | Motion-comic (AI stills + camera moves + text), 20–180 s, no video model |

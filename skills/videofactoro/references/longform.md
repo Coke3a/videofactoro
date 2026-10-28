@@ -5,7 +5,7 @@ Both make a 20–180 s video from an existing project's characters and places, r
 | | `vf film` | `vf motion` |
 |---|---|---|
 | Look | Generative AI video: real motion, acting, scene sound | Motion-comic: AI stills + camera moves + bold text |
-| Unit | shot, 5–10 s, mostly 8–10 s (one flux-3-video clip each) | scene, 3–8 s (one still each) |
+| Unit | shot, 5–20 s, mostly 15–20 s with 2–3 timed beats (one flux-3-video clip each) | scene, 3–8 s (one still each) |
 | Text on screen | none | title, rank cards, captions, comic sound words |
 | Cost, 90 s | ≈ $1.5–2 draft (13 shots) · HD ≈ +$1.4 | ≈ $0.6–0.8 (18 scenes) |
 | Time, 90 s | 10–20 min (3 shots at a time) | 5–12 min (CPU-bound ffmpeg) |
@@ -23,7 +23,7 @@ Narration is on only when the project has a narrator (`project.json` → `narrat
 2. **per shot** (3 at a time): keyframe (refs + plate, QA) → video (i2v, diegetic sound, request id saved before polling) → narration (TTS) → normalize (720×1280 @24 fps for 9:16, stereo 48 kHz).
 3. **concat** → `films/<id>/film-raw.mp4`.
 4. **narration track**: each line placed at its shot's start (+0.3 s), sped up to 1.3× if too long.
-5. **music** (ElevenLabs; film + 1 s when that is ≤ 30 s, otherwise one 30 s loopable track crossfaded to length, saved as `music-loop.mp3` → `music.mp3`) → **mix** → `renders/<id>.mp4`.
+5. **music** (shared library `_music/`: clef-omni listens to tracks at least as long as the video and reuses the best one scoring ≥ 0.6; otherwise ElevenLabs makes a new track of max(video + 1 s, 90 s), which is added to the library and `_music/MUSIC.md`; copied to `music.mp3`) → **mix** (music trimmed to the video) → `renders/<id>.mp4`.
 
 Video QA is not run per shot (it is a weak signal and slow). Inspect a contact sheet instead (see `clip.md`).
 

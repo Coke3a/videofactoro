@@ -81,7 +81,7 @@ The last 10 jobs, newest first, without log tails. Free.
 Usage text.
 
 ### `vf film <project> --prompt "<story>" [--duration 20-180] [--hd] [options]`
-A multi-shot generative AI video (mostly 8–10 s shots joined, one narration track, one music bed). Options: `--duration` (default 60), `--hd`, `--no-narration`, `--no-music`, `--id`, `--max-rerolls` (default 2), `--foreground`, `--dry-run`. Result: `film: {id, title, seconds, shots, quality, file, dir, narration, music, warnings}`. See `longform.md`.
+A multi-shot generative AI video (mostly 15–20 s shots joined, one narration track, one music bed from the shared library). Options: `--duration` (default 60), `--hd`, `--no-narration`, `--no-music`, `--id`, `--max-rerolls` (default 2), `--foreground`, `--dry-run`. Result: `film: {id, title, seconds, shots, quality, file, dir, narration, music, music_track, warnings}` (`music_track: {id, reused, score}`). See `longform.md`.
 
 ### `vf motion <project> --prompt "<idea>" [--duration 20-180] [options]`
 A motion-comic: AI stills animated by ffmpeg with titles, rank cards, captions, sound words, narration and music. No video model. Same options as film except `--hd`, plus `--no-reuse` (don't reuse old library stills). Result: `motion: {id, title, seconds, scenes, reused_stills, file, dir, text, narration, music, warnings}`. See `longform.md`.

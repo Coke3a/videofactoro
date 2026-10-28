@@ -42,7 +42,7 @@ const MOTION = () => ({
   scenes: [scene(5, { card: "#4", move: "zoom_in" }), scene(5, { card: "#3" }), scene(5, { card: "#2", move: "bounce" }), scene(5, { card: "#1", narration: "" })],
 });
 
-let MP4, WAV, MP3, root, dir, saved, calls, origWrite, plan, pollFail, flagImages, blockVideos, fitsScore, flagFast;
+let MP4, WAV, MP3, root, dir, saved, calls, origWrite, plan, pollFail, flagImages, blockVideos, fitsScore, flagFast, musicFit;
 const reply = (result) => ({ ok: true, status: 200, text: async () => JSON.stringify({ success: true, result }) });
 const posts = (model) => calls.filter((c) => c.method === "POST" && c.body?.model === model);
 const REWRITE_MARK = "image safety filter";
@@ -58,7 +58,8 @@ before(() => {
   WAV = path.join(fx, "n.wav");
   execFileSync("ffmpeg", ["-loglevel", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=220:duration=1", "-ar", "24000", "-ac", "1", WAV]);
   MP3 = path.join(fx, "m.mp3");
-  execFileSync("ffmpeg", ["-loglevel", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=330:duration=3", MP3]);
+  // ยาวกว่า LIBRARY_TRACK_SEC: เพลงที่สร้างแล้วเก็บเข้าคลังกลางต้องยาวพอให้คลิปถัดไปเลือกใช้ซ้ำได้
+  execFileSync("ffmpeg", ["-loglevel", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=330:duration=95", "-ac", "1", "-b:a", "32k", MP3]);
 });
 
 beforeEach(async () => {
@@ -70,6 +71,7 @@ beforeEach(async () => {
   flagImages = 0;
   blockVideos = 0;
   fitsScore = 0.9;
+  musicFit = 0.9;
   flagFast = false;
   calls = [];
   cf.setFetch(async (url, init = {}) => {
@@ -85,7 +87,7 @@ beforeEach(async () => {
     const body = bodyOf(url, init);
     calls.push({ url: u, method, body });
     if (u.includes("clef-omni")) {
-      const answers = Object.fromEntries(Object.keys(body.questions).map((k) => [k, { noul: /text/.test(k) || k === "has_people_or_animals" ? 0 : k === "fits_shot" ? fitsScore : 0.9 }]));
+      const answers = Object.fromEntries(Object.keys(body.questions).map((k) => [k, { noul: /text/.test(k) || k === "has_people_or_animals" ? 0 : k === "fits_shot" ? fitsScore : k === "fits_story" || k === "fits_mood" ? musicFit : 0.9 }]));
       return reply({ answers, usage: { prompt_tokens: 1500 } });
     }
     if (body?.model === MODELS.image || body?.model === MODELS.imageFast) {
@@ -255,22 +257,50 @@ test("loopMusicArgs: เพลงท่อนสั้นวน crossfade ได
   assert.equal(loopMusicArgs({ src: "a.mp3", srcSec: 30, duration: 25, out: "o.mp3" }).filter((a) => a === "-i").length, 1);
 });
 
-test("motion ยาวกว่า 30 วินาที: จ่ายเพลงท่อนเดียว 30 วินาที แล้ววนให้ยาวทั้งคลิป", async () => {
+test("เพลง: คลังกลางว่าง → สร้างใหม่ 90 วินาที (ไม่วน) เก็บเข้าคลังพร้อม MUSIC.md · คลิปถัดไป clef เลือกเพลงเดิม ไม่จ่ายค่าเพลง", async () => {
   plan = MOTION();
   plan.scenes = Array.from({ length: 5 }, (_, i) => scene(8, { card: `#${5 - i}` }));
-  const r = await motion(["demo", "--prompt", "เพลงวน", "--duration", "40", "--foreground"]);
+  const r = await motion(["demo", "--prompt", "เพลงคลัง", "--duration", "40", "--foreground"]);
   const [m] = posts(MODELS.music);
-  assert.equal(m.body.input.music_length_ms, 30000);
-  assert.match(m.body.input.prompt, /Seamless loop/);
-  const musicFile = path.join(dir, "motions", r.motion.id, "music.mp3");
-  const sec = Number(execFileSync("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", musicFile]).toString());
-  assert.ok(Math.abs(sec - 41) < 0.3, `เพลงยาว ${sec}`);
+  assert.equal(m.body.input.music_length_ms, 90000);
+  assert.doesNotMatch(m.body.input.prompt, /Seamless loop/);
   const row = readCosts(path.join(dir, ".vf")).find((x) => x.model === MODELS.music);
-  assert.ok(Math.abs(row.usd - 30 * 0.0025) < 1e-9);
+  assert.ok(Math.abs(row.usd - 90 * 0.0025) < 1e-9);
+  assert.equal(r.motion.music_track.reused, false);
+  const lib = path.join(root, "_music");
+  const idx = JSON.parse(fs.readFileSync(path.join(lib, "index.json"), "utf8"));
+  assert.equal(idx.tracks.length, 1);
+  assert.ok(fs.existsSync(path.join(lib, idx.tracks[0].file)));
+  const md = fs.readFileSync(path.join(lib, "MUSIC.md"), "utf8");
+  assert.ok(md.includes(idx.tracks[0].id) && md.includes("Bouncy ukulele") && md.includes("demo · Top 4 Oops"));
   const sfx = path.join(dir, "motions", r.motion.id, "sfx.wav");
   assert.ok(fs.existsSync(sfx), "มีรางเสียงประกอบ (whoosh ตอนตัด + ding ตอนการ์ด)");
   assert.ok(Math.abs(Number(probe(sfx).format.duration) - 40) < 0.3);
-  assert.equal(r.motion.sfx, true);
+  assert.ok(Math.abs(Number(probe(r.motion.file).format.duration) - 40) < 0.5, "เพลงยาวกว่าคลิปถูกตัดให้เท่าคลิป");
+
+  calls.length = 0;
+  const r2 = await motion(["demo", "--prompt", "เพลงคลังรอบสอง", "--duration", "40", "--foreground"]);
+  assert.equal(posts(MODELS.music).length, 0, "ใช้เพลงจากคลัง ไม่สร้างใหม่");
+  const heard = calls.filter((c) => c.url.includes("clef-omni") && c.body?.questions?.fits_story);
+  assert.equal(heard.length, 1);
+  assert.match(heard[0].body.audio[0], /^data:audio\/mpeg;base64,/);
+  assert.equal(r2.motion.music_track.id, idx.tracks[0].id);
+  assert.equal(r2.motion.music_track.reused, true);
+  const after = JSON.parse(fs.readFileSync(path.join(lib, "index.json"), "utf8"));
+  assert.equal(after.tracks[0].uses.length, 2);
+});
+
+test("เพลง: clef ให้คะแนนต่ำกว่าเกณฑ์ → สร้างเพลงใหม่เพิ่มเข้าคลัง", async () => {
+  plan = MOTION();
+  plan.scenes = Array.from({ length: 5 }, (_, i) => scene(8, { card: `#${5 - i}` }));
+  await motion(["demo", "--prompt", "เพลงหนึ่ง", "--duration", "40", "--foreground"]);
+  calls.length = 0;
+  musicFit = 0.2;
+  await motion(["demo", "--prompt", "เพลงสอง", "--duration", "40", "--foreground"]);
+  musicFit = 0.9;
+  assert.equal(posts(MODELS.music).length, 1);
+  const idx = JSON.parse(fs.readFileSync(path.join(root, "_music", "index.json"), "utf8"));
+  assert.equal(idx.tracks.length, 2);
 });
 
 test("reuseCandidates: ตัวละคร/ฉาก/อัตราส่วนต้องตรง, ข้ามภาพที่ถูกปัดตก ใช้ครบโควตา หรือมาจากคลิปนี้, เรียงตามคำที่ซ้ำ", () => {
@@ -313,7 +343,6 @@ test("motion reuse: clef ให้ผ่าน → ใช้ภาพเก่�
   assert.equal(r2.motion.reused_stills, 0);
   assert.equal(posts(MODELS.imageFast).length, 4);
   calls.length = 0;
-  fitsScore = 0.9;
   const r3 = await motion(["demo", "--prompt", "รอบสี่", "--duration", "20", "--foreground", "--id", "fourth", "--no-reuse"]);
   assert.equal(r3.motion.reused_stills, 0);
   assert.equal(posts(MODELS.imageFast).length, 4);
@@ -322,8 +351,9 @@ test("motion reuse: clef ให้ผ่าน → ใช้ภาพเก่�
 test("film --dry-run และ --duration นอกช่วง ไม่เรียก API", async () => {
   const d = await film(["demo", "--prompt", "x", "--duration", "90", "--dry-run"]);
   assert.equal(d.dry_run, true);
-  assert.equal(d.planned.find((p) => p.step === "video").count, 10);
-  assert.ok(d.estimated_usd > 0.7);
+  assert.equal(d.planned.find((p) => p.step === "video").count, 5);
+  // 5 ช็อต × ($0.06 + keyframe) + เพลงใหม่ 90 วินาที (สูงสุด กรณีคลังไม่มีเพลงที่เข้ากัน) + LLM/TTS
+  assert.ok(d.estimated_usd > 0.5 && d.estimated_usd < 0.7, String(d.estimated_usd));
   await assert.rejects(film(["demo", "--prompt", "x", "--duration", "10"]), (e) => e instanceof VfError && e.code === "USAGE");
   assert.equal(calls.length, 0);
 });
