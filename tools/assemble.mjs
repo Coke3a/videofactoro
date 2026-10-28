@@ -16,10 +16,14 @@ export function frameSize(aspect) {
   return { w: 720, h: 1280 };
 }
 
-export async function ffmpeg(args, what) {
+// ffmpeg ที่ค้างไม่สนใจ SIGTERM → หมดเวลาแล้วฆ่าด้วย SIGKILL
+export const FFMPEG_TIMEOUT_MS = 10 * 60 * 1000;
+
+export async function ffmpeg(args, what, { timeoutMs = FFMPEG_TIMEOUT_MS } = {}) {
   try {
-    await execFileP("ffmpeg", ["-loglevel", "error", "-y", ...args], { maxBuffer: 1 << 24 });
+    await execFileP("ffmpeg", ["-loglevel", "error", "-y", ...args], { maxBuffer: 1 << 24, timeout: timeoutMs, killSignal: "SIGKILL" });
   } catch (err) {
+    if (err?.killed) throw new VfError("INTERNAL", `ffmpeg ${what} ค้างเกิน ${Math.round(timeoutMs / 1000)} วินาที จึงถูกหยุด`, { timeoutMs });
     throw new VfError("INTERNAL", `ffmpeg ${what} ไม่สำเร็จ`, { cause: String(err?.stderr ?? err?.message ?? err).slice(0, 400) });
   }
 }
@@ -45,7 +49,7 @@ export function normalizeArgs({ input, out, w, h, hasAudio, seconds }) {
   return [
     "-i", input, ...(hasAudio ? [] : ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"]),
     "-vf", `${fit(w, h)},fps=${FPS},format=yuv420p`, "-map", "0:v", ...audio,
-    "-af", "aresample=48000,aformat=channel_layouts=stereo,apad", "-t", seconds.toFixed(3),
+    "-af", `aresample=48000,aformat=channel_layouts=stereo,apad=whole_dur=${seconds.toFixed(3)}`, "-t", seconds.toFixed(3),
     ...VIDEO_OUT, "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2", out,
   ];
 }
@@ -91,16 +95,19 @@ export function concatArgs({ listFile, out }) {
 }
 
 // เสียงพากย์หลายท่อน วางตามเวลาเริ่ม (วินาที) เร่งตาม tempo แล้วรวมเป็นแทร็กเดียวยาว duration
+// ไม่ใช้ apad: apad หลัง amix บางครั้งทำ ffmpeg 8 วนค้างไม่จบ หรือจบสั้นกว่าที่สั่ง (ตอนเครื่องหนัก)
+// → ผสมกับเสียงเงียบยาว duration พอดีแทน ทุกแหล่งมีความยาวจำกัด
 export function narrationTrackArgs({ items, duration, out }) {
   if (!items.length) throw new VfError("INTERNAL", "ไม่มีเสียงพากย์ให้รวม");
-  const inputs = items.flatMap((it) => ["-i", it.file]);
+  const d = duration.toFixed(3);
+  const inputs = [...items.flatMap((it) => ["-i", it.file]), "-f", "lavfi", "-t", d, "-i", "anullsrc=r=48000:cl=stereo"];
   const parts = items.map((it, i) => {
     const ms = Math.round(it.at * 1000);
     return `[${i}:a]aresample=48000,aformat=channel_layouts=stereo,${it.tempo && it.tempo !== 1 ? `atempo=${it.tempo},` : ""}adelay=${ms}|${ms}[n${i}]`;
   });
-  const labels = items.map((_, i) => `[n${i}]`).join("");
-  const graph = [...parts, `${labels}amix=inputs=${items.length}:normalize=0:duration=longest,apad,atrim=0:${duration.toFixed(3)}[out]`].join(";");
-  return [...inputs, "-filter_complex", graph, "-map", "[out]", "-ar", "48000", "-ac", "2", out];
+  const labels = items.map((_, i) => `[n${i}]`).join("") + `[${items.length}:a]`;
+  const graph = [...parts, `${labels}amix=inputs=${items.length + 1}:normalize=0:duration=longest,atrim=0:${d}[out]`].join(";");
+  return [...inputs, "-filter_complex", graph, "-map", "[out]", "-ar", "48000", "-ac", "2", "-t", d, out];
 }
 
 // เพลงสั้นวนต่อกันด้วย crossfade จนยาวถึง duration (จ่ายเพลงแค่ท่อนเดียว)

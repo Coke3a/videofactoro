@@ -421,7 +421,7 @@ test("narrationTrackArgs / stillMotionArgs: หน่วงตามเวลา
   const a = narrationTrackArgs({ items: [{ file: "a.wav", at: 0 }, { file: "b.wav", at: 7.5, tempo: 1.2 }], duration: 20, out: "o.wav" });
   const g = a[a.indexOf("-filter_complex") + 1];
   assert.match(g, /\[1:a\][^;]*atempo=1\.2,adelay=7500\|7500/);
-  assert.match(g, /amix=inputs=2:normalize=0[^;]*atrim=0:20\.000/);
+  assert.match(g, /amix=inputs=3:normalize=0[^;]*atrim=0:20\.000/); // 2 เสียง + เงียบรองพื้น
   const s = stillMotionArgs({ image: "i.jpg", out: "o.mp4", w: 720, h: 1280, seconds: 5, move: "pan_left" });
   assert.equal(s[s.indexOf("-frames:v") + 1], "120");
   assert.match(s[s.indexOf("-vf") + 1], /zoompan=z='1\.15'.*s=720x1280:fps=24/);
