@@ -151,7 +151,7 @@ test("composeHtml: ตำแหน่งจาก spotX เท้าที่ st
   // biscuit วิ่งจาก left → right = 540px
   assert.match(html, /tl\.fromTo\("#sc1-c-biscuit", \{"x":0\}, \{"x":540,"duration":1,"ease":"none"/);
   // ตัวที่ขี่อยู่ในกล่องของ prop
-  assert.match(html, /id="sc2-o-vacuum"[^>]*>[^]*?id="sc2-c-marmalade"/);
+  assert.match(html, /id="sc2-o-vacuum"[^>]*>[^]*?id="sc2-c-marmalade" class="actor" style="left:50%;margin-left:-226.8px;bottom:30%;/);
 });
 
 test("composeHtml: escape ข้อความจากแผน", () => {

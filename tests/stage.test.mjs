@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as cf from "../tools/cf.mjs";
 import { VfError } from "../tools/out.mjs";
-import { stageFor, spotX, DEFAULT_STAGE } from "../tools/stage.mjs";
+import { stageFor, spotX, upgradeStage, DEFAULT_STAGE, STAGE_VERSION } from "../tools/stage.mjs";
 import { bodyOf } from "./fixtures/body.mjs";
 
 process.env.VF_NO_DOTENV = "1";
@@ -47,7 +47,8 @@ const args = () => ({ dir, place: place(), meta: {}, costDir: path.join(dir, ".v
 
 test("stageFor ตัด spot ที่ติดเฟอร์นิเจอร์ เขียน place.json และครั้งที่สองไม่เรียก clef", async () => {
   const s = await stageFor(args());
-  assert.equal(s.floor, 0.87);
+  assert.equal(s.floor, DEFAULT_STAGE.floor);
+  assert.equal(s.v, STAGE_VERSION);
   assert.ok(!("center" in s.spots));
   assert.equal(s.spots.left, 0.25);
   assert.equal(calls.length, 1);
@@ -74,7 +75,24 @@ test("stageFor clef PROVIDER → DEFAULT_STAGE ไม่เขียนไฟล
   assert.equal(fs.readFileSync(placeFile, "utf8"), before);
 });
 
+test("stageFor แคชรุ่นเก่า (floor 0.87 ไม่มี v) → floor ใหม่ เก็บ spot ที่ clef เลือก ไม่เรียก clef", async () => {
+  const old = { floor: 0.87, spots: { left: 0.25, center: 0.5, "far-right": 0.88 } };
+  fs.writeFileSync(placeFile, JSON.stringify({ ...place(), plate: "plates/p.png", stage: old }));
+  const s = await stageFor(args());
+  assert.equal(calls.length, 0);
+  assert.equal(s.floor, DEFAULT_STAGE.floor);
+  assert.ok(s.floor >= 0.94);
+  assert.deepEqual(Object.keys(s.spots), ["left", "center", "far-right"]);
+  assert.equal(s.spots["far-right"], DEFAULT_STAGE.spots["far-right"]);
+  assert.deepEqual(JSON.parse(fs.readFileSync(placeFile, "utf8")).stage, s);
+  // รุ่นปัจจุบันคืนตัวเดิม (แก้มือได้)
+  const tuned = { ...s, floor: 0.9 };
+  assert.equal(upgradeStage(tuned), tuned);
+  // spot เหลือไม่ถึงสอง → ค่าเริ่มต้นทั้งชุด
+  assert.deepEqual(upgradeStage({ floor: 0.87, spots: { left: 0.25 } }), DEFAULT_STAGE);
+});
+
 test("spotX อ่านค่า และชื่อไม่รู้จัก → INTERNAL", () => {
-  assert.equal(spotX(DEFAULT_STAGE, "far-right"), 0.88);
+  assert.equal(spotX(DEFAULT_STAGE, "far-right"), 0.86);
   assert.throws(() => spotX(DEFAULT_STAGE, "nope"), (e) => e.code === "INTERNAL");
 });

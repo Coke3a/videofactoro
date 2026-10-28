@@ -21,7 +21,7 @@ import { SFX_KINDS } from "./fx.mjs";
 import { pool } from "./shots.mjs";
 import { loadPoses } from "./poses.mjs";
 import { listProps, makeProp } from "./props.mjs";
-import { stageFor } from "./stage.mjs";
+import { stageFor, upgradeStage } from "./stage.mjs";
 import { STORY_SCHEMA, storySystemPrompt, validateStory, scenesSchema, scenesSystemPrompt, validateScenePlan, normalizeScenePlan } from "./motion-plan.mjs";
 import { FONT_FOR, fontFile, sceneTimes, audioCues, composeHtml } from "./hf-compose.mjs";
 import { gsapFile, hfLint, hfSnapshot, hfRender } from "./hf.mjs";
@@ -182,10 +182,11 @@ async function work({ dir, ctx, state, key, prompt, total, audio, places, warnin
   // ทุกสถานที่ของ project (แผนฉากเลือกได้ทุกที่) — stageFor แคชผลใน place.json จึงถามแค่ครั้งแรก
   const stages = {};
   for (const p of places) {
-    stages[p.id] = await step(state, `stage:${p.id}`, async () => {
+    // checkpoint ของรันก่อนอาจเป็น stage รุ่นเก่า → อัปเกรดทุกครั้ง
+    stages[p.id] = upgradeStage(await step(state, `stage:${p.id}`, async () => {
       log(`ขั้น stage:${p.id}`);
       return stageFor({ dir, place: p.id, meta: { project: slug, step: "stage", item: p.id, run }, costDir });
-    });
+    }));
   }
 
   const assets = {

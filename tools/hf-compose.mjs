@@ -9,8 +9,10 @@ import { narrationBudget } from "./clip.mjs";
 
 const KIT_CSS = new URL("./hf-kit/base.css", import.meta.url);
 const SPRITE_RATIO = 1184 / 880; // ขนาดจริงของภาพท่า 3:4 จากโมเดล
-const ACTOR_SIZE = 0.5;
-const PROP_SIZE = 0.3;
+// เล็กลงจาก 0.5/0.3: ตัวใหญ่บังเฟอร์นิเจอร์ครึ่งห้องจนดูเหมือนยืนบนโต๊ะ และหัวชนคำบรรยาย
+const ACTOR_SIZE = 0.42;
+const PROP_SIZE = 0.26;
+const RIDE_BOTTOM = "30%";
 const NARRATOR_COLOR = "#ffffff";
 const CAP_COLORS = ["#ffe066", "#ffb36b", "#8fe3ff", "#b6f28b", "#ff9ecb"];
 const MOVE_DUR = { to: 1.2, "run-to": 1.2, shiver: 2, loop: 3 };
@@ -209,7 +211,8 @@ export function composeHtml({ plan, times, lines = {}, stage, assets, size = { w
         `<img id="${id}-t-${safe(p)}" class="sprite" src="${esc(assets.sprite(c.who, p, true))}" />`,
       ]).join("");
       const pos = rides(c)
-        ? `left:50%;margin-left:${r3(-aw / 2)}px;bottom:38%`
+        // ภาพท่ามีที่ว่างใต้เท้า ~19% → จมลงในยอด prop นิดหน่อยให้ดูนั่งอยู่จริง ไม่ลอย
+        ? `left:50%;margin-left:${r3(-aw / 2)}px;bottom:${RIDE_BOTTOM}`
         : `left:${r3(el[c.who].x0 * W - aw / 2)}px;bottom:${r3(floorPx - ah * 0.06)}px`;
       return `<div id="${id}" class="actor" style="${pos};width:${r3(aw)}px;height:${r3(ah)}px"><div id="${id}-body" class="body">${imgs}</div></div>`;
     };
