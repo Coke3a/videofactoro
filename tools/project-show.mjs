@@ -4,6 +4,7 @@ import { parse } from "./out.mjs";
 import { resolveProject } from "./paths.mjs";
 import { ID_RE } from "./bible.mjs";
 import { loadProject } from "./entities.mjs";
+import { listProps } from "./props.mjs";
 import { readCosts, summarize } from "./cost.mjs";
 
 const listFiles = (d) => (existsSync(d) ? readdirSync(d, { withFileTypes: true }).filter((e) => e.isFile()).map((e) => join(d, e.name)).sort() : []);
@@ -47,6 +48,7 @@ export async function main(argv) {
       return { id: c.id, name: c.name, role: c.role, ref: existsSync(ref) ? ref : null, poses: listFiles(join(dir, "characters", c.id, "poses")) };
     }),
     places: places.filter((p) => ID_RE.test(String(p?.id))).map((p) => ({ id: p.id, name: p.name, plates: listFiles(join(dir, "places", p.id, "plates")) })),
+    props: listProps(dir),
     episodes: rows.length,
     last_episodes: rows.slice(-5),
     cost_total_usd: summarize(readCosts(join(dir, ".vf"))).totalUsd,
