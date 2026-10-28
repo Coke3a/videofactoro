@@ -10,8 +10,12 @@ import { narrationBudget } from "./clip.mjs";
 const KIT_CSS = new URL("./hf-kit/base.css", import.meta.url);
 const SPRITE_RATIO = 1184 / 880; // ขนาดจริงของภาพท่า 3:4 จากโมเดล
 // เล็กลงจาก 0.5/0.3: ตัวใหญ่บังเฟอร์นิเจอร์ครึ่งห้องจนดูเหมือนยืนบนโต๊ะ และหัวชนคำบรรยาย
-const ACTOR_SIZE = 0.42;
+export const ACTOR_SIZE = 0.42;
+// ฉาก 3 ตัว: 0.42 × 3 กว้างเกินเฟรม → ย่อลงให้วางห่างกันได้ครบในเฟรม
+export const CROWD_SIZE = 0.34;
 const PROP_SIZE = 0.26;
+// ระยะกึ่งกลางขั้นต่ำ = SEP × ความกว้างเฉลี่ยของคู่: ตัวละครจริงกินแค่ ~78% ของกว้างภาพท่า (ขอบใส)
+export const SEP = 0.8;
 const RIDE_BOTTOM = "30%";
 const NARRATOR_COLOR = "#ffffff";
 // สีอิ่มตัว ตัดกับขอบดำ: สีพาสเทล (#ffb36b เดิม) จมไปกับ plate สีครีม
@@ -125,6 +129,27 @@ const beatAt = (b, t) => Math.min(t.dur, Math.max(0, atSec(b.at, t.lines)));
 
 const byAt = (a, b) => a.at - b.at;
 
+const inFrame = (x, w) => Math.min(1 - w / 2, Math.max(w / 2, x));
+
+// items: [{ key, x, w }] เป็นสัดส่วนของความกว้างเฟรม → { key: x } ที่อยู่ในเฟรมเต็มตัวและห่างกันอย่างน้อย SEP
+// ดันไปทางขวาก่อน แล้วดันกลับจากขอบขวา; ยังไม่พอ (ตัวใหญ่เกิน) → กระจายเท่า ๆ กัน
+export function layoutX(items) {
+  const xs = items.map((it, i) => ({ ...it, i })).sort((a, b) => a.x - b.x || a.i - b.i);
+  for (const it of xs) it.x = inFrame(it.x, it.w);
+  const gap = (a, b) => (SEP * (a.w + b.w)) / 2;
+  for (let k = 1; k < xs.length; k++) xs[k].x = Math.max(xs[k].x, xs[k - 1].x + gap(xs[k - 1], xs[k]));
+  for (let k = xs.length - 1; k >= 0; k--) {
+    const hi = k + 1 < xs.length ? xs[k + 1].x - gap(xs[k], xs[k + 1]) : 1 - xs[k].w / 2;
+    xs[k].x = Math.min(xs[k].x, hi);
+  }
+  if (xs.some((it) => it.x < it.w / 2 - 1e-9)) {
+    const lo = xs[0].w / 2;
+    const hi = 1 - xs.at(-1).w / 2;
+    xs.forEach((it, k) => { it.x = inFrame(xs.length > 1 ? lo + (k * (hi - lo)) / (xs.length - 1) : 0.5, it.w); });
+  }
+  return Object.fromEntries(xs.map((it) => [it.key, r3(it.x)]));
+}
+
 export function audioCues(plan, times) {
   const voices = [];
   const sfx = [];
@@ -194,34 +219,44 @@ export function composeHtml({ plan, times, lines = {}, stage, assets, size = { w
     const props = sc.props ?? [];
     const beats = sc.beats ?? [];
 
+    const actorW = (c) => c.size ?? (cast.length >= 3 ? CROWD_SIZE : ACTOR_SIZE);
+    const propW = (p) => p.size ?? PROP_SIZE;
+    const propIds = new Set(props.map((p) => p.id));
+    const rides = (c) => c.ride && propIds.has(c.ride);
+    // จัดตำแหน่งตัวที่ยืนบนพื้น + prop ที่มีคนขี่ (กว้างเท่าตัวที่ขี่) ด้วยกัน; prop เปล่าแค่ไม่ให้หลุดขอบ
+    const riders = (p) => cast.filter((c) => rides(c) && c.ride === p.id);
+    const bodyW = (p) => Math.max(propW(p), ...riders(p).map(actorW));
+    const pos = layoutX([
+      ...cast.filter((c) => !rides(c)).map((c) => ({ key: `c:${c.who}`, x: spotX(st, c.spot), w: actorW(c) })),
+      ...props.filter((p) => riders(p).length).map((p) => ({ key: `o:${p.id}`, x: spotX(st, p.spot), w: bodyW(p) })),
+    ]);
+    const propX = Object.fromEntries(props.map((p) => [p.id, pos[`o:${p.id}`] ?? inFrame(spotX(st, p.spot), propW(p))]));
     // who ใน beat: หาใน cast ก่อน แล้วค่อย props (cast ทับ props)
-    const propX = Object.fromEntries(props.map((p) => [p.id, spotX(st, p.spot)]));
     const el = Object.create(null);
-    for (const p of props) el[p.id] = { sel: `#${eid(`o-${safe(p.id)}`)}`, x0: propX[p.id], body: false, cur: 0 };
-    const rides = (c) => c.ride && Object.hasOwn(propX, c.ride);
+    for (const p of props) el[p.id] = { sel: `#${eid(`o-${safe(p.id)}`)}`, x0: propX[p.id], w: bodyW(p), body: false, cur: 0 };
     // ตัวที่ขี่ prop อยู่ในกล่องของ prop → ระยะเดินนับจากจุดของ prop
-    for (const c of cast) el[c.who] = { sel: `#${eid(`c-${safe(c.who)}`)}`, x0: rides(c) ? propX[c.ride] : spotX(st, c.spot), body: true, cur: 0 };
+    for (const c of cast) el[c.who] = { sel: `#${eid(`c-${safe(c.who)}`)}`, x0: rides(c) ? propX[c.ride] : pos[`c:${c.who}`], w: actorW(c), body: true, cur: 0 };
 
     const posesOf = (c) => uniq([c.pose, ...beats.filter((b) => b.who === c.who && b.pose).map((b) => b.pose)]);
     const actorHtml = (c) => {
-      const aw = (c.size ?? ACTOR_SIZE) * W;
+      const aw = actorW(c) * W;
       const ah = aw * SPRITE_RATIO;
       const id = eid(`c-${safe(c.who)}`);
       const imgs = posesOf(c).flatMap((p) => [
         `<img id="${id}-p-${safe(p)}" class="sprite" src="${esc(assets.sprite(c.who, p, false))}" />`,
         `<img id="${id}-t-${safe(p)}" class="sprite" src="${esc(assets.sprite(c.who, p, true))}" />`,
       ]).join("");
-      const pos = rides(c)
+      const at = rides(c)
         // ภาพท่ามีที่ว่างใต้เท้า ~19% → จมลงในยอด prop นิดหน่อยให้ดูนั่งอยู่จริง ไม่ลอย
         ? `left:50%;margin-left:${r3(-aw / 2)}px;bottom:${RIDE_BOTTOM}`
         : `left:${r3(el[c.who].x0 * W - aw / 2)}px;bottom:${r3(floorPx - ah * 0.06)}px`;
-      return `<div id="${id}" class="actor" style="${pos};width:${r3(aw)}px;height:${r3(ah)}px"><div id="${id}-body" class="body">${imgs}</div></div>`;
+      return `<div id="${id}" class="actor" style="${at};width:${r3(aw)}px;height:${r3(ah)}px"><div id="${id}-body" class="body">${imgs}</div></div>`;
     };
     const propHtml = (p) => {
-      const pw = (p.size ?? PROP_SIZE) * W;
-      const riders = cast.filter((c) => rides(c) && c.ride === p.id).map(actorHtml).join("");
+      const pw = propW(p) * W;
+      const ride = riders(p).map(actorHtml).join("");
       return `<div id="${eid(`o-${safe(p.id)}`)}" class="prop" style="left:${r3(propX[p.id] * W - pw / 2)}px;bottom:${r3(floorPx - pw * 0.12)}px;width:${r3(pw)}px;height:${r3(pw)}px">`
-        + `<img class="prop-img" src="${esc(assets.prop(p.id))}" />${riders}</div>`;
+        + `<img class="prop-img" src="${esc(assets.prop(p.id))}" />${ride}</div>`;
     };
     const caps = t.lines.map((l, i) => {
       const words = captionChunks(sc.lines[i].text, lang);
@@ -270,7 +305,7 @@ export function composeHtml({ plan, times, lines = {}, stage, assets, size = { w
         tw(e.sel, { x: e.cur }, { x: r3(e.cur - X(9)), duration: 0.05, ease: "none", yoyo: true, repeat: Math.round(dur / 0.05) | 1 }, at);
       } else if (b.move === "to" || b.move === "run-to") {
         // ระยะสะสมต่อ element ในฉาก → เดินหลายครั้งต่อกันได้ไม่กระตุกกลับ
-        const dx = r3((spotX(st, b.to_spot) - e.x0) * W);
+        const dx = r3((inFrame(spotX(st, b.to_spot), e.w) - e.x0) * W);
         tw(e.sel, { x: e.cur }, { x: dx, duration: dur, ease: b.move === "run-to" ? "none" : "power1.inOut" }, at);
         e.cur = dx;
         if (b.move === "run-to" && e.body) {

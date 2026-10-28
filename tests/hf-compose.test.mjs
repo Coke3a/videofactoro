@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { sceneTimes, mouthFrames, composeHtml, audioCues, FONT_FOR, fontFile, captionChunks } from "../tools/hf-compose.mjs";
+import { sceneTimes, mouthFrames, composeHtml, audioCues, FONT_FOR, fontFile, captionChunks, layoutX, ACTOR_SIZE, CROWD_SIZE, SEP } from "../tools/hf-compose.mjs";
 import { DEFAULT_STAGE } from "../tools/stage.mjs";
 import { LEAD, GAP, TAIL, SCENE_MIN } from "../tools/motion-plan.mjs";
 
@@ -242,4 +242,68 @@ test("ชื่อผู้พูดแปลก ๆ อย่าง __proto__ �
   const html = compose({ plan: p });
   assert.match(html, /id="sc1-cap1" class="cap" style="color:#ffd60a">/);
   assert.doesNotMatch(html, /object Object/);
+});
+
+const fits = (pos, items) => {
+  const xs = items.map((it) => ({ ...it, x: pos[it.key] })).sort((a, b) => a.x - b.x);
+  for (const it of xs) {
+    assert.ok(it.x - it.w / 2 >= -1e-9 && it.x + it.w / 2 <= 1 + 1e-9, `${it.key} หลุดขอบ x=${it.x}`);
+  }
+  for (let k = 1; k < xs.length; k++) {
+    const need = (SEP * (xs[k - 1].w + xs[k].w)) / 2;
+    assert.ok(xs[k].x - xs[k - 1].x >= need - 1e-3, `${xs[k - 1].key}–${xs[k].key} ชิดเกิน`);
+  }
+};
+
+test("layoutX: ทุกตัวอยู่ในเฟรมเต็มตัวและห่างกันอย่างน้อย SEP", () => {
+  // ตัวเดียวที่ far-right: ดันเข้าจนขอบขวาพอดีเฟรม
+  assert.deepEqual(layoutX([{ key: "pip", x: 0.86, w: 0.42 }]), { pip: 0.79 });
+  // ฉาก 8 ของคลิปสอง: left / center / far-right
+  const three = [{ key: "a", x: 0.25, w: CROWD_SIZE }, { key: "b", x: 0.5, w: CROWD_SIZE }, { key: "c", x: 0.86, w: CROWD_SIZE }];
+  const pos = layoutX(three);
+  fits(pos, three);
+  assert.ok(pos.a < pos.b && pos.b < pos.c);
+  assert.equal(pos.a, 0.25, "ตัวที่ไม่ชนไม่ต้องขยับ");
+  // ยืนจุดเดียวกัน: แยกตามลำดับใน cast ผลเหมือนเดิมทุกครั้ง
+  const same = [{ key: "x", x: 0.5, w: ACTOR_SIZE }, { key: "y", x: 0.5, w: ACTOR_SIZE }];
+  const p2 = layoutX(same);
+  fits(p2, same);
+  assert.ok(p2.x < p2.y);
+  assert.deepEqual(layoutX(same), p2);
+  // ชนขอบขวาหลายตัว: ดันกลับมาทางซ้าย
+  const right = [{ key: "a", x: 0.86, w: CROWD_SIZE }, { key: "b", x: 0.86, w: CROWD_SIZE }, { key: "c", x: 0.75, w: CROWD_SIZE }];
+  fits(layoutX(right), right);
+  // ใหญ่เกินจนวางห่างไม่ได้: กระจายเท่า ๆ กันแต่ยังอยู่ในเฟรม
+  const big = [{ key: "a", x: 0.5, w: 0.6 }, { key: "b", x: 0.5, w: 0.6 }, { key: "c", x: 0.5, w: 0.6 }];
+  const pb = layoutX(big);
+  assert.deepEqual(Object.values(pb), [0.3, 0.5, 0.7]);
+});
+
+test("composeHtml: ฉาก 3 ตัวย่อลงเป็น CROWD_SIZE ไม่หลุดขอบ ไม่ทับกัน รวมตัวที่ขี่ prop", () => {
+  const p = plan();
+  p.scenes[1].cast = [
+    { who: "marmalade", spot: "left", pose: "idle" },
+    { who: "biscuit", spot: "far-left", pose: "sad" },
+    { who: "pip", spot: "center", pose: "happy", ride: "vacuum" },
+  ];
+  p.scenes[1].beats = [{ at: "0.5", who: "marmalade", move: "to", to_spot: "far-right" }];
+  const html = compose({ plan: p });
+  const W = 1080;
+  const aw = CROWD_SIZE * W;
+  const left = (id) => Number(new RegExp(`id="sc2-${id}" class="(?:actor|prop)" style="left:([-\\d.]+)px;`).exec(html)[1]);
+  const width = (id) => Number(new RegExp(`id="sc2-${id}" class="(?:actor|prop)" style="[^"]*width:([\\d.]+)px`).exec(html)[1]);
+  assert.equal(width("c-marmalade"), r3(aw));
+  const pw = width("o-vacuum");
+  const items = [
+    { key: "marmalade", x: (left("c-marmalade") + aw / 2) / W, w: CROWD_SIZE },
+    { key: "biscuit", x: (left("c-biscuit") + aw / 2) / W, w: CROWD_SIZE },
+    // ตัวที่ขี่อยู่กลางกล่อง prop → นับเป็นตัวเดียวกว้างเท่าตัวละคร
+    { key: "vacuum", x: (left("o-vacuum") + pw / 2) / W, w: CROWD_SIZE },
+  ];
+  fits(Object.fromEntries(items.map((it) => [it.key, it.x])), items);
+  assert.match(html, new RegExp(`id="sc2-c-pip" class="actor" style="left:50%;margin-left:${r3(-aw / 2)}px;`));
+  // เดินไป far-right ก็หยุดก่อนหลุดขอบ
+  const dx = Number(/tl\.fromTo\("#sc2-c-marmalade", \{"x":0\}, \{"x":([-\d.]+),/.exec(html)[1]);
+  assert.ok(left("c-marmalade") + dx + aw <= W + 1e-6, String(dx));
+  assert.ok(ACTOR_SIZE > CROWD_SIZE);
 });
