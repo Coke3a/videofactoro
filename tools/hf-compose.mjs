@@ -14,7 +14,8 @@ const ACTOR_SIZE = 0.42;
 const PROP_SIZE = 0.26;
 const RIDE_BOTTOM = "30%";
 const NARRATOR_COLOR = "#ffffff";
-const CAP_COLORS = ["#ffe066", "#ffb36b", "#8fe3ff", "#b6f28b", "#ff9ecb"];
+// สีอิ่มตัว ตัดกับขอบดำ: สีพาสเทล (#ffb36b เดิม) จมไปกับ plate สีครีม
+const CAP_COLORS = ["#ffd60a", "#3ad7ff", "#6dff4f", "#ff5fa8", "#ff8c1a"];
 const MOVE_DUR = { to: 1.2, "run-to": 1.2, shiver: 2, loop: 3 };
 const CHUNK_MIN = 4;
 const CHUNK_MAX = 8;

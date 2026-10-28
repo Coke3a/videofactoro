@@ -169,7 +169,7 @@ test("composeHtml: คำบรรยายเด้งทีละคำ สี
   const html = compose({ font: { family: "Noto Sans", file: "NotoSans-Bold.ttf" } });
   assert.match(html, /@font-face \{ font-family: "Noto Sans"; src: url\("fonts\/NotoSans-Bold\.ttf"\)/);
   assert.match(html, /id="sc1-cap1" class="cap" style="color:#ffffff"><span>This<\/span><span>is<\/span><span>Biscuit.<\/span>/);
-  assert.match(html, /id="sc1-cap2" class="cap" style="color:#ffe066">/);
+  assert.match(html, /id="sc1-cap2" class="cap" style="color:#ffd60a">/);
   assert.match(html, /tl\.fromTo\("#sc1-cap1 span", \{"opacity":0,"y":20\}, \{"opacity":1,"y":0,"duration":0.12,"stagger":0.4\}, 0.45\);/);
 });
 
@@ -240,6 +240,6 @@ test("ชื่อผู้พูดแปลก ๆ อย่าง __proto__ �
   const p = plan();
   p.scenes[0].lines[0].who = "__proto__";
   const html = compose({ plan: p });
-  assert.match(html, /id="sc1-cap1" class="cap" style="color:#ffe066">/);
+  assert.match(html, /id="sc1-cap1" class="cap" style="color:#ffd60a">/);
   assert.doesNotMatch(html, /object Object/);
 });

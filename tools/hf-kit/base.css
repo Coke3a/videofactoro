@@ -10,7 +10,9 @@ body { margin: 0; background: #000; }
 .prop-img { position: absolute; inset: 0; width: 100%; height: 100%; }
 /* คำบรรยายลอยเหนือหัวตัวละคร (เท้าอยู่ที่พื้นหน้าสุด) และใต้ stamp */
 .cap { position: absolute; left: 60px; right: 60px; bottom: 43%; text-align: center; font-size: 60px; line-height: 1.15;
-       font-weight: 700; -webkit-text-stroke: 9px #222; paint-order: stroke fill; }
+       font-weight: 700; -webkit-text-stroke: 12px #111; paint-order: stroke fill;
+       /* วงเงาเข้มรอบตัวอักษร: อ่านออกแม้ plate สว่าง (stroke อย่างเดียวบางเกินบนพื้นครีม) */
+       text-shadow: 0 0 3px #111, 3px 3px 0 #111, -3px 3px 0 #111, 3px -3px 0 #111, -3px -3px 0 #111, 0 6px 10px rgba(0, 0, 0, 0.55); }
 .cap span { display: inline-block; margin: 0 7px; opacity: 0; }
 .stamp { position: absolute; top: 330px; left: 0; right: 0; text-align: center; font-size: 190px; font-weight: 700; color: #ffd23f;
          -webkit-text-stroke: 14px #3b2a1a; paint-order: stroke fill; opacity: 0; }
