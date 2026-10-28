@@ -36,7 +36,7 @@ test("hfLint คืน errors ให้ผู้เรียกตัดสิ�
 
 test("hfLint อ่านผลไม่ได้ → error", async () => {
   setRunner(async () => ({ stdout: "???" }));
-  await assert.rejects(hfLint("/p"), { name: "VfError" });
+  await assert.rejects(hfLint("/p"), { name: "VfError", code: "INTERNAL" });
 });
 
 test("runner ได้ HF_ENV ใน env", async () => {
@@ -61,4 +61,9 @@ test("hfBin/gsapFile ชี้ใต้ node_modules", () => {
   for (const f of [hfBin, gsapFile]) {
     try { assert.ok(f().includes("node_modules")); } catch (e) { assert.equal(e.code, "CONFIG"); }
   }
+});
+
+test("runner ล้มเหลว (ไม่ใช่ lint) → INTERNAL", async () => {
+  setRunner(async () => { throw new Error("boom"); });
+  await assert.rejects(hfRender("/p", "/o.mp4"), { name: "VfError", code: "INTERNAL" });
 });

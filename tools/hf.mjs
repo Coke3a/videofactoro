@@ -51,14 +51,14 @@ async function exec(args) {
     return text(await runner(args, { env }));
   } catch (err) {
     if (args[0] === "lint" && (err?.stdout || err?.stderr)) return text(err);
-    throw new VfError("RENDER", `hyperframes ${args[0]} ล้มเหลว: ${String(err?.stderr || err?.message || err).slice(0, 400)}`);
+    throw new VfError("INTERNAL", `hyperframes ${args[0]} ล้มเหลว: ${String(err?.stderr || err?.message || err).slice(0, 400)}`);
   }
 }
 
 export async function hfLint(dir) {
   const out = await exec(lintArgs({ dir }));
   const m = /(\d+)\s+error\(s\),\s*(\d+)\s+warning\(s\)/.exec(out);
-  if (!m) throw new VfError("RENDER", "อ่านผล hyperframes lint ไม่ได้", { text: out.slice(0, 400) });
+  if (!m) throw new VfError("INTERNAL", "อ่านผล hyperframes lint ไม่ได้", { text: out.slice(0, 400) });
   return { errors: Number(m[1]), warnings: Number(m[2]), text: out };
 }
 
