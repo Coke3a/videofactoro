@@ -106,3 +106,5 @@ videofactoro is a tool you run yourself. There is no hosted service and no share
 ## License
 
 [MIT](LICENSE). Provided as is, without warranty. The author does not run, support or pay for any deployment.
+
+The motion renderer installs `gsap` from npm at setup time. GSAP is licensed under the [GSAP Standard License](https://gsap.com/standard-license), not MIT, and is not part of this repository (see `NOTICE`).

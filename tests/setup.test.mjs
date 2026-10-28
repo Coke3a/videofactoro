@@ -48,7 +48,7 @@ function fakeCloudflare() {
 
 test("setup: ทุก check ผ่านด้วย Cloudflare ปลอม ไม่มี R2 และคีย์ไม่หลุด", async () => {
   const seen = fakeCloudflare();
-  const { checks } = await main([], { costDir });
+  const { checks } = await main([], { costDir, hfInstall: async () => [] });
   const by = Object.fromEntries(checks.map((c) => [c.name, c]));
   for (const n of ["cf:token", "cf:credits"]) assert.equal(by[n].ok, true, n + " " + by[n].detail);
   assert.ok(!checks.some((c) => c.name.startsWith("r2:")));
@@ -61,6 +61,6 @@ test("setup: ทุก check ผ่านด้วย Cloudflare ปลอม �
 test("setup: env หลักขาด -> CONFIG พร้อม checks และไม่เรียกเครือข่าย", async () => {
   delete process.env.CLOUDFLARE_AI_API_TOKEN;
   const seen = fakeCloudflare();
-  await assert.rejects(main([], { costDir }), (e) => e.code === "CONFIG" && Array.isArray(e.details.checks));
+  await assert.rejects(main([], { costDir, hfInstall: async () => [] }), (e) => e.code === "CONFIG" && Array.isArray(e.details.checks));
   assert.equal(seen.length, 0);
 });

@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { VfError, parse, redact } from "./out.mjs";
 import { getFetch } from "./cf.mjs";
+import { HF_ENV, HF_VERSION, hfBin, gsapFile } from "./hf.mjs";
 
 export const CORE = ["CLOUDFLARE_AI_ACCOUNT_ID", "CLOUDFLARE_AI_API_TOKEN"];
 const OPTIONAL = ["VF_AIG_GATEWAY_ID"];
@@ -20,12 +21,35 @@ function binaryCheck(bin) {
   return { name: bin, ok: true, detail: m ? m[1] : "พบแล้ว" };
 }
 
+function hfVersionCheck() {
+  try {
+    const r = spawnSync(hfBin(), ["--version"], { encoding: "utf8", env: { ...process.env, ...HF_ENV } });
+    const v = (r.stdout ?? "").trim();
+    if (r.error || r.status !== 0) return { name: "hyperframes", ok: false, detail: "รัน hyperframes ไม่ได้ — vf setup" };
+    return { name: "hyperframes", ok: v === HF_VERSION, detail: v === HF_VERSION ? v : `ได้ ${v} ต้องการ ${HF_VERSION} — vf setup` };
+  } catch (e) {
+    return { name: "hyperframes", ok: false, detail: `${e.message} — vf setup` };
+  }
+}
+
+function gsapCheck() {
+  try {
+    gsapFile();
+    return { name: "gsap", ok: true, detail: "พบแล้ว" };
+  } catch (e) {
+    return { name: "gsap", ok: false, detail: `${e.message} — vf setup` };
+  }
+}
+
+export const hfChecks = () => [hfVersionCheck(), gsapCheck()];
+
 export function localChecks() {
   const major = Number(process.versions.node.split(".")[0]);
   return [
     { name: "node>=22", ok: major >= 22, detail: process.versions.node },
     binaryCheck("ffmpeg"),
     binaryCheck("ffprobe"),
+    ...hfChecks(),
     ...CORE.map((n) => envCheck(n, true)),
     ...OPTIONAL.map((n) => envCheck(n, false)),
   ];
