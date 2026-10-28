@@ -45,6 +45,7 @@ open projects/catdog/renders/*.mp4
 | `vf project create --prompt "..." --name <slug>` | Bible + characters + places from one prompt |
 | `vf project show <slug>` | Project summary as JSON |
 | `vf character add <slug> --prompt "..."` | Add a character (`--image` to use your own art, `--replace --id` to redo one) |
+| `vf character poses <slug> <id>` | Make cut-out pose sprites + talk twins for motion (`--poses idle,happy`, `--replace`) |
 | `vf place add <slug> --prompt "..."` | Add a place (background plate) |
 | `vf asset find <slug> <terms...>` | Search the project library |
 | `vf music list <slug>` / `vf music add <slug> <file.mp3> --prompt "..."` | Show or extend the shared music library (`_music/`, reused across projects; clef-omni picks a fitting track, new 90 s tracks are generated only when none fits) |

@@ -9,6 +9,7 @@ const COMMANDS = {
   "project create": "project-create",
   "project show": "project-show",
   "character add": "character-add",
+  "character poses": "character-poses",
   "place add": "place-add",
   "asset find": "asset-find",
   "music list": "music-list",
