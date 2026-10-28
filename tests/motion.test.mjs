@@ -144,6 +144,10 @@ test("motion: story → props → stage → scenes → tts → compose → lint 
     "Is any character standing on furniture, cut off by the frame edge, or floating in the air?");
   const plan = JSON.parse(fs.readFileSync(path.join(m.dir, "plan.json"), "utf8"));
   assert.equal(plan.scenes.length, 4);
+  // skill video-gen ของ Hermes อ่าน characters/title/summary จาก plan.json
+  assert.deepEqual(plan.characters, ["cat", "dog"]);
+  assert.equal(plan.title, "Ball Panic");
+  assert.equal(plan.summary, "The cat and the dog chase a red ball.");
   assert.ok(fs.readFileSync(path.join(dir, "EPISODES.md"), "utf8").includes("| motion | Ball Panic |"));
   assert.ok(r.cost.usd > 0);
   await assert.rejects(motion(ARGS), (e) => e.code === "USAGE" && /เสร็จแล้ว/.test(e.message));

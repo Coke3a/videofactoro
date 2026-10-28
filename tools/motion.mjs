@@ -218,7 +218,9 @@ async function work({ dir, ctx, state, key, prompt, total, audio, places, warnin
   // composition ของ HyperFrames อยู่ใน hf/ แยกจากเสียงและวิดีโอ (lint ไม่เห็นไฟล์เสียงที่ไม่ได้ใช้)
   const hdir = join(rdir, "hf");
   mkdirSync(rdir, { recursive: true });
-  writeJsonAtomic(join(rdir, "plan.json"), { prompt, total, ...story, ...plan });
+  // characters ระดับบนสุด: เครื่องมือปลายทาง (skill video-gen) อ่านรายชื่อตัวละครจากตรงนี้
+  const cast = [...new Set(plan.scenes.flatMap((s) => s.cast.map((c) => c.who)))].sort();
+  writeJsonAtomic(join(rdir, "plan.json"), { prompt, total, ...story, characters: cast, ...plan });
   const meta = { project: slug, motion: id, item: id, run };
 
   const jobs = plan.scenes.flatMap((sc, si) => sc.lines.map((line, li) => ({ key: lineKey(si, li), line })));
