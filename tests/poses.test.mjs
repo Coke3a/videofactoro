@@ -17,7 +17,7 @@ const B64 = fs.readFileSync(fileURLToPath(new URL("./fixtures/tiny.png", import.
 const ENV = { CLOUDFLARE_AI_ACCOUNT_ID: "acc1", CLOUDFLARE_AI_API_TOKEN: "tok-secret-123456" };
 const ENV_KEYS = [...Object.keys(ENV), "VF_PROJECTS"];
 
-let root, saved, calls, origWrite, dir, qaBad, noul;
+let root, saved, calls, origWrite, dir, qaBad, noul, failTalk;
 const reply = (result) => ({ ok: true, status: 200, text: async () => JSON.stringify({ success: true, result }) });
 const klein = () => calls.filter((c) => c.body?.model === MODELS.imageFast);
 const clefCalls = () => calls.filter((c) => c.url.includes("clef-omni"));
@@ -34,6 +34,9 @@ function install() {
         k, { noul: k in noul ? pick(k) : k === "has_text" || k === "has_people_or_animals" ? 0 : k === "single_character" && qaBad ? 0.1 : 0.9 },
       ]));
       return reply({ answers, usage: { prompt_tokens: 1500 } });
+    }
+    if (failTalk && body?.model === MODELS.imageFast && body.input?.prompt?.includes("Edit image 1")) {
+      return { ok: false, status: 500, text: async () => "boom" };
     }
     if (body?.model === MODELS.image || body?.model === MODELS.imageFast) return reply({ image: B64 });
     if (body?.model === MODELS.llm[0]) {
@@ -54,6 +57,7 @@ beforeEach(async () => {
   cf.setSleep(async () => {});
   qaBad = false;
   noul = {};
+  failTalk = false;
   install();
   origWrite = process.stderr.write;
   process.stderr.write = () => true;
@@ -162,16 +166,56 @@ test("ตัวละครที่ไม่มี → USAGE; รันซ้�
   await assert.rejects(run(["--poses", "fly", "--replace"]), (e) => e.code === "USAGE");
 });
 
-test("--replace เก็บชุดเดิมไว้ poses-old-* และสร้างชุดใหม่", async () => {
+const olds = () => fs.readdirSync(path.join(dir, "characters", "cat")).filter((n) => n.startsWith("poses-old-"));
+const oldDir = () => path.join(dir, "characters", "cat", olds()[0]);
+const readPj = () => JSON.parse(fs.readFileSync(path.join(posesDir(), "poses.json"), "utf8"));
+
+test("--replace ไม่มี --poses: เก็บทั้งชุดไว้ poses-old-* และสร้างใหม่ทั้งชุด", async () => {
   await run(["--poses", "idle"]);
   fs.writeFileSync(path.join(posesDir(), "marker.txt"), "old");
-  const r = await run(["--poses", "idle,sad", "--replace"]);
-  assert.deepEqual(r.poses, ["idle", "sad"]);
-  const olds = fs.readdirSync(path.join(dir, "characters", "cat")).filter((n) => n.startsWith("poses-old-"));
-  assert.equal(olds.length, 1);
-  assert.ok(fs.existsSync(path.join(dir, "characters", "cat", olds[0], "marker.txt")));
+  const r = await run(["--replace"]);
+  assert.deepEqual(r.poses, Object.keys(DEFAULT_POSES));
+  assert.equal(olds().length, 1);
+  assert.ok(fs.existsSync(path.join(oldDir(), "marker.txt")));
+  assert.ok(fs.existsSync(path.join(oldDir(), "idle.png")));
   assert.ok(!fs.existsSync(path.join(posesDir(), "marker.txt")));
-  assert.equal(loadPoses(dir, "cat").names.length, 2);
+  assert.equal(loadPoses(dir, "cat").names.length, 6);
+});
+
+test("--replace --poses: เก็บเฉพาะไฟล์ท่าที่ระบุ แล้วรวมเข้า poses.json เดิม ท่าอื่นไม่ถูกแตะ", async () => {
+  await run(["--poses", "idle,sad"]);
+  for (const f of ["idle.png", "idle-talk.png", "sad.png", "sad-talk.png"]) fs.writeFileSync(path.join(posesDir(), f), `OLD ${f}`);
+  fs.writeFileSync(path.join(posesDir(), "marker.txt"), "old");
+  const before = readPj();
+  calls.length = 0;
+  const r = await run(["--poses", "idle,happy", "--replace"]);
+  assert.deepEqual(r.poses, ["idle", "sad", "happy"]);
+  // seed ใหม่ (ไม่ใช้ cache) → เรียก klein จริงสำหรับ idle และ happy (ท่า + อ้าปาก)
+  assert.equal(klein().length, 4);
+  assert.equal(olds().length, 1);
+  assert.deepEqual(fs.readdirSync(oldDir()).sort(), ["idle-talk.png", "idle.png", "poses.json"]);
+  assert.equal(fs.readFileSync(path.join(oldDir(), "idle.png"), "utf8"), "OLD idle.png");
+  assert.equal(fs.readFileSync(path.join(posesDir(), "sad.png"), "utf8"), "OLD sad.png");
+  assert.equal(fs.readFileSync(path.join(posesDir(), "sad-talk.png"), "utf8"), "OLD sad-talk.png");
+  assert.notEqual(fs.readFileSync(path.join(posesDir(), "idle.png"), "utf8").slice(0, 3), "OLD");
+  assert.ok(fs.existsSync(path.join(posesDir(), "marker.txt")));
+  const pj = readPj();
+  assert.deepEqual(Object.keys(pj.poses), ["idle", "sad", "happy"]);
+  assert.deepEqual(pj.poses.sad, before.poses.sad);
+});
+
+test("--replace --poses ที่ล้มกลางทางรันซ้ำได้ เก็บของเดิมครั้งเดียวและรวมครบ", async () => {
+  await run(["--poses", "idle,sad"]);
+  failTalk = true;
+  await assert.rejects(run(["--poses", "idle", "--replace"]), (e) => e.code === "PROVIDER");
+  assert.equal(olds().length, 1);
+  failTalk = false;
+  const r = await run(["--poses", "idle", "--replace"]);
+  assert.deepEqual(r.poses, ["idle", "sad"]);
+  assert.equal(olds().length, 1);
+  assert.deepEqual(fs.readdirSync(oldDir()).sort(), ["idle-talk.png", "idle.png", "poses.json"]);
+  assert.deepEqual(Object.keys(readPj().poses), ["idle", "sad"]);
+  assert.ok(fs.existsSync(path.join(posesDir(), "idle-talk.png")));
 });
 
 test("ท่าที่ QA ไม่ผ่านถูกเก็บไว้พร้อม warnings และ reroll 1 ครั้ง", async () => {

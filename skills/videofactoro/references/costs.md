@@ -55,7 +55,7 @@ Split: video 39 %, images 37 %, music 18 %, LLM + TTS + QA 6 %. 32 video attempt
 
 ## Motion v2 (HyperFrames + GSAP pose sprites)
 
-- `vf character poses`: about $0.04 per character, once (6 poses and their talk twins, with QA).
+- `vf character poses`: about $0.04 per character, once (6 poses and their talk twins, each QA'd; up to ≈ $0.08 when every reroll runs).
 - `vf prop add`: about $0.001 per prop. Stage spots: one cheap clef call per place, cached.
 - `vf motion`: about $0.02–0.03 per clip (story and scene LLM, TTS, staging checks) + music: $0 from the shared library, $0.2275 for a new 90 s track. `--dry-run` prices the worst case (new track).
 - Render time is CPU, not money: about 3.5× the clip length on 2 vCPU; one render at a time.

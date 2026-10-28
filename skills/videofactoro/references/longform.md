@@ -29,7 +29,7 @@ Video QA is not run per shot (it is a weak signal and slow). Inspect a contact s
 
 ## `vf motion` setup (before the first run)
 
-1. `vf character poses <project> <character>`: once per character, a background job (`vf wait`). It draws 6 poses (idle, happy, scared, sad, curious, run), cuts each out to a transparent png and makes a mouth-open "talk" twin. About $0.04 per character. `--poses idle,happy` makes a subset, `--replace` redoes the set (the old one is kept as `poses-old-*`). Files: `characters/<id>/poses/` (`poses.json`, `<pose>.png`, `<pose>-talk.png`).
+1. `vf character poses <project> <character>`: once per character, a background job (`vf wait`). It draws 6 poses (idle, happy, scared, sad, curious, run), cuts each out to a transparent png and makes a mouth-open "talk" twin. About $0.04 per character. `--poses idle,happy` makes a subset, `--replace` redoes the whole set, `--replace --poses happy,run` redoes only those poses and keeps the rest (replaced files are kept in `poses-old-*`). Talk twins are checked against their pose so the eyes do not flicker with the mouth. Files: `characters/<id>/poses/` (`poses.json`, `<pose>.png`, `<pose>-talk.png`).
 2. `vf prop add <project> --prompt "a red rubber ball" [--id ball]`: optional, about $0.001 per prop, files in `props/<id>/`. Default id = first 3 words of the prompt, slugified; a prompt with no Latin words (Thai) needs `--id` (a-z, 0-9, `-`). A duplicate id = USAGE. Props named by the story plan are created automatically during `vf motion`.
 3. Stage spots: where characters may stand on a place. Computed once per place by clef (cheap) and cached in `places/<id>/place.json`; never asked again.
 
