@@ -142,7 +142,7 @@ function dryRun(total, audio, places, warnings) {
   };
 }
 
-async function work({ dir, ctx, state, key, prompt, total, audio, places, warnings: early, run: fresh }) {
+async function work({ dir, ctx, state, key, id: given, prompt, total, audio, places, warnings: early, run: fresh }) {
   const { pj, slug, lang, characters } = ctx;
   const run = pinRun(state, fresh);
   const costDir = join(dir, ".vf");
@@ -213,7 +213,8 @@ async function work({ dir, ctx, state, key, prompt, total, audio, places, warnin
     return { scenes: normalizeScenePlan(data).scenes };
   });
 
-  const id = `${slugify(story.title).slice(0, 40).replace(/-+$/, "")}-${key.slice(-4)}`;
+  // --id ที่ผู้ใช้ตั้ง = id คลิปและชื่อไฟล์ render ตรง ๆ; ไม่ใส่ → ตั้งจากชื่อเรื่อง + ท้าย hash
+  const id = given ?? `${slugify(story.title).slice(0, 40).replace(/-+$/, "")}-${key.slice(-4)}`;
   const base = `motions/${id}`;
   const rdir = join(dir, base);
   // composition ของ HyperFrames อยู่ใน hf/ แยกจากเสียงและวิดีโอ (lint ไม่เห็นไฟล์เสียงที่ไม่ได้ใช้)
@@ -401,6 +402,6 @@ export async function main(argv) {
     ...(values["no-reuse"] ? ["--no-reuse"] : []), ...(values["max-rerolls"] !== undefined ? [`--max-rerolls=${values["max-rerolls"]}`] : [])];
   return await runEntity({
     dir, projectRef: positionals[0], slug: ctx.slug, command, label: `motion ${key}`, foreground: values.foreground,
-    work: ({ run }) => work({ dir, ctx, state: openRun(), key, prompt, total, audio, places, warnings, run }),
+    work: ({ run }) => work({ dir, ctx, state: openRun(), key, id, prompt, total, audio, places, warnings, run }),
   });
 }

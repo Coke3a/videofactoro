@@ -158,6 +158,20 @@ test("motion: story → props → stage → scenes → tts → compose → lint 
   await assert.rejects(motion(ARGS), (e) => e.code === "USAGE" && /เสร็จแล้ว/.test(e.message));
 });
 
+test("motion --id: ใช้เป็น id ของคลิปและชื่อไฟล์ render; id ผิดรูป → USAGE", async () => {
+  setRunner(stubRunner());
+  const r = await motion([...ARGS, "--id", "cheese-chase-v2"]);
+  assert.equal(r.motion.id, "cheese-chase-v2");
+  assert.equal(r.motion.file, path.join(dir, "renders", "cheese-chase-v2.mp4"));
+  assert.equal(r.motion.dir, path.join(dir, "motions", "cheese-chase-v2"));
+  assert.ok(fs.existsSync(r.motion.file));
+  const n = calls.length;
+  for (const bad of ["Cheese_Chase", "9lives", "x"]) {
+    await assert.rejects(motion([...ARGS, "--id", bad]), (e) => e.code === "USAGE" && /--id/.test(e.message), bad);
+  }
+  assert.equal(calls.length, n, "id ผิดรูปไม่เรียก API");
+});
+
 test("motion: ตัวละครที่ยังไม่มีท่า → USAGE บอกคำสั่ง ไม่เรียก API เลย", async () => {
   setRunner(stubRunner());
   fs.rmSync(path.join(dir, "characters", "dog", "poses"), { recursive: true });
