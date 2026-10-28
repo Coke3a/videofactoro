@@ -76,6 +76,23 @@ const plan = () => ({
 
 const OPTS = (p, extra = {}) => ({ total: Math.round(estimateSeconds(p, "en")), lang: "en", narrator: true, ...extra });
 
+test("one place for a long plan when several exist → issue; short plan or one place available → fine", () => {
+  const one = plan();
+  for (const sc of one.scenes) sc.place = "kitchen";
+  // s01/s04 ใช้ spot ที่ kitchen มีอยู่แล้ว
+  const issues = validateScenePlan(one, ASSETS, OPTS(one));
+  assert.deepEqual(issues, ["all 10 scenes are in kitchen: move the story through 2–3 places (have: living, hallway, kitchen)"]);
+  assert.deepEqual(validateScenePlan(one, { ...ASSETS, places: { kitchen: SPOTS } }, OPTS(one)), []);
+  const short = plan();
+  short.scenes = short.scenes.slice(4, 9);
+  assert.equal(short.scenes.length, 5);
+  assert.deepEqual(validateScenePlan(short, ASSETS, OPTS(short)), []);
+  const two = plan();
+  for (const sc of two.scenes) sc.place = "kitchen";
+  two.scenes[9].place = "living";
+  assert.deepEqual(validateScenePlan(two, ASSETS, OPTS(two)), []);
+});
+
 test("enums and timing constants", () => {
   assert.deepEqual(CAMERAS, ["push", "push-fast", "pan-left", "pan-right", "static"]);
   assert.deepEqual(ENTERS, ["drop", "slide-left", "slide-right"]);
@@ -225,6 +242,11 @@ test("prompts mention the target, language, assets and narrator rule", () => {
   for (const s of ["60", "hallway", "far-right", "marmalade", "whirr", "12"]) assert.ok(on.includes(s), s);
   assert.notEqual(on, off);
   assert.match(off, /no narrator/i);
+  // หลายสถานที่ → สั่งให้ย้ายที่ 2–3 แห่ง; ที่เดียว → ไม่พูดถึง
+  assert.match(sp, /2–3 of these places/);
+  assert.match(on, /Use 2–3 different places/);
+  assert.doesNotMatch(storySystemPrompt("en", 45, { ...ctx, places: ["living"] }), /2–3 of these places/);
+  assert.doesNotMatch(scenesSystemPrompt("en", 60, { ...ASSETS, places: { living: SPOTS } }), /different places/);
 });
 
 const story = () => ({

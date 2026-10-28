@@ -19,6 +19,8 @@ export const MAX_CAST = 3;
 export const STAMP_MAX = 12;
 export const TOTAL_TOLERANCE = 0.15;
 export const SCENE_MAX = 12;
+// คลิปแรกจริงอยู่ห้องเดียวทั้ง 12 ฉากทั้งที่มี 3 สถานที่ → ฉากเยอะพอแล้วต้องย้ายที่
+export const MULTI_PLACE_SCENES = 6;
 const LINE_SECONDS = 6;
 
 const str = { type: "string" };
@@ -118,6 +120,9 @@ export function storySystemPrompt(lang, total, ctx = {}) {
     "- Use only these characters, and only actions their poses can show:",
     ...(chars.length ? chars : ["  (none)"]),
     `- Places available: ${(ctx.places ?? []).join(", ") || "(none)"}. Stay in these places.`,
+    (ctx.places ?? []).length >= 2
+      ? "- Move the story through 2–3 of these places (e.g. start in one room, chase into another, end somewhere new); say in the beat text where it happens."
+      : "",
     "- Existing props:",
     ...(props.length ? props : ["  (none)"]),
     "- props_needed: every prop the story uses. Reuse an existing id when it fits; a new prop gets a new id (a-z, 0-9, -, starts with a letter) and a short English visual description of one object. Keep props few (0–3).",
@@ -142,6 +147,9 @@ export function scenesSystemPrompt(lang, total, raw, { narrator = false } = {}) 
     ...poses,
     "- Spots per place:",
     ...places,
+    places.length >= 2
+      ? `- Use 2–3 different places, following where the outline says things happen: change place at a story turn (a chase leads into another room, the twist or button happens somewhere new). Keep neighbouring scenes in one place while the action stays there. With ${MULTI_PLACE_SCENES}+ scenes, one place for the whole clip is rejected.`
+      : "",
     `- props: { id, spot, enter? } from: ${(assets.props ?? []).join(", ") || "(none)"}.`,
     `- lines: short, in ${lang}, at most ${max} ${unitEn(lang)} each. who is ${narrator ? '"narrator" or ' : ""}a character in that scene's cast.`,
     narrator ? "- The narrator tells the story briefly; characters speak their own short lines." : "- There is no narrator in this project: every line is spoken by a character in the cast.",
@@ -150,7 +158,7 @@ export function scenesSystemPrompt(lang, total, raw, { narrator = false } = {}) 
     "- Make it move: most scenes need at least one beat. Every beat must change something: a pose, a move, an fx or an sfx (a beat with only text, who or dur is dropped). End on the button gag.",
     `- Every scene needs 1–${MAX_CAST} cast characters, each standing on a named spot; never leave cast empty.`,
     "- No real people, brands or copyrighted characters.",
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 }
 
 const lineSeconds = (lang, text) => narrationSize(lang, String(text ?? "")) / rate(lang);
@@ -335,6 +343,12 @@ export function validateScenePlan(plan, raw, { total, lang = "en", narrator = fa
     const secs = sceneSeconds(sc, lang);
     if (secs > SCENE_MAX) issues.push(`${tag} (scene ${i + 1}) is about ${secs.toFixed(1)}s, max ${SCENE_MAX}s: split it or cut lines`);
   });
+
+  const placeIds = Object.keys(assets.places);
+  const used = uniq(scenes.map((sc) => sc?.place).filter((p) => Object.hasOwn(assets.places, p ?? "")));
+  if (placeIds.length >= 2 && scenes.length >= MULTI_PLACE_SCENES && used.length === 1) {
+    issues.push(`all ${scenes.length} scenes are in ${used[0]}: move the story through 2–3 places (have: ${placeIds.join(", ")})`);
+  }
 
   if (Number.isFinite(total)) {
     const est = estimateSeconds(plan, lang);
