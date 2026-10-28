@@ -153,10 +153,11 @@ test("ภาพอ้าปากผ่านใน reroll ครั้งแร
   assert.equal(klein().filter((c) => c.body.input.prompt.includes("Edit image 1")).length, 2);
 });
 
-test("TALK_PROMPT คงตา คิ้ว น้ำตา หู อุ้งเท้า ไว้เหมือนเดิม และยังห้ามฉากหลัง", () => {
-  for (const w of ["eyes", "open or closed", "gaze", "eyebrows", "tears", "ears", "paws", "Change only the mouth", "room, furniture, window or scenery"]) {
+test("TALK_PROMPT คงตา คิ้ว หู อุ้งเท้า ไว้เหมือนเดิม ไม่เอ่ยถึงน้ำตา และยังห้ามฉากหลัง", () => {
+  for (const w of ["eyes", "open or closed", "gaze", "eyebrows", "ears", "paws", "Change only the mouth", "room, furniture, window or scenery"]) {
     assert.ok(TALK_PROMPT.includes(w), w);
   }
+  assert.ok(!/tear/i.test(TALK_PROMPT), "ไม่เอ่ยถึงน้ำตา");
 });
 
 test("ตัวละครที่ไม่มี → USAGE; รันซ้ำไม่มี --replace → USAGE มีท่าแล้ว", async () => {
