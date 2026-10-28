@@ -31,7 +31,7 @@ function install() {
       // noul[k] = ตัวเลข หรือ array ที่ใช้ทีละค่าต่อการเรียก
       const pick = (k) => (Array.isArray(noul[k]) ? (noul[k].length > 1 ? noul[k].shift() : noul[k][0]) : noul[k]);
       const answers = Object.fromEntries(Object.keys(body.questions).map((k) => [
-        k, { noul: k in noul ? pick(k) : k === "has_text" || k === "has_people_or_animals" ? 0 : k === "single_character" && qaBad ? 0.1 : 0.9 },
+        k, { noul: k in noul ? pick(k) : k === "has_text" || k === "has_people_or_animals" || k === "odd_eyes" ? 0 : k === "single_character" && qaBad ? 0.1 : 0.9 },
       ]));
       return reply({ answers, usage: { prompt_tokens: 1500 } });
     }
@@ -108,10 +108,10 @@ test("รันจริง: 12 ไฟล์ + poses.json 6 ท่า, talk ใ�
   // QA ท่า 6 ครั้ง (ภาพเดียว มีคำถามเรื่องตาพร้อมชื่อท่า) + QA ภาพอ้าปาก 6 ครั้ง (ภาพท่า + ภาพอ้าปาก)
   const qa = clefCalls().map((c) => c.body);
   assert.equal(qa.length, 12);
-  const poseQa = qa.filter((b) => "natural_eyes" in b.questions);
+  const poseQa = qa.filter((b) => "odd_eyes" in b.questions);
   assert.equal(poseQa.length, 6);
   assert.ok(poseQa.every((b) => b.images.length === 1));
-  assert.ok(poseQa.some((b) => b.questions.natural_eyes.instructions.includes('"sad"')));
+  assert.ok(poseQa.some((b) => b.questions.odd_eyes.instructions.includes('"sad"')));
   const talkQa = qa.filter((b) => "same_except_mouth" in b.questions);
   assert.equal(talkQa.length, 6);
   assert.ok(talkQa.every((b) => b.images.length === 2 && "mouth_more_open" in b.questions));
@@ -123,7 +123,7 @@ test("รันจริง: 12 ไฟล์ + poses.json 6 ท่า, talk ใ�
 });
 
 test("ท่าตาแปลก → reroll และเก็บภาพตาปกติ", async () => {
-  noul = { natural_eyes: [0.1, 0.9] };
+  noul = { odd_eyes: [0.9, 0.1] };
   const r = await run(["--poses", "curious"]);
   assert.equal(r.warnings, undefined);
   const pose = klein().filter((c) => !c.body.input.prompt.includes("Edit image 1"));

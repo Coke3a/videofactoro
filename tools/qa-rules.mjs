@@ -13,8 +13,9 @@ export const KEY_TEXT_MAX = 0.3;
 export const VIDEO_CONSISTENT_MIN = 0.6;
 export const VIDEO_MORPH_MIN = 0.6;
 export const VIDEO_FOLLOWS_MIN = 0.5;
-// ท่า: ตาแปลก (หรี่ข้างเดียว ตาเหล่) = ไม่ผ่าน; น้ำหนักทำให้ภาพตาปกติชนะเมื่อไม่มีภาพไหนผ่าน
-export const POSE_EYES_MIN = 0.5;
+// ท่า: ถามตรง ๆ ว่าตาแปลกไหม (odd_eyes ≥ 0.5 = ไม่ผ่าน); น้ำหนักทำให้ภาพตาปกติชนะเมื่อไม่มีภาพไหนผ่าน
+// คำถามเดิมแบบปฏิเสธซ้อน (natural_eyes) ทำให้ clef ให้ท่า curious ตาโตปกติแค่ 0.27–0.30
+export const POSE_ODD_EYES_MAX = 0.5;
 export const POSE_EYES_WEIGHT = 0.5;
 // ภาพอ้าปาก: ต้องเหมือนภาพท่าเท่ากับเกณฑ์ "ตัวเดียวกัน" ของ keyframe
 export const TALK_SAME_MIN = 0.6;
@@ -60,14 +61,14 @@ export const RULES = {
     state: (ctx) => `A character pose image. Pose "${ctx.pose}": ${ctx.action}. Art style: ${ctx.style}.`,
     questions: (ctx) => ({
       ...RULES.characterRef.questions(ctx),
-      natural_eyes: q(`Are both eyes drawn clearly and naturally (no half-closed, crossed, rolled or mismatched eye)? The pose is "${ctx.pose}" (${ctx.action}); answer yes for closed or teary eyes only if this pose asks for them.`),
+      odd_eyes: q(`Is either eye drawn oddly: half-closed or squinting when the other is open, crossed, rolled sideways, or the two eyes mismatched in shape or size? The pose is "${ctx.pose}" (${ctx.action}); closed or teary eyes are not odd if this pose asks for them.`),
     }),
     judge(a) {
       const v = RULES.characterRef.judge(a);
-      const eyes = good(a, "natural_eyes");
+      const odd = bad(a, "odd_eyes");
       const reasons = [...v.reasons];
-      if (!(eyes >= POSE_EYES_MIN)) reasons.push(`ตาผิดปกติ (${eyes.toFixed(2)} < ${POSE_EYES_MIN})`);
-      return { pass: reasons.length === 0, score: v.score + POSE_EYES_WEIGHT * eyes, reasons };
+      if (!(odd < POSE_ODD_EYES_MAX)) reasons.push(`ตาผิดปกติ (${odd.toFixed(2)} ≥ ${POSE_ODD_EYES_MAX})`);
+      return { pass: reasons.length === 0, score: v.score + POSE_EYES_WEIGHT * (1 - odd), reasons };
     },
   },
   // ภาพ 1 = ท่า, ภาพ 2 = ภาพอ้าปากของท่านั้น

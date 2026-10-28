@@ -129,19 +129,26 @@ test("placePlate.judge score และเกณฑ์", () => {
   assert.equal(RULES.placePlate.judge(place(0.4)).pass, false);
 });
 
-const poseA = (eyes) => ({ matches_look: n(0.9), single_character: n(0.9), has_text: n(0), full_body: n(0.9), natural_eyes: n(eyes) });
+const poseA = (odd) => ({ matches_look: n(0.9), single_character: n(0.9), has_text: n(0), full_body: n(0.9), odd_eyes: n(odd) });
 
 test("characterPose: ตาแปลกไม่ผ่านและแพ้ภาพตาปกติ; คำถามมีชื่อท่า", () => {
-  const odd = RULES.characterPose.judge(poseA(0.1));
-  const normal = RULES.characterPose.judge(poseA(0.9));
+  const odd = RULES.characterPose.judge(poseA(0.9));
+  const normal = RULES.characterPose.judge(poseA(0.1));
   assert.equal(odd.pass, false);
   assert.ok(odd.reasons.some((r) => r.includes("ตา")));
   assert.equal(normal.pass, true);
   assert.ok(normal.score > odd.score);
   assert.equal(RULES.characterPose.judge({}).pass, false);
+  // เกณฑ์ที่ขอบ: 0.5 ไม่ผ่าน, ต่ำกว่าผ่าน; คะแนนใช้ 1 − odd
+  assert.equal(RULES.characterPose.judge(poseA(0.5)).pass, false);
+  assert.equal(RULES.characterPose.judge(poseA(0.49)).pass, true);
+  assert.ok(Math.abs(normal.score - (0.9 + 0.2 * 0.9 - 0 + 0.5 * 0.9)) < 1e-9);
   const qs = RULES.characterPose.questions({ look: "orange cat", style: "anime", pose: "sad", action: "teary eyes" });
-  assert.match(qs.natural_eyes.instructions, /sad/);
-  assert.match(qs.natural_eyes.instructions, /closed/);
+  assert.ok(!("natural_eyes" in qs));
+  assert.match(qs.odd_eyes.instructions, /^Is either eye drawn oddly/);
+  assert.match(qs.odd_eyes.instructions, /half-closed or squinting.*crossed.*rolled sideways.*mismatched/);
+  assert.match(qs.odd_eyes.instructions, /"sad" \(teary eyes\)/);
+  assert.match(qs.odd_eyes.instructions, /closed or teary eyes are not odd/);
   assert.match(qs.matches_look.instructions, /orange cat/);
 });
 
