@@ -1,5 +1,5 @@
 import { riskFindings } from "./risk.mjs";
-import { narrationBudget, narrationSize, WORDS_PER_SEC, CHARS_PER_SEC } from "./clip.mjs";
+import { narrationBudget, narrationSize, CHARS_PER_SEC } from "./clip.mjs";
 import { ID_RE } from "./bible.mjs";
 
 export const CAMERAS = ["push", "push-fast", "pan-left", "pan-right", "static"];
@@ -22,6 +22,9 @@ export const SCENE_MAX = 12;
 // คลิปแรกจริงอยู่ห้องเดียวทั้ง 12 ฉากทั้งที่มี 3 สถานที่ → ฉากเยอะพอแล้วต้องย้ายที่
 export const MULTI_PLACE_SCENES = 6;
 const LINE_SECONDS = 6;
+// อัตราพูดจริงของ TTS ใน motion (ภาษาเว้นวรรค): คลิปแรก 92 คำ / 32.9 วิ (ตัดเงียบแล้ว) = 2.8 คำ/วิ
+// WORDS_PER_SEC 2.2 ของ clip.mjs ทำให้ประเมินเกิน → คลิปเป้า 60 วิออกมา 50 วิ; คำสั่งอื่นยังใช้ค่าเดิม
+export const MOTION_WPS = 2.8;
 
 const str = { type: "string" };
 const num = { type: "number" };
@@ -34,7 +37,9 @@ const withDefaults = (a) => ({
 });
 const spaced = (lang) => narrationBudget(lang, 1).unit === "คำ";
 const unitEn = (lang) => (spaced(lang) ? "words" : "characters");
-const rate = (lang) => (spaced(lang) ? WORDS_PER_SEC : CHARS_PER_SEC);
+const rate = (lang) => (spaced(lang) ? MOTION_WPS : CHARS_PER_SEC);
+// งบต่อบท: ไทยใช้งบตัวอักษรเดิม ภาษาเว้นวรรคนับตามอัตราพูดของ motion
+export const lineMax = (lang) => (spaced(lang) ? Math.floor((LINE_SECONDS - 1) * MOTION_WPS) : narrationBudget(lang, LINE_SECONDS).max);
 
 export const STORY_SCHEMA = {
   type: "object",
@@ -135,7 +140,7 @@ export function storySystemPrompt(lang, total, ctx = {}) {
 export function scenesSystemPrompt(lang, total, raw, { narrator = false } = {}) {
   const assets = withDefaults(raw);
   const n = Math.round(total / 5);
-  const { max } = narrationBudget(lang, LINE_SECONDS);
+  const max = lineMax(lang);
   const poses = Object.entries(assets.poses).map(([c, ps]) => `  - ${c}: ${ps.join(", ")}`);
   const places = Object.entries(assets.places).map(([p, ss]) => `  - ${p}: ${ss.join(", ")}`);
   return [
@@ -233,7 +238,7 @@ export function validateScenePlan(plan, raw, { total, lang = "en", narrator = fa
   const chars = assets.poses;
   const propIds = new Set(assets.props);
   const sfx = new Set(assets.sfx);
-  const { max } = narrationBudget(lang, LINE_SECONDS);
+  const max = lineMax(lang);
   const risky = (label, text) => {
     for (const f of riskFindings(String(text ?? ""))) issues.push(`${label} has a risk word: ${f.matched}`);
   };
