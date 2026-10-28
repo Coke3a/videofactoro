@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   CAMERAS, ENTERS, MOVES, FX, LEAD, GAP, TAIL, SCENE_MIN,
-  MOTION_WPS, lineMax, STORY_SCHEMA, scenesSchema, storySystemPrompt, scenesSystemPrompt, validateScenePlan, normalizeScenePlan, estimateSeconds, validateStory, sceneSeconds,
+  MOTION_WPS, TOTAL_TOLERANCE, lineMax, STORY_SCHEMA, scenesSchema, storySystemPrompt, scenesSystemPrompt, validateScenePlan, normalizeScenePlan, estimateSeconds, validateStory, sceneSeconds,
 } from "../tools/motion-plan.mjs";
 import { geminiStrip, anthropicStrip } from "../tools/llm.mjs";
 
@@ -145,16 +145,18 @@ test("total far from target names both numbers", () => {
   assert.ok(est > 25 && est < 35, String(est));
   const issues = validateScenePlan(p, ASSETS, { total: 60, lang: "en", narrator: true });
   assert.equal(issues.length, 1, issues.join("\n"));
-  assert.equal(issues[0], `estimated ${est.toFixed(1)}s, target 60s (±15%): add lines or scenes`);
+  assert.equal(issues[0], `estimated ${est.toFixed(1)}s, target 60s (±10%): add lines or scenes`);
+  assert.equal(TOTAL_TOLERANCE, 0.1);
+  assert.match(scenesSystemPrompt("en", 60, ASSETS), /within ±10% of 60s/);
 });
 
 test("estimateSeconds follows lead + lines + gaps + tail with a floor", () => {
   // อัตราพูดที่วัดจากคลิปจริง ไม่ใช่ WORDS_PER_SEC 2.2 ของ clip.mjs
-  assert.equal(MOTION_WPS, 2.8);
+  assert.equal(MOTION_WPS, 2.68);
   const one = { scenes: [{ lines: [{ who: "narrator", text: "one two three four five six seven eight nine ten eleven" }] }] };
-  assert.equal(Math.round(estimateSeconds(one, "en") * 1000), Math.round((0.45 + 11 / 2.8 + 0.7) * 1000));
-  const two = { scenes: [{ lines: [{ text: "a b c d e f g h i j k l m n" }, { text: "a b c d e f g h i j k l m n" }] }, { lines: [] }, { lines: [{ text: "hi" }] }] };
-  assert.equal(Math.round(estimateSeconds(two, "en") * 1000), Math.round((0.45 + 10 + 0.3 + 0.7 + 3 + 3) * 1000));
+  assert.equal(Math.round(estimateSeconds(one, "en") * 1000), Math.round((0.45 + 11 / 2.68 + 0.7) * 1000));
+  const two = { scenes: [{ lines: [{ text: "a b c d e f g h i j k l m" }, { text: "a b c d e f g h i j k l m n" }] }, { lines: [] }, { lines: [{ text: "hi" }] }] };
+  assert.equal(Math.round(estimateSeconds(two, "en") * 1000), Math.round((0.45 + 27 / 2.68 + 0.3 + 0.7 + 3 + 3) * 1000));
   const th = { scenes: [{ lines: [{ text: "ก".repeat(55) }] }] };
   assert.equal(Math.round(estimateSeconds(th, "th") * 1000), Math.round((0.45 + 5 + 0.7) * 1000));
 });
@@ -168,16 +170,16 @@ test("Thai lines use the character budget", () => {
   assert.match(issues[0], /s02 line 2/);
   assert.match(issues[0], /56/);
   assert.match(issues[0], /55/);
-  // ภาษาอังกฤษนับคำตามอัตรา motion: 15 คำ > 14 (= 5 วิ × 2.8)
-  assert.equal(lineMax("en"), 14);
+  // ภาษาอังกฤษนับคำตามอัตรา motion: 14 คำ > 13 (= 5 วิ × 2.68)
+  assert.equal(lineMax("en"), 13);
   assert.equal(lineMax("th"), 55);
   const q = plan();
-  q.scenes[1].lines[1].text = "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen";
-  assert.ok(validateScenePlan(q, ASSETS, OPTS(q)).some((s) => /s02 line 2/.test(s) && /15/.test(s) && /14/.test(s)));
   q.scenes[1].lines[1].text = "one two three four five six seven eight nine ten eleven twelve thirteen fourteen";
+  assert.ok(validateScenePlan(q, ASSETS, OPTS(q)).some((s) => /s02 line 2/.test(s) && /14/.test(s) && /13/.test(s)));
+  q.scenes[1].lines[1].text = "one two three four five six seven eight nine ten eleven twelve thirteen";
   assert.ok(!validateScenePlan(q, ASSETS, OPTS(q)).some((s) => /s02 line 2/.test(s)));
-  assert.match(scenesSystemPrompt("en", 60, ASSETS), /at most 14 words each/);
-  assert.match(scenesSystemPrompt("en", 60, ASSETS), /about 2\.8 words\/s/);
+  assert.match(scenesSystemPrompt("en", 60, ASSETS), /at most 13 words each/);
+  assert.match(scenesSystemPrompt("en", 60, ASSETS), /about 2\.68 words\/s/);
 });
 
 test("ids, cast count, ride, props, sfx, stamp, narrator, scene count, risk", () => {

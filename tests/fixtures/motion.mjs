@@ -42,7 +42,7 @@ const sc = (i, narrator = true) => ({
   id: `s0${i}`, place: "kitchen", camera: i % 2 ? "push" : "static",
   cast: [{ who: "cat", spot: "left", pose: "idle", enter: "drop" }, { who: "dog", spot: "right", pose: "idle" }],
   props: i === 1 ? [{ id: "ball", spot: "center" }] : [],
-  lines: [{ who: narrator ? "narrator" : "cat", text: "The cat sees something." }, { who: "dog", text: "Look at that ball!" }],
+  lines: [{ who: narrator ? "narrator" : "cat", text: "The cat sees something shiny." }, { who: "dog", text: "Look at that ball!" }],
   beats: [{ at: "line2", who: "cat", pose: "happy", move: "hop", sfx: "boing" }, { at: "1", fx: "shake", sfx: "whoosh" }],
 });
 // ประมาณ 5 วินาทีต่อฉาก × 4 = 20 วินาที (ตาม estimateSeconds)

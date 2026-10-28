@@ -17,14 +17,16 @@ export const SCENES_MIN = 4;
 export const SCENES_MAX = 14;
 export const MAX_CAST = 3;
 export const STAMP_MAX = 12;
-export const TOTAL_TOLERANCE = 0.15;
+// ±15% ปล่อยคลิปที่สองเป้า 60 วิให้ออกมา 71.7 วิ
+export const TOTAL_TOLERANCE = 0.1;
 export const SCENE_MAX = 12;
 // คลิปแรกจริงอยู่ห้องเดียวทั้ง 12 ฉากทั้งที่มี 3 สถานที่ → ฉากเยอะพอแล้วต้องย้ายที่
 export const MULTI_PLACE_SCENES = 6;
 const LINE_SECONDS = 6;
-// อัตราพูดจริงของ TTS ใน motion (ภาษาเว้นวรรค): คลิปแรก 92 คำ / 32.9 วิ (ตัดเงียบแล้ว) = 2.8 คำ/วิ
+// อัตราพูดจริงของ TTS ใน motion (ภาษาเว้นวรรค, ตัดเงียบแล้ว): คลิปแรก 92 คำ / 32.87 วิ = 2.80,
+// คลิปสอง 148 คำ / 56.8 วิ = 2.61 → รวม 240 คำ / 89.67 วิ ≈ 2.68 คำ/วิ
 // WORDS_PER_SEC 2.2 ของ clip.mjs ทำให้ประเมินเกิน → คลิปเป้า 60 วิออกมา 50 วิ; คำสั่งอื่นยังใช้ค่าเดิม
-export const MOTION_WPS = 2.8;
+export const MOTION_WPS = 2.68;
 
 const str = { type: "string" };
 const num = { type: "number" };
@@ -146,7 +148,7 @@ export function scenesSystemPrompt(lang, total, raw, { narrator = false } = {}) 
   return [
     `You turn a 5-part gag outline into the scene list of a ${total}-second kids' cartoon. Reply with JSON matching the schema only.`,
     `- scenes: about ${n} (${SCENES_MIN}–${SCENES_MAX}), following the outline in order. Each scene has a short id (s01, s02, ...), one place, one camera move (${CAMERAS.join(", ")}).`,
-    `- Timing: a scene lasts ${LEAD}s + its spoken lines (about ${rate(lang)} ${unitEn(lang)}/s) + ${GAP}s between lines + ${TAIL}s, at least ${SCENE_MIN}s. All scenes together must come within ±15% of ${total}s.`,
+    `- Timing: a scene lasts ${LEAD}s + its spoken lines (about ${rate(lang)} ${unitEn(lang)}/s) + ${GAP}s between lines + ${TAIL}s, at least ${SCENE_MIN}s. All scenes together must come within ±${TOTAL_TOLERANCE * 100}% of ${total}s.`,
     `- cast: 1–${MAX_CAST} characters per scene. Each stands only on a named spot of that place (spot), wears one of ITS OWN poses, may enter (${ENTERS.join(", ")}) and may ride a prop that is in the scene's props.`,
     "- Poses per character:",
     ...poses,
