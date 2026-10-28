@@ -109,6 +109,11 @@ test("motion: story → props → stage → scenes → tts → compose → lint 
   // โฟลเดอร์ของ HyperFrames มีแต่ composition (เสียง/วิดีโออยู่ชั้นนอก)
   assert.deepEqual(fs.readdirSync(path.join(m.dir, "hf")).sort(), ["assets", "fonts", "index.html", "vendor"]);
   for (const a of runner.seen) assert.equal(a[1], path.join(m.dir, "hf"), `hyperframes ${a[0]} ได้โฟลเดอร์ hf/`);
+  // temp ของ hyperframes อยู่ใต้ motions/<id>/.tmp ทุกคำสั่ง และถูกลบหลัง render สำเร็จ
+  const tmp = path.join(m.dir, ".tmp");
+  assert.equal(runner.envs.length, runner.seen.length);
+  for (const e of runner.envs) for (const k of ["TMPDIR", "TMP", "TEMP"]) assert.equal(e[k], tmp, k);
+  assert.ok(!fs.existsSync(tmp), "ลบ .tmp หลัง render สำเร็จ");
   assert.ok(fs.existsSync(path.join(dir, "props", "ball", "prop.png")), "prop ใหม่ถูกสร้างก่อนวางแผนฉาก");
   const html = fs.readFileSync(path.join(m.dir, "hf", "index.html"), "utf8");
   assert.match(html, /src="assets\/plate-kitchen\.jpg"/);

@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -28,9 +28,11 @@ export function hfBin() {
 
 // รันด้วย node ตัวเดียวกับ vf (ระบบอาจมี node เก่ากว่า 22 บน PATH)
 export const hfCommand = (args) => ({ cmd: process.execPath, args: [hfBin(), ...args] });
-export const hfEnv = (base = process.env) => ({
+// tmpDir: /tmp ของ sandbox เป็น tmpfs เล็ก (512 MB) แต่ render เขียนไฟล์ชั่วคราวใหญ่ → ชี้ไปดิสก์โปรเจกต์
+export const hfEnv = (base = process.env, tmpDir) => ({
   ...base,
   ...HF_ENV,
+  ...(tmpDir ? { TMPDIR: tmpDir, TMP: tmpDir, TEMP: tmpDir } : {}),
   PATH: [dirname(process.execPath), base.PATH].filter(Boolean).join(delimiter),
 });
 
@@ -69,8 +71,9 @@ export const setRunner = (fn) => { runner = fn ?? defaultRunner; };
 const text = (r) => (typeof r === "string" ? r : `${r?.stdout ?? ""}${r?.stderr ? `\n${r.stderr}` : ""}`);
 
 // lint ที่เจอ error ออก exit != 0 → ยังอ่านผลจาก stdout ของ error ได้
-async function exec(args) {
-  const env = hfEnv();
+async function exec(args, { tmpDir } = {}) {
+  if (tmpDir) mkdirSync(tmpDir, { recursive: true });
+  const env = hfEnv(process.env, tmpDir);
   try {
     return text(await runner(args, { env }));
   } catch (err) {
@@ -80,20 +83,20 @@ async function exec(args) {
   }
 }
 
-export async function hfLint(dir) {
-  const out = await exec(lintArgs({ dir }));
+export async function hfLint(dir, opts) {
+  const out = await exec(lintArgs({ dir }), opts);
   const m = /(\d+)\s+error\(s\),\s*(\d+)\s+warning\(s\)/.exec(out);
   if (!m) throw new VfError("INTERNAL", "อ่านผล hyperframes lint ไม่ได้", { text: out.slice(0, 400) });
   return { errors: Number(m[1]), warnings: Number(m[2]), text: out };
 }
 
-export async function hfRender(dir, out) {
+export async function hfRender(dir, out, opts) {
   const t0 = Date.now();
-  await exec(renderArgs({ dir, out }));
+  await exec(renderArgs({ dir, out }), opts);
   return { seconds: (Date.now() - t0) / 1000 };
 }
 
-export async function hfSnapshot(dir, at, outDir) {
-  await exec(snapshotArgs({ dir, at, outDir }));
+export async function hfSnapshot(dir, at, outDir, opts) {
+  await exec(snapshotArgs({ dir, at, outDir }), opts);
   return readdirSync(outDir).filter((f) => f.endsWith(".png")).sort().map((f) => join(outDir, f));
 }

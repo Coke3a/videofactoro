@@ -217,6 +217,8 @@ async function work({ dir, ctx, state, key, prompt, total, audio, places, warnin
   const rdir = join(dir, base);
   // composition ของ HyperFrames อยู่ใน hf/ แยกจากเสียงและวิดีโอ (lint ไม่เห็นไฟล์เสียงที่ไม่ได้ใช้)
   const hdir = join(rdir, "hf");
+  // temp ของ hyperframes อยู่บนดิสก์โปรเจกต์ (นอก hf/ เพื่อไม่ให้ lint/render เห็น)
+  const tmpDir = join(rdir, ".tmp");
   mkdirSync(rdir, { recursive: true });
   // characters ระดับบนสุด: เครื่องมือปลายทาง (skill video-gen) อ่านรายชื่อตัวละครจากตรงนี้
   const cast = [...new Set(plan.scenes.flatMap((s) => s.cast.map((c) => c.who)))].sort();
@@ -279,7 +281,7 @@ async function work({ dir, ctx, state, key, prompt, total, audio, places, warnin
 
   const lint = await step(state, "lint", async () => {
     log("ขั้น lint");
-    const r = await hfLint(hdir);
+    const r = await hfLint(hdir, { tmpDir });
     if (r.errors > 0) {
       // ให้รอบหน้า compose ใหม่จากแผนเดิม (ไม่เรียก LLM/TTS) แทนที่จะ lint HTML เดิมซ้ำ
       state.set("compose", { status: "stale" });
@@ -297,7 +299,7 @@ async function work({ dir, ctx, state, key, prompt, total, audio, places, warnin
     rmSync(snaps, { recursive: true, force: true });
     mkdirSync(snaps, { recursive: true });
     const at = times.map((t) => r3(t.start + t.dur / 2));
-    const pngs = (await hfSnapshot(hdir, at, snaps)).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    const pngs = (await hfSnapshot(hdir, at, snaps, { tmpDir })).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
     if (pngs.length !== at.length) throw new VfError("INTERNAL", `hyperframes snapshot ได้ ${pngs.length} ภาพ (ขอ ${at.length})`);
     const scores = [];
     const found = [];
@@ -325,7 +327,10 @@ async function work({ dir, ctx, state, key, prompt, total, audio, places, warnin
     log(`ขั้น render (${seconds} วินาที)`);
     const rel = `${base}/video.mp4`;
     rmSync(join(dir, rel), { force: true });
-    const r = await hfRender(hdir, join(dir, rel));
+    // เคลียร์ทุกรอบ ไม่ให้ค้างสะสม; ถ้า render พัง เก็บไว้ดูได้จนรอบหน้า
+    rmSync(tmpDir, { recursive: true, force: true });
+    const r = await hfRender(hdir, join(dir, rel), { tmpDir });
+    rmSync(tmpDir, { recursive: true, force: true });
     let size = 0;
     try { size = statSync(join(dir, rel)).size; } catch {}
     if (!size) throw new VfError("INTERNAL", "hyperframes render ไม่ได้ไฟล์วิดีโอ (ไม่มีไฟล์หรือไฟล์ว่าง)", { file: rel });

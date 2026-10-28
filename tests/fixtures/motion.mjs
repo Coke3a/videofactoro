@@ -53,8 +53,10 @@ export const SILENT_SCENES = () => ({ scenes: [1, 2, 3, 4, 5, 6, 7].map((i) => (
 // hf runner ปลอม: lint ตามที่สั่ง, snapshot = png ต่อเวลา, render = วิดีโอดำยาวเท่า data-duration ของ root
 export function stubRunner(opt = {}) {
   const seen = [];
-  const fn = async (args) => {
+  const envs = [];
+  const fn = async (args, o) => {
     seen.push(args);
+    envs.push(o?.env);
     const [cmd, dir] = args;
     if (cmd === "lint") return { stdout: opt.lint ?? "◇  0 error(s), 1 warning(s)\n⚠ overlapping_gsap_tweens: two tweens", stderr: "" };
     if (cmd === "snapshot") {
@@ -67,6 +69,8 @@ export function stubRunner(opt = {}) {
       return { stdout: "" };
     }
     if (cmd === "render") {
+      // จำลองไฟล์ชั่วคราวของ render ใน TMPDIR
+      if (o?.env?.TMPDIR) fs.writeFileSync(path.join(o.env.TMPDIR, "chunk.tmp"), "x");
       if (opt.renderFail?.()) throw new Error("render boom");
       const out = args[args.indexOf("-o") + 1];
       if (opt.renderEmpty) { fs.writeFileSync(out, ""); return { stdout: "" }; }
@@ -78,5 +82,6 @@ export function stubRunner(opt = {}) {
     throw new Error(`unexpected hyperframes ${cmd}`);
   };
   fn.seen = seen;
+  fn.envs = envs;
   return fn;
 }

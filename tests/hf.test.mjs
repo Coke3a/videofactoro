@@ -1,7 +1,7 @@
 process.env.VF_NO_DOTENV = "1";
 import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { dirname, delimiter } from "node:path";
@@ -56,6 +56,17 @@ test("hfSnapshot คืน path ของ png", async () => {
   writeFileSync(join(d, "n.txt"), "x");
   setRunner(async () => ({ stdout: "" }));
   assert.deepEqual(await hfSnapshot("/p", [1], d), [join(d, "a.png"), join(d, "b.png")]);
+});
+
+test("hfEnv/hfLint: tmpDir → TMPDIR/TMP/TEMP และสร้างโฟลเดอร์ให้", async () => {
+  assert.equal(hfEnv({ PATH: "/x" }).TMPDIR, undefined);
+  const t = join(mkdtempSync(join(tmpdir(), "hf-")), "a", ".tmp");
+  assert.equal(hfEnv({ PATH: "/x" }, t).TEMP, t);
+  let seen;
+  setRunner(async (args, opts) => { seen = opts; return { stdout: "◇  0 error(s), 0 warning(s)" }; });
+  await hfLint("/p", { tmpDir: t });
+  for (const k of ["TMPDIR", "TMP", "TEMP"]) assert.equal(seen.env[k], t);
+  assert.ok(existsSync(t));
 });
 
 test("hfBin/gsapFile ชี้ใต้ node_modules", () => {
