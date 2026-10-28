@@ -13,6 +13,12 @@ export const KEY_TEXT_MAX = 0.3;
 export const VIDEO_CONSISTENT_MIN = 0.6;
 export const VIDEO_MORPH_MIN = 0.6;
 export const VIDEO_FOLLOWS_MIN = 0.5;
+// ท่า: ตาแปลก (หรี่ข้างเดียว ตาเหล่) = ไม่ผ่าน; น้ำหนักทำให้ภาพตาปกติชนะเมื่อไม่มีภาพไหนผ่าน
+export const POSE_EYES_MIN = 0.5;
+export const POSE_EYES_WEIGHT = 0.5;
+// ภาพอ้าปาก: ต้องเหมือนภาพท่าเท่ากับเกณฑ์ "ตัวเดียวกัน" ของ keyframe
+export const TALK_SAME_MIN = 0.6;
+export const TALK_MOUTH_MIN = 0.5;
 
 // คำตอบที่หายไปนับเป็นค่าที่แย่ที่สุด (0 สำหรับข้อ "ดี", 1 สำหรับข้อ "ไม่ดี") จะได้ไม่มีทางผ่านเกณฑ์โดยบังเอิญ
 const good = (a, k) => {
@@ -47,6 +53,37 @@ export const RULES = {
       if (!(single >= CHAR_SINGLE_MIN)) reasons.push(`ไม่ใช่ตัวละครเดี่ยว (${single.toFixed(2)} < ${CHAR_SINGLE_MIN})`);
       if (!(text < CHAR_TEXT_MAX)) reasons.push(`มีตัวหนังสือหรือโลโก้ในภาพ (${text.toFixed(2)} ≥ ${CHAR_TEXT_MAX})`);
       return { pass: reasons.length === 0, score: matches + CHAR_FULLBODY_WEIGHT * full - text, reasons };
+    },
+  },
+  // ท่าของตัวละคร = เกณฑ์ ref + ตรวจตา (ท่าที่ขอให้หลับตา/ร้องไห้ได้รับการยกเว้นผ่านชื่อท่าในคำถาม)
+  characterPose: {
+    state: (ctx) => `A character pose image. Pose "${ctx.pose}": ${ctx.action}. Art style: ${ctx.style}.`,
+    questions: (ctx) => ({
+      ...RULES.characterRef.questions(ctx),
+      natural_eyes: q(`Are both eyes drawn clearly and naturally (no half-closed, crossed, rolled or mismatched eye)? The pose is "${ctx.pose}" (${ctx.action}); answer yes for closed or teary eyes only if this pose asks for them.`),
+    }),
+    judge(a) {
+      const v = RULES.characterRef.judge(a);
+      const eyes = good(a, "natural_eyes");
+      const reasons = [...v.reasons];
+      if (!(eyes >= POSE_EYES_MIN)) reasons.push(`ตาผิดปกติ (${eyes.toFixed(2)} < ${POSE_EYES_MIN})`);
+      return { pass: reasons.length === 0, score: v.score + POSE_EYES_WEIGHT * eyes, reasons };
+    },
+  },
+  // ภาพ 1 = ท่า, ภาพ 2 = ภาพอ้าปากของท่านั้น
+  talkTwin: {
+    state: () => "Image 1 is a character pose. Image 2 should be the same drawing with only the mouth opened slightly.",
+    questions: () => ({
+      same_except_mouth: q("Image 2 is the same drawing as image 1 except the mouth: are the eyes (open/closed, gaze), eyebrows, pose and body identical?"),
+      mouth_more_open: q("Is the mouth in image 2 open more than in image 1?"),
+    }),
+    judge(a) {
+      const same = good(a, "same_except_mouth");
+      const mouth = good(a, "mouth_more_open");
+      const reasons = [];
+      if (!(same >= TALK_SAME_MIN)) reasons.push(`ภาพอ้าปากไม่เหมือนภาพท่า (ตา/คิ้ว/ตัว) (${same.toFixed(2)} < ${TALK_SAME_MIN})`);
+      if (!(mouth >= TALK_MOUTH_MIN)) reasons.push(`ปากไม่ได้อ้า (${mouth.toFixed(2)} < ${TALK_MOUTH_MIN})`);
+      return { pass: reasons.length === 0, score: same + mouth, reasons };
     },
   },
   characterFromImage: {

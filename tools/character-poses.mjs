@@ -6,7 +6,7 @@ import { openState, step, writeJsonAtomic } from "./state.mjs";
 import { NO_PASS_WARNING } from "./qa.mjs";
 import { pinInput, pinRun, costSince, loadProject, planRows, imageRow, qaRow, runEntity } from "./entities.mjs";
 import { MODELS } from "./models.mjs";
-import { DEFAULT_POSES, makePoses, posesDir } from "./poses.mjs";
+import { DEFAULT_POSES, TALK_MAX_REROLLS, makePoses, posesDir } from "./poses.mjs";
 
 const OPTIONS = {
   poses: { type: "string" },
@@ -27,12 +27,14 @@ function pickPoses(list) {
 }
 
 function dryRun(n) {
+  // QA ภาพอ้าปากส่ง 2 ภาพ จึงคิด token ของมันเป็น 2 เท่า (n + 2n)
+  const qa = { ...qaRow(n * 2), usd: qaRow(n * 3).usd };
   return {
     dry_run: true,
-    ...planRows([imageRow("pose", n * 2, MODELS.imageFast), qaRow(n)]),
+    ...planRows([imageRow("pose", n * 2, MODELS.imageFast), qa]),
     assumptions: [
       `ท่าละ 1 ภาพ + ภาพอ้าปากพูด 1 ภาพ (รวม ${n * 2}) ด้วย ${MODELS.imageFast}`,
-      `QA ${n} ครั้ง (ไม่นับ reroll สูงสุด ${MAX_REROLLS} ครั้งต่อท่า) · ตัดพื้นหลังในเครื่อง ไม่มีค่าใช้จ่าย`,
+      `QA ${n * 2} ครั้ง (ท่า ${n} + ภาพอ้าปาก ${n}) ไม่นับ reroll: ท่าสูงสุด ${MAX_REROLLS} ครั้ง ภาพอ้าปากสูงสุด ${TALK_MAX_REROLLS} ครั้งต่อท่า (reroll ละ 1 ภาพ + 1 QA) · ตัดพื้นหลังในเครื่อง ไม่มีค่าใช้จ่าย`,
     ],
   };
 }
@@ -62,7 +64,10 @@ async function work({ dir, ctx, state, char, poses, replace, run: fresh }) {
     return { done: true };
   });
 
-  const warnings = Object.entries(made.poses).filter(([, p]) => !p.passed).map(([n]) => `${n}: ${NO_PASS_WARNING}`);
+  const warnings = Object.entries(made.poses).flatMap(([n, p]) => [
+    ...(p.passed ? [] : [`${n}: ${NO_PASS_WARNING}`]),
+    ...(p.talk_passed === false ? [`${n} (talk): ${NO_PASS_WARNING}`] : []),
+  ]);
   return {
     character: char.id,
     poses: Object.keys(made.poses),

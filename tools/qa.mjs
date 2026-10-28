@@ -61,9 +61,12 @@ const DEFAULT_STATE = "An image to check.";
 const isolated = (err, codes) => err instanceof VfError && codes.includes(err.code);
 const errVerdict = (code) => ({ pass: false, score: -Infinity, reasons: [`QA error: ${code}`] });
 
-export async function pickBest(candidates, rule, ctx, { meta = {}, costDir } = {}) {
+// lead = ไฟล์ภาพที่ส่งนำหน้าภาพที่ตรวจทุกครั้ง (เช่น ภาพท่า เพื่อเทียบกับภาพอ้าปาก)
+export async function pickBest(candidates, rule, ctx, { meta = {}, costDir, lead = [] } = {}) {
   if (!candidates?.length) throw new VfError("INTERNAL", "pickBest ต้องมี candidates อย่างน้อย 1 ภาพ");
   if (!costDir) throw new VfError("INTERNAL", "pickBest ต้องระบุ costDir");
+  const leadImages = [];
+  for (const f of lead) leadImages.push(await toQaImage(f));
   const ranked = [];
   let errors = 0;
   for (const [i, candidate] of candidates.entries()) {
@@ -82,7 +85,7 @@ export async function pickBest(candidates, rule, ctx, { meta = {}, costDir } = {
       const answers = await clef({
         state: rule.state ? rule.state(ctx) : DEFAULT_STATE,
         questions: rule.questions(ctx),
-        images: [image],
+        images: [...leadImages, image],
         meta,
         costDir,
       });

@@ -129,6 +129,42 @@ test("placePlate.judge score และเกณฑ์", () => {
   assert.equal(RULES.placePlate.judge(place(0.4)).pass, false);
 });
 
+const poseA = (eyes) => ({ matches_look: n(0.9), single_character: n(0.9), has_text: n(0), full_body: n(0.9), natural_eyes: n(eyes) });
+
+test("characterPose: ตาแปลกไม่ผ่านและแพ้ภาพตาปกติ; คำถามมีชื่อท่า", () => {
+  const odd = RULES.characterPose.judge(poseA(0.1));
+  const normal = RULES.characterPose.judge(poseA(0.9));
+  assert.equal(odd.pass, false);
+  assert.ok(odd.reasons.some((r) => r.includes("ตา")));
+  assert.equal(normal.pass, true);
+  assert.ok(normal.score > odd.score);
+  assert.equal(RULES.characterPose.judge({}).pass, false);
+  const qs = RULES.characterPose.questions({ look: "orange cat", style: "anime", pose: "sad", action: "teary eyes" });
+  assert.match(qs.natural_eyes.instructions, /sad/);
+  assert.match(qs.natural_eyes.instructions, /closed/);
+  assert.match(qs.matches_look.instructions, /orange cat/);
+});
+
+test("talkTwin: ตา/ตัวไม่เหมือน หรือปากไม่อ้า → ไม่ผ่าน; คำถามอ้าง image 1 และ 2", () => {
+  const t = (same, mouth) => RULES.talkTwin.judge({ same_except_mouth: n(same), mouth_more_open: n(mouth) });
+  assert.equal(t(0.9, 0.9).pass, true);
+  assert.equal(t(0.2, 0.9).pass, false);
+  assert.equal(t(0.9, 0.1).pass, false);
+  assert.ok(t(0.9, 0.9).score > t(0.2, 0.9).score);
+  assert.equal(RULES.talkTwin.judge({}).pass, false);
+  const qs = RULES.talkTwin.questions({});
+  assert.match(qs.same_except_mouth.instructions, /Image 2.*image 1.*eyes/s);
+  assert.match(qs.mouth_more_open.instructions, /mouth/);
+});
+
+test("pickBest lead: ส่งภาพนำหน้าก่อนภาพที่ตรวจ ในการเรียก clef ครั้งเดียว", async () => {
+  fake(ok({ same_except_mouth: n(0.9), mouth_more_open: n(0.9) }));
+  const r = await pickBest([files()[0]], RULES.talkTwin, {}, { meta: {}, costDir: dir, lead: [TINY] });
+  assert.equal(calls.length, 1);
+  assert.equal(bodyOf(0).images.length, 2);
+  assert.equal(r.ranked[0].verdict.pass, true);
+});
+
 test("RULES.questions ใส่ ctx ลงในคำถาม", () => {
   assert.match(RULES.characterRef.questions({ look: "red fox", style: "anime" }).matches_look.instructions, /red fox/);
   assert.match(RULES.placePlate.questions({ desc: "old kitchen", style: "anime" }).fits.instructions, /old kitchen.*anime/);

@@ -21,7 +21,9 @@ export const POSE_FRAME = "Full body, centered, whole character visible with spa
 // prompt แก้ภาพ (ไม่ใส่ style_prompt เพราะภาพต้นฉบับมีสไตล์อยู่แล้ว และห้ามเพิ่มฉากหลัง)
 // ตาต้องเหมือนเดิมเป๊ะ ไม่งั้นตากระพริบทุกครั้งที่ปากขยับ
 export const TALK_PROMPT = "Edit image 1. Keep everything identical: the same character, same pose, same size and position in the frame, same plain flat light cream background with nothing else in it. Keep the eyes exactly as they are (open or closed, gaze direction, shape and size), and keep the eyebrows, tears, ears, paws, tail, body and every other detail unchanged. Change only the mouth: open it slightly as if saying \"ah\". Do not add any room, furniture, window or scenery.";
+// seed ภาพอ้าปาก = base + 8, 9, 10 (ไม่ชน seed ของท่าที่ใช้ 0..maxRerolls)
 const TALK_ATTEMPT = 8;
+export const TALK_MAX_REROLLS = 2;
 
 export const posesDir = (dir, cid) => join(dir, "characters", cid, "poses");
 
@@ -34,10 +36,16 @@ export async function makePoses({ dir, slug, char, poses = DEFAULT_POSES, maxRer
   if (!existsSync(ref)) throw new VfError("USAGE", `ตัวละคร "${cid}" ยังไม่มีภาพ ref (${ref})`);
   const out = posesDir(dir, cid);
   const pj = JSON.parse(readFileSync(join(dir, "project.json"), "utf8"));
-  const ctx = { look: char.look, style: pj.style_prompt };
   const result = {};
+  const score = (v) => (Number.isFinite(v.score) ? v.score : null);
+  const check = async (c, rule, ctx, meta, lead) => {
+    const [r] = (await pickBest([c], rule, ctx, { meta, costDir, lead })).ranked;
+    saveVerdicts(dir, [r]);
+    return r.verdict;
+  };
 
   for (const [name, action] of Object.entries(poses)) {
+    const ctx = { look: char.look, style: pj.style_prompt, pose: name, action };
     const meta = { project: slug, step: "pose", item: `${cid}:${name}`, run };
     const base = baseSeed(slug, `${cid}:pose:${name}${salt}`);
     const pose = await step(state, `pose:${name}`, async () => {
@@ -49,25 +57,24 @@ export async function makePoses({ dir, slug, char, poses = DEFAULT_POSES, maxRer
           prompt: `The same character as in image 1 (${char.look}), now ${action}. Keep exactly the same character design, colors and art style as image 1. ${POSE_FRAME} ${pj.style_prompt}`,
           need: `pose:${cid}:${name}`, kind: "character-pose", characters: [cid], tags: [name], meta,
         }),
-        check: async (c) => {
-          const [r] = (await pickBest([c], RULES.characterRef, ctx, { meta, costDir })).ranked;
-          saveVerdicts(dir, [r]);
-          return r.verdict;
-        },
+        check: (c) => check(c, RULES.characterPose, ctx, meta),
       });
-      return {
-        raw: relative(dir, res.best.file), passed: res.passed,
-        score: Number.isFinite(res.verdict.score) ? res.verdict.score : null,
-      };
+      return { raw: relative(dir, res.best.file), passed: res.passed, score: score(res.verdict) };
     });
     const talk = await step(state, `talk:${name}`, async () => {
       log(`ขั้น talk:${name}`);
-      const t = await generateImage({
-        projectDir: dir, model: MODELS.imageFast, refs: [resolve(dir, pose.raw)], aspect: "3:4", seed: seedAt(base, TALK_ATTEMPT),
-        prompt: TALK_PROMPT, need: `pose:${cid}:${name}:talk`, kind: "character-pose", characters: [cid], tags: [name, "talk"],
-        meta: { ...meta, item: `${cid}:${name}:talk` },
+      const poseFile = resolve(dir, pose.raw);
+      const tmeta = { ...meta, item: `${cid}:${name}:talk` };
+      // QA เทียบภาพท่ากับภาพอ้าปาก: ตา/คิ้ว/ตัวต้องเหมือนเดิม ไม่งั้นตากระพริบตามปาก
+      const res = await generateWithQa({
+        maxRerolls: TALK_MAX_REROLLS,
+        generate: (attempt) => generateImage({
+          projectDir: dir, model: MODELS.imageFast, refs: [poseFile], aspect: "3:4", seed: seedAt(base, TALK_ATTEMPT + attempt),
+          prompt: TALK_PROMPT, need: `pose:${cid}:${name}:talk`, kind: "character-pose", characters: [cid], tags: [name, "talk"], meta: tmeta,
+        }),
+        check: (c) => check(c, RULES.talkTwin, {}, tmeta, [poseFile]),
       });
-      return { raw: relative(dir, t.file) };
+      return { raw: relative(dir, res.best.file), passed: res.passed, score: score(res.verdict) };
     });
     await step(state, `cut:${name}`, async () => {
       log(`ขั้น cut:${name}`);
@@ -76,7 +83,10 @@ export async function makePoses({ dir, slug, char, poses = DEFAULT_POSES, maxRer
       await cutout(resolve(dir, talk.raw), join(out, `${name}-talk.png`));
       return { done: true };
     });
-    result[name] = { file: `${name}.png`, talk: `${name}-talk.png`, score: pose.score, passed: pose.passed };
+    result[name] = {
+      file: `${name}.png`, talk: `${name}-talk.png`, score: pose.score, passed: pose.passed,
+      talk_score: talk.score ?? null, talk_passed: talk.passed ?? null,
+    };
   }
   return { poses: result };
 }
