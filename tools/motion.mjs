@@ -35,6 +35,8 @@ export const SIZE = { w: 1080, h: 1920 };
 export const CONCURRENCY = 3;
 export const STAGING_QUESTION = "Is any character standing on furniture, cut off by the frame edge, or floating in the air?";
 export const STAGING_WARN = 0.5;
+// 12000 เคยไม่พอหนึ่งครั้ง (คำตอบถูกตัด): JSON ถึง 14 ฉาก + thinking ของ Gemini ใช้งบเดียวกัน; ยังต่ำกว่าเพดาน output ของโมเดลใน MODELS.llm
+export const SCENES_MAX_TOKENS = 24000;
 const STAGING_KEY = "staging_problem";
 const STAGING_STATE = "One frame from a kids' cartoon made of cut-out characters on a painted background.";
 // TTS มีเงียบหัวท้าย: ตัดออกก่อนวัดเวลา ไม่งั้นปากขยับช้ากว่าเสียงและฉากยาวเกิน
@@ -207,7 +209,7 @@ async function work({ dir, ctx, state, key, id: given, prompt, total, audio, pla
     ].join("\n");
     const { data } = await llmJson({
       system: scenesSystemPrompt(lang, total, assets, { narrator }), user, schema: scenesSchema(assets),
-      validate: (p) => validateScenePlan(normalizeScenePlan(p), assets, { total, lang, narrator }), maxTokens: 12000,
+      validate: (p) => validateScenePlan(normalizeScenePlan(p), assets, { total, lang, narrator }), maxTokens: SCENES_MAX_TOKENS,
       meta: { project: slug, step: "motion-scenes", item: key, run }, costDir,
     });
     return { scenes: normalizeScenePlan(data).scenes };

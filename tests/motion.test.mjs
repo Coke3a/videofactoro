@@ -8,7 +8,7 @@ import { execFileSync } from "node:child_process";
 import * as cf from "../tools/cf.mjs";
 import { MODELS } from "../tools/models.mjs";
 import { main as create } from "../tools/project-create.mjs";
-import { main as motion } from "../tools/motion.mjs";
+import { main as motion, SCENES_MAX_TOKENS } from "../tools/motion.mjs";
 import { setRunner } from "../tools/hf.mjs";
 import { validateScenePlan, validateStory } from "../tools/motion-plan.mjs";
 import { SFX_KINDS } from "../tools/fx.mjs";
@@ -156,6 +156,18 @@ test("motion: story → props → stage → scenes → tts → compose → lint 
   assert.ok(fs.readFileSync(path.join(dir, "EPISODES.md"), "utf8").includes("| motion | Ball Panic |"));
   assert.ok(r.cost.usd > 0);
   await assert.rejects(motion(ARGS), (e) => e.code === "USAGE" && /เสร็จแล้ว/.test(e.message));
+});
+
+test("motion: แผนฉากขอ maxTokens SCENES_MAX_TOKENS ส่วน story ยัง 4000", async () => {
+  setRunner(stubRunner());
+  await motion(ARGS);
+  // คลิปสองถูกตัดที่ 12000 ครั้งหนึ่ง (14 ฉาก + thinking ของ Gemini)
+  assert.equal(SCENES_MAX_TOKENS, 24000);
+  const llm = posts(MODELS.llm[0]);
+  const max = (mark) => llm.find((c) => c.body.input.systemInstruction.parts[0].text.includes(mark)).body.input.generationConfig.maxOutputTokens;
+  const headroom = max(STORY_MARK) - 4000;
+  assert.ok(headroom >= 0);
+  assert.equal(max(SCENES_MARK), SCENES_MAX_TOKENS + headroom);
 });
 
 test("motion --id: ใช้เป็น id ของคลิปและชื่อไฟล์ render; id ผิดรูป → USAGE", async () => {
