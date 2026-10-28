@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
-import { existsSync, readdirSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { VfError } from "./out.mjs";
@@ -15,11 +15,24 @@ export const HF_ENV = {
   HYPERFRAMES_SKIP_SKILLS: "1",
 };
 
+// หา entry JS ของ hyperframes จาก package.json bin (ไม่ใช้ shim .bin เพราะ shebang จะเลือก node ของระบบ)
 export function hfBin() {
-  const p = join(REPO_ROOT, "node_modules", ".bin", "hyperframes");
-  if (!existsSync(p)) throw new VfError("CONFIG", "ยังไม่ได้ติดตั้ง hyperframes", { hint: "vf setup" });
+  const pkgPath = join(REPO_ROOT, "node_modules", "hyperframes", "package.json");
+  if (!existsSync(pkgPath)) throw new VfError("CONFIG", "ยังไม่ได้ติดตั้ง hyperframes", { hint: "vf setup" });
+  const bin = JSON.parse(readFileSync(pkgPath, "utf8")).bin;
+  const rel = typeof bin === "string" ? bin : bin?.hyperframes;
+  const p = rel && join(dirname(pkgPath), rel);
+  if (!p || !existsSync(p)) throw new VfError("CONFIG", "ไม่พบ entry ของ hyperframes", { hint: "vf setup" });
   return p;
 }
+
+// รันด้วย node ตัวเดียวกับ vf (ระบบอาจมี node เก่ากว่า 22 บน PATH)
+export const hfCommand = (args) => ({ cmd: process.execPath, args: [hfBin(), ...args] });
+export const hfEnv = (base = process.env) => ({
+  ...base,
+  ...HF_ENV,
+  PATH: [dirname(process.execPath), base.PATH].filter(Boolean).join(delimiter),
+});
 
 export function gsapFile() {
   const p = join(REPO_ROOT, "node_modules", "gsap", "dist", "gsap.min.js");
@@ -43,12 +56,12 @@ export const binRunner = (bin, timeoutMs = HF_TIMEOUT_MS) => async (args, { env 
   try {
     return await run(bin, args, { env, maxBuffer: 64 * 1024 * 1024, timeout: timeoutMs, killSignal: "SIGKILL" });
   } catch (err) {
-    if (err?.killed) throw new VfError("INTERNAL", `hyperframes ${args[0]} ค้างเกิน ${Math.round(timeoutMs / 1000)} วินาที จึงถูกหยุด`, { timeoutMs });
+    if (err?.killed) throw new VfError("INTERNAL", `hyperframes ${args.find((a) => !a.endsWith(".mjs")) ?? args[0]} ค้างเกิน ${Math.round(timeoutMs / 1000)} วินาที จึงถูกหยุด`, { timeoutMs });
     throw err;
   }
 };
 
-const defaultRunner = (args, opts) => binRunner(hfBin())(args, opts);
+const defaultRunner = (args, opts) => binRunner(process.execPath)([hfBin(), ...args], opts);
 
 let runner = defaultRunner;
 export const setRunner = (fn) => { runner = fn ?? defaultRunner; };
@@ -57,7 +70,7 @@ const text = (r) => (typeof r === "string" ? r : `${r?.stdout ?? ""}${r?.stderr 
 
 // lint ที่เจอ error ออก exit != 0 → ยังอ่านผลจาก stdout ของ error ได้
 async function exec(args) {
-  const env = { ...process.env, ...HF_ENV };
+  const env = hfEnv();
   try {
     return text(await runner(args, { env }));
   } catch (err) {

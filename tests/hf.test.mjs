@@ -4,7 +4,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { HF_ENV, HF_VERSION, HF_TIMEOUT_MS, binRunner, renderArgs, lintArgs, snapshotArgs, setRunner, hfLint, hfRender, hfSnapshot, hfBin, gsapFile } from "../tools/hf.mjs";
+import { dirname, delimiter } from "node:path";
+import { hfCommand, hfEnv, HF_ENV, HF_VERSION, HF_TIMEOUT_MS, binRunner, renderArgs, lintArgs, snapshotArgs, setRunner, hfLint, hfRender, hfSnapshot, hfBin, gsapFile } from "../tools/hf.mjs";
 import { VfError } from "../tools/out.mjs";
 
 afterEach(() => setRunner(null));
@@ -77,4 +78,23 @@ test("binRunner: hyperframes ค้างเกินเวลา → SIGKILL �
   assert.equal(HF_TIMEOUT_MS, 30 * 60 * 1000);
   setRunner(async () => { throw new VfError("INTERNAL", "hyperframes render ค้างเกิน 1800 วินาที จึงถูกหยุด"); });
   await assert.rejects(hfRender("/p", "/o.mp4"), (e) => e.code === "INTERNAL" && /ค้างเกิน/.test(e.message));
+});
+
+test("hfCommand ใช้ process.execPath + entry JS ของ hyperframes", () => {
+  let c;
+  try { c = hfCommand(["lint", "/p"]); } catch (e) { assert.equal(e.code, "CONFIG"); return; }
+  assert.equal(c.cmd, process.execPath);
+  assert.equal(c.args[0], hfBin());
+  assert.ok(!c.args[0].includes(".bin"));
+  assert.deepEqual(c.args.slice(1), ["lint", "/p"]);
+});
+
+test("hfEnv: PATH ขึ้นต้นด้วย dir ของ node ที่รัน vf", async () => {
+  const e = hfEnv({ PATH: "/usr/bin" });
+  assert.equal(e.PATH, `${dirname(process.execPath)}${delimiter}/usr/bin`);
+  assert.equal(e.HYPERFRAMES_NO_TELEMETRY, "1");
+  let seen;
+  setRunner(async (args, opts) => { seen = opts; return { stdout: "" }; });
+  await hfRender("/p", "/o.mp4");
+  assert.ok(seen.env.PATH.startsWith(dirname(process.execPath) + delimiter));
 });

@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { VfError, parse, redact } from "./out.mjs";
 import { getFetch } from "./cf.mjs";
-import { HF_ENV, HF_VERSION, hfBin, gsapFile } from "./hf.mjs";
+import { HF_VERSION, hfCommand, hfEnv, gsapFile } from "./hf.mjs";
 
 export const CORE = ["CLOUDFLARE_AI_ACCOUNT_ID", "CLOUDFLARE_AI_API_TOKEN"];
 const OPTIONAL = ["VF_AIG_GATEWAY_ID"];
@@ -23,7 +23,8 @@ function binaryCheck(bin) {
 
 function hfVersionCheck() {
   try {
-    const r = spawnSync(hfBin(), ["--version"], { encoding: "utf8", env: { ...process.env, ...HF_ENV } });
+    const { cmd, args } = hfCommand(["--version"]);
+    const r = spawnSync(cmd, args, { encoding: "utf8", env: hfEnv() });
     const v = (r.stdout ?? "").trim();
     if (r.error || r.status !== 0) return { name: "hyperframes", ok: false, detail: "รัน hyperframes ไม่ได้ — vf setup" };
     return { name: "hyperframes", ok: v === HF_VERSION, detail: v === HF_VERSION ? v : `ได้ ${v} ต้องการ ${HF_VERSION} — vf setup` };
