@@ -29,8 +29,9 @@ const NOTO = "/usr/share/fonts/truetype/noto";
 export function FONT_FOR(lang) {
   if (/^th/i.test(String(lang ?? ""))) {
     return {
-      family: "Noto Sans Thai",
-      candidates: [`${NOTO}/NotoSansThai-Bold.ttf`, "/usr/share/fonts/opentype/tlwg/Loma-Bold.otf", "/usr/share/fonts/truetype/tlwg/Loma-Bold.ttf"],
+      // Loma มีตัวละตินด้วย (stamp อย่าง BONK! ในคลิปไทย) และมีในเครื่องจริงอยู่แล้วสำหรับ ASS ของ longform
+      family: "Loma",
+      candidates: ["/usr/share/fonts/opentype/tlwg/Loma-Bold.otf", "/usr/share/fonts/truetype/tlwg/Loma-Bold.ttf", `${NOTO}/NotoSansThai-Bold.ttf`],
     };
   }
   return { family: "Noto Sans", candidates: [`${NOTO}/NotoSans-Bold.ttf`] };
@@ -45,7 +46,7 @@ export function fontFile(lang) {
   const f = FONT_FOR(lang);
   const hit = f.candidates.find((c) => existsSync(c));
   if (hit) return hit;
-  const pkg = /^th/i.test(String(lang ?? "")) ? "fonts-noto-core (หรือ fonts-thai-tlwg)" : "fonts-noto-core";
+  const pkg = /^th/i.test(String(lang ?? "")) ? "fonts-thai-tlwg (หรือ fonts-noto-core)" : "fonts-noto-core";
   throw new VfError("CONFIG", `ไม่พบฟอนต์คำบรรยาย ${f.family}: ติดตั้งแพ็กเกจ ${pkg} หรือตั้ง VF_HF_FONT เป็นไฟล์ฟอนต์`, { candidates: f.candidates });
 }
 
@@ -116,6 +117,9 @@ function atSec(at, lines) {
   return m[2] ? l.end : l.start;
 }
 
+// เวลา beat ถูกบีบไว้ในช่วงฉาก → tween และ sfx ไม่ล้นไปฉากถัดไป
+const beatAt = (b, t) => Math.min(t.dur, Math.max(0, atSec(b.at, t.lines)));
+
 const byAt = (a, b) => a.at - b.at;
 
 export function audioCues(plan, times) {
@@ -124,13 +128,14 @@ export function audioCues(plan, times) {
   plan.scenes.forEach((sc, si) => {
     const t = times[si];
     for (const l of t.lines) voices.push({ file: `voice-${l.key}.wav`, at: r3(t.start + l.start) });
-    for (const b of sc.beats ?? []) if (b.sfx) sfx.push({ kind: b.sfx, at: r3(t.start + atSec(b.at, t.lines)) });
+    for (const b of sc.beats ?? []) if (b.sfx) sfx.push({ kind: b.sfx, at: r3(t.start + beatAt(b, t)) });
   });
   return { voices: voices.sort(byAt), sfx: sfx.sort(byAt) };
 }
 
 function speakerColors(plan) {
-  const m = { narrator: NARRATOR_COLOR };
+  const m = Object.create(null);
+  m.narrator = NARRATOR_COLOR;
   let i = 0;
   for (const sc of plan.scenes) for (const l of sc.lines ?? []) {
     if (!Object.hasOwn(m, l.who)) m[l.who] = CAP_COLORS[i++ % CAP_COLORS.length];
@@ -188,7 +193,7 @@ export function composeHtml({ plan, times, lines = {}, stage, assets, size = { w
 
     // who ใน beat: หาใน cast ก่อน แล้วค่อย props (cast ทับ props)
     const propX = Object.fromEntries(props.map((p) => [p.id, spotX(st, p.spot)]));
-    const el = {};
+    const el = Object.create(null);
     for (const p of props) el[p.id] = { sel: `#${eid(`o-${safe(p.id)}`)}`, x0: propX[p.id], body: false, cur: 0 };
     const rides = (c) => c.ride && Object.hasOwn(propX, c.ride);
     // ตัวที่ขี่ prop อยู่ในกล่องของ prop → ระยะเดินนับจากจุดของ prop
@@ -277,8 +282,9 @@ export function composeHtml({ plan, times, lines = {}, stage, assets, size = { w
     const poseAt = Object.fromEntries(cast.map((c) => [c.who, [[0, c.pose]]]));
     let stampNo = 0;
     for (const b of beats) {
-      const s = atSec(b.at, t.lines);
-      if (b.pose && poseAt[b.who]) poseAt[b.who].push([s, b.pose]);
+      const s = beatAt(b, t);
+      // ท่าเปลี่ยนที่เฟรมเดียวกับที่ปากเริ่ม (ปัดแบบเดียวกัน)
+      if (b.pose && poseAt[b.who]) poseAt[b.who].push([Math.round(s * fps), b.pose]);
       if (b.move && b.who && el[b.who]) move(el[b.who], b, T(s));
       if (b.fx === "shake") tw(`#${sid}`, { x: 0 }, { keyframes: [-26, 22, -14, 8, 0].map((v) => ({ x: X(v) })), duration: 0.4 }, T(s));
       if (b.fx === "stamp") {
@@ -306,7 +312,7 @@ export function composeHtml({ plan, times, lines = {}, stage, assets, size = { w
       const pt = poseAt[c.who].slice().sort((a, b) => a[0] - b[0]);
       let last = null;
       for (let fr = 0; fr < frames; fr++) {
-        const pose = pt.filter(([s]) => s <= fr / fps).at(-1)[1];
+        const pose = pt.filter(([f0]) => f0 <= fr).at(-1)[1];
         const key = `${open[fr] ? "t" : "p"}-${safe(pose)}`;
         if (key === last) continue;
         if (last) set(`#${id}-${last}`, { opacity: 0 }, T(fr / fps));

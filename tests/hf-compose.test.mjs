@@ -189,7 +189,7 @@ test("composeHtml ภาษาไทย: ใช้ฟอนต์ไทยแล
   const p = plan();
   p.scenes[0].lines[1].text = "สวัสดีครับ วันนี้อากาศดีมาก!";
   const html = compose({ plan: p, lang: "th" });
-  assert.match(html, /src: url\("fonts\/NotoSansThai-Bold\.ttf"\)/);
+  assert.match(html, /src: url\("fonts\/Loma-Bold\.otf"\)/);
   assert.match(html, /<span>สวัสดี<\/span><span>ครับ<\/span><span>วันนี้<\/span><span>อากาศ<\/span><span>ดีมาก!<\/span>/);
   assert.deepEqual(captionChunks("Hi  there you", "en"), ["Hi", "there", "you"]);
 });
@@ -198,9 +198,10 @@ test("FONT_FOR และ fontFile", () => {
   assert.equal(FONT_FOR("en").family, "Noto Sans");
   assert.ok(FONT_FOR("en").candidates.includes("/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf"));
   const th = FONT_FOR("th");
-  assert.equal(th.family, "Noto Sans Thai");
-  assert.equal(th.candidates[0], "/usr/share/fonts/truetype/noto/NotoSansThai-Bold.ttf");
-  assert.ok(th.candidates.some((c) => c.includes("Loma")));
+  // Loma (fonts-thai-tlwg) มีตัวละตินด้วย → คำ stamp ภาษาอังกฤษในคลิปไทยไม่ตกไปใช้ฟอนต์อื่น
+  assert.equal(th.family, "Loma");
+  assert.match(th.candidates[0], /tlwg\/Loma-Bold\./);
+  assert.ok(th.candidates.includes("/usr/share/fonts/truetype/noto/NotoSansThai-Bold.ttf"));
   const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "vf-font-")), "fixture.ttf");
   fs.writeFileSync(f, "font");
   process.env.VF_HF_FONT = f;
@@ -211,4 +212,34 @@ test("FONT_FOR และ fontFile", () => {
   const have = th.candidates.find((c) => fs.existsSync(c));
   if (have) assert.equal(fontFile("th"), have);
   else assert.throws(() => fontFile("th"), (e) => e.code === "CONFIG" && /fonts-noto-core/.test(e.message));
+});
+
+test("ท่าเปลี่ยนตรงเฟรมเดียวกับปาก: ไม่โชว์ -talk ของท่าเก่าแม้เฟรมเดียว", () => {
+  // บทที่ 2 เริ่ม 1.94 s = เฟรม 58.2 → ปากเริ่มเฟรม 58; ท่า curious ต้องเริ่มเฟรม 58 ด้วย
+  const l = { "1-1": { seconds: 1.19, rms: loud(36) }, "1-2": { seconds: 2.5, rms: loud(75) } };
+  const html = compose({ lines: l });
+  assert.doesNotMatch(html, /sc1-c-biscuit-t-idle", \{"opacity":1/);
+  assert.match(html, /tl\.set\("#sc1-c-biscuit-t-curious", \{"opacity":1\}, 1\.933\);/);
+});
+
+test("beat ที่เลยท้ายฉากถูกตัดไว้ที่ท้ายฉาก ทั้ง tween และ sfx", () => {
+  const p = plan();
+  p.scenes[0].beats.push({ at: "99", who: "biscuit", move: "hop", sfx: "bang" }, { at: "50", fx: "shake" });
+  const l = lines();
+  const t = sceneTimes(p, l);
+  const end = r3(t[0].start + t[0].dur);
+  const html = compose({ plan: p });
+  assert.match(html, new RegExp(`tl\\.fromTo\\("#sc1-c-biscuit", \\{"y":0\\}, \\{"y":-130,[^}]*\\}, ${end}\\);`));
+  assert.match(html, new RegExp(`tl\\.fromTo\\("#sc1", \\{"x":0\\}, .*, ${end}\\);`));
+  for (const m of html.matchAll(/tl\.fromTo\("#sc1[^"]*", .*, ([\d.]+)\);/g)) assert.ok(Number(m[1]) <= end, m[0]);
+  const bang = audioCues(p, t).sfx.find((c) => c.kind === "bang");
+  assert.equal(bang.at, end);
+});
+
+test("ชื่อผู้พูดแปลก ๆ อย่าง __proto__ ไม่ทำสีพัง", () => {
+  const p = plan();
+  p.scenes[0].lines[0].who = "__proto__";
+  const html = compose({ plan: p });
+  assert.match(html, /id="sc1-cap1" class="cap" style="color:#ffe066">/);
+  assert.doesNotMatch(html, /object Object/);
 });
