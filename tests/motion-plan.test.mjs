@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   CAMERAS, ENTERS, MOVES, FX, LEAD, GAP, TAIL, SCENE_MIN,
-  STORY_SCHEMA, scenesSchema, storySystemPrompt, scenesSystemPrompt, validateScenePlan, estimateSeconds,
+  STORY_SCHEMA, scenesSchema, storySystemPrompt, scenesSystemPrompt, validateScenePlan, estimateSeconds, validateStory, sceneSeconds,
 } from "../tools/motion-plan.mjs";
 import { geminiStrip, anthropicStrip } from "../tools/llm.mjs";
 
@@ -225,4 +225,80 @@ test("prompts mention the target, language, assets and narrator rule", () => {
   for (const s of ["60", "hallway", "far-right", "marmalade", "whirr", "12"]) assert.ok(on.includes(s), s);
   assert.notEqual(on, off);
   assert.match(off, /no narrator/i);
+});
+
+const story = () => ({
+  title: "Biscuit and the Robot Vacuum",
+  summary: "A puppy meets a vacuum.",
+  music_prompt: "playful pizzicato, 110 BPM, no vocals",
+  beats: [
+    { part: "setup", text: "Biscuit naps in the living room." },
+    { part: "problem", text: "A robot vacuum rolls in." },
+    { part: "escalation", text: "It chases Biscuit to the kitchen." },
+    { part: "twist", text: "Marmalade rides it." },
+    { part: "button", text: "Biscuit rides too: wheee!" },
+  ],
+  props_needed: [{ id: "vacuum", desc: "round robot vacuum" }, { id: "red-ball", desc: "small red ball" }],
+});
+
+test("validateStory: valid story has no issues", () => {
+  assert.deepEqual(validateStory(story()), []);
+});
+
+test("validateStory: beats must be the 5 parts in order", () => {
+  const s = story();
+  s.beats.pop();
+  assert.ok(validateStory(s).some((x) => x.includes("5")));
+  const t = story();
+  [t.beats[1], t.beats[2]] = [t.beats[2], t.beats[1]];
+  assert.ok(validateStory(t).some((x) => x.includes("problem")));
+});
+
+test("validateStory: prop ids, risk words, malformed input", () => {
+  const s = story();
+  s.props_needed[1].id = "Red Ball";
+  assert.ok(validateStory(s).some((x) => x.includes("Red Ball")));
+  const d = story();
+  d.props_needed[1].id = "vacuum";
+  assert.ok(validateStory(d).some((x) => x.includes("vacuum") && x.includes("twice")));
+  const r = story();
+  r.props_needed[0].desc = "a Mickey Mouse vacuum";
+  r.beats[3].text = "Mickey Mouse appears";
+  assert.equal(validateStory(r).filter((x) => x.includes("risk")).length, 2);
+  for (const bad of [null, 5, "x", {}, { beats: "no", props_needed: [null] }]) assert.ok(validateStory(bad).length > 0);
+});
+
+test("who enum is deduped and a prop id equal to a cast id is reported", () => {
+  const a = { ...ASSETS, props: ["vacuum", "biscuit"] };
+  const who = scenesSchema(a).properties.scenes.items.properties.beats.items.properties.who.enum;
+  assert.deepEqual(who, ["biscuit", "marmalade", "vacuum"]);
+  const p = plan();
+  p.scenes[0].props = [{ id: "biscuit", spot: "left" }];
+  assert.ok(validateScenePlan(p, a, OPTS(p)).some((x) => x.includes("biscuit") && x.includes("prop")));
+});
+
+test("estimateSeconds and validators survive malformed input and missing assets", () => {
+  for (const bad of [null, {}, { scenes: "x" }, { scenes: [null, { lines: "x" }, { lines: [null] }] }]) {
+    assert.equal(typeof estimateSeconds(bad, "en"), "number");
+  }
+  assert.ok(Array.isArray(validateScenePlan(plan(), {}, { total: 60 })));
+  assert.ok(scenesSchema({}));
+});
+
+test("a scene estimated over 12 s is an issue naming scene number and seconds", () => {
+  const p = plan();
+  const long = "one two three four five six seven eight nine ten eleven";
+  p.scenes[2].lines = [{ who: "narrator", text: long }, { who: "narrator", text: long }, { who: "narrator", text: "and then" }];
+  const secs = sceneSeconds(p.scenes[2], "en");
+  assert.ok(secs > 12);
+  const issues = validateScenePlan(p, ASSETS, OPTS(p));
+  assert.ok(issues.some((x) => x.includes("scene 3") && x.includes(`${secs.toFixed(1)}s`)), issues.join("\n"));
+});
+
+test("unknown speaker is not treated as cast", () => {
+  const p = plan();
+  p.scenes[0].cast.push({ who: "rex", spot: "left", pose: "idle" });
+  p.scenes[0].lines[1].who = "rex";
+  const issues = validateScenePlan(p, ASSETS, OPTS(p));
+  assert.ok(issues.some((x) => x.includes("line 2") && x.includes("rex")), issues.join("\n"));
 });

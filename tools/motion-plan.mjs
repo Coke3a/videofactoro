@@ -1,5 +1,6 @@
 import { riskFindings } from "./risk.mjs";
 import { narrationBudget, narrationSize, WORDS_PER_SEC, CHARS_PER_SEC } from "./clip.mjs";
+import { ID_RE } from "./bible.mjs";
 
 export const CAMERAS = ["push", "push-fast", "pan-left", "pan-right", "static"];
 export const ENTERS = ["drop", "slide-left", "slide-right"];
@@ -17,6 +18,7 @@ export const SCENES_MAX = 14;
 export const MAX_CAST = 3;
 export const STAMP_MAX = 12;
 export const TOTAL_TOLERANCE = 0.15;
+export const SCENE_MAX = 12;
 const LINE_SECONDS = 6;
 
 const str = { type: "string" };
@@ -24,6 +26,10 @@ const num = { type: "number" };
 // enum ว่างทำ schema พัง → ปล่อยเป็น string แล้วให้ validator จับ
 const oneOf = (list) => (list.length ? { type: "string", enum: list } : str);
 const uniq = (xs) => [...new Set(xs)];
+const arr = (v) => (Array.isArray(v) ? v : []);
+const withDefaults = (a) => ({
+  poses: a?.poses ?? {}, places: a?.places ?? {}, props: arr(a?.props), sfx: arr(a?.sfx),
+});
 const spaced = (lang) => narrationBudget(lang, 1).unit === "คำ";
 const unitEn = (lang) => (spaced(lang) ? "words" : "characters");
 const rate = (lang) => (spaced(lang) ? WORDS_PER_SEC : CHARS_PER_SEC);
@@ -47,10 +53,11 @@ export const STORY_SCHEMA = {
 };
 
 // assets = { poses: {charId: [pose]}, places: {placeId: [spot]}, props: [id], sfx: [kind] }
-export function scenesSchema(assets) {
+export function scenesSchema(raw = {}) {
+  const assets = withDefaults(raw);
   const chars = Object.keys(assets.poses);
   const spots = uniq(Object.values(assets.places).flat());
-  const props = assets.props ?? [];
+  const props = assets.props;
   const cast = { who: oneOf(chars), spot: oneOf(spots), pose: oneOf(uniq(Object.values(assets.poses).flat())), size: num, enter: oneOf(ENTERS) };
   if (props.length) cast.ride = oneOf(props);
   return {
@@ -80,13 +87,13 @@ export function scenesSchema(assets) {
                 properties: {
                   // ตัวเลข/ข้อความผสมกันใน schema ไม่ได้ → string ทั้งหมด ("1.5", "line2", "line2-end")
                   at: str,
-                  who: oneOf([...chars, ...props]),
+                  who: oneOf(uniq([...chars, ...props])),
                   pose: cast.pose,
                   move: oneOf(MOVES),
                   to_spot: oneOf(spots),
                   dur: num,
                   fx: oneOf(FX),
-                  sfx: oneOf(assets.sfx ?? []),
+                  sfx: oneOf(assets.sfx),
                   text: str,
                 },
                 required: ["at"],
@@ -120,7 +127,8 @@ export function storySystemPrompt(lang, total, ctx = {}) {
   ].filter(Boolean).join("\n");
 }
 
-export function scenesSystemPrompt(lang, total, assets, { narrator = false } = {}) {
+export function scenesSystemPrompt(lang, total, raw, { narrator = false } = {}) {
+  const assets = withDefaults(raw);
   const n = Math.round(total / 5);
   const { max } = narrationBudget(lang, LINE_SECONDS);
   const poses = Object.entries(assets.poses).map(([c, ps]) => `  - ${c}: ${ps.join(", ")}`);
@@ -147,13 +155,13 @@ export function scenesSystemPrompt(lang, total, assets, { narrator = false } = {
 const lineSeconds = (lang, text) => narrationSize(lang, String(text ?? "")) / rate(lang);
 
 export const sceneSeconds = (scene, lang) => {
-  const lines = Array.isArray(scene?.lines) ? scene.lines : [];
+  const lines = arr(scene?.lines);
   if (!lines.length) return SCENE_MIN;
-  const talk = lines.reduce((s, l) => s + lineSeconds(lang, l?.text), 0);
+  const talk = lines.reduce((s, l) => s + lineSeconds(lang, typeof l?.text === "string" ? l.text : ""), 0);
   return Math.max(SCENE_MIN, LEAD + talk + GAP * (lines.length - 1) + TAIL);
 };
 
-export const estimateSeconds = (plan, lang) => (plan?.scenes ?? []).reduce((s, sc) => s + sceneSeconds(sc, lang), 0);
+export const estimateSeconds = (plan, lang) => arr(plan?.scenes).reduce((s, sc) => s + sceneSeconds(sc, lang), 0);
 
 // at: ตัวเลข, ตัวเลขเป็นข้อความ หรือ line<N>[-end] (N นับจาก 1 ในฉาก)
 function atIssue(at, nLines) {
@@ -166,13 +174,47 @@ function atIssue(at, nLines) {
   return k >= 1 && k <= nLines ? null : `at "${s}" refers to a line this scene does not have (it has ${nLines})`;
 }
 
-export function validateScenePlan(plan, assets, { total, lang = "en", narrator = false } = {}) {
+export function validateStory(story) {
+  if (story === null || typeof story !== "object" || Array.isArray(story)) return ["story must be an object"];
+  const issues = [];
+  const risky = (label, text) => {
+    for (const f of riskFindings(String(text ?? ""))) issues.push(`${label} has a risk word: ${f.matched}`);
+  };
+  for (const k of ["title", "summary", "music_prompt"]) {
+    if (typeof story[k] !== "string" || !story[k].trim()) issues.push(`${k} must be non-empty text`);
+  }
+  risky("title", story.title);
+  risky("summary", story.summary);
+  const beats = arr(story.beats);
+  if (beats.length !== PARTS.length) issues.push(`beats must be exactly ${PARTS.length} (${PARTS.join(", ")}), got ${beats.length}`);
+  beats.forEach((b, i) => {
+    const label = `beat ${i + 1}`;
+    if (i < PARTS.length && b?.part !== PARTS[i]) issues.push(`${label}: part must be "${PARTS[i]}" (got "${b?.part}"); order is ${PARTS.join(" → ")}`);
+    if (typeof b?.text !== "string" || !b.text.trim()) issues.push(`${label}: text must not be empty`);
+    risky(`${label} text`, b?.text);
+  });
+  if (!Array.isArray(story.props_needed)) issues.push("props_needed must be an array (may be empty)");
+  const seen = new Set();
+  arr(story.props_needed).forEach((p, i) => {
+    const label = `props_needed ${i + 1}`;
+    const id = p?.id;
+    if (typeof id !== "string" || !ID_RE.test(id)) issues.push(`${label}: id "${id}" must be a-z, 0-9, - (starts with a letter, 2–31 chars)`);
+    else if (seen.has(id)) issues.push(`${label}: id "${id}" appears twice`);
+    seen.add(id);
+    if (typeof p?.desc !== "string" || !p.desc.trim()) issues.push(`${label}: desc must not be empty`);
+    risky(`${label} desc`, p?.desc);
+  });
+  return issues;
+}
+
+export function validateScenePlan(plan, raw, { total, lang = "en", narrator = false } = {}) {
+  const assets = withDefaults(raw);
   if (plan === null || typeof plan !== "object" || !Array.isArray(plan.scenes)) return ["plan must be an object with a scenes array"];
   const issues = [];
   const scenes = plan.scenes;
-  const chars = assets.poses ?? {};
-  const propIds = new Set(assets.props ?? []);
-  const sfx = new Set(assets.sfx ?? []);
+  const chars = assets.poses;
+  const propIds = new Set(assets.props);
+  const sfx = new Set(assets.sfx);
   const { max } = narrationBudget(lang, LINE_SECONDS);
   const risky = (label, text) => {
     for (const f of riskFindings(String(text ?? ""))) issues.push(`${label} has a risk word: ${f.matched}`);
@@ -224,7 +266,7 @@ export function validateScenePlan(plan, assets, { total, lang = "en", narrator =
         if (inCast.has(who)) issues.push(`${label}: ${who} appears twice in cast`);
         if (!chars[who].includes(c.pose)) issues.push(`${label}: pose "${c.pose}" is not available for ${who} (has: ${chars[who].join(", ")})`);
       }
-      inCast.add(who);
+      if (Object.hasOwn(chars, who ?? "")) inCast.add(who);
       spotCheck(label, c?.spot);
       enterCheck(label, c?.enter);
       sizeCheck(label, c?.size);
@@ -232,6 +274,8 @@ export function validateScenePlan(plan, assets, { total, lang = "en", narrator =
         issues.push(`${label}: ${who} rides "${c.ride}" but that prop is not in this scene's props`);
       }
     });
+
+    for (const id of inProps) if (inCast.has(id)) issues.push(`${tag}: prop id "${id}" is also a character in this scene; beats cannot tell them apart`);
 
     const lines = Array.isArray(sc.lines) ? sc.lines : [];
     if (!Array.isArray(sc.lines)) issues.push(`${tag}: lines must be an array (may be empty)`);
@@ -278,6 +322,9 @@ export function validateScenePlan(plan, assets, { total, lang = "en", narrator =
       if (!b?.pose && !b?.move && !b?.fx && !b?.sfx) issues.push(`${label}: beat does nothing (needs pose, move, fx or sfx)`);
       risky(`${label} text`, b?.text);
     });
+
+    const secs = sceneSeconds(sc, lang);
+    if (secs > SCENE_MAX) issues.push(`${tag} (scene ${i + 1}) is about ${secs.toFixed(1)}s, max ${SCENE_MAX}s: split it or cut lines`);
   });
 
   if (Number.isFinite(total)) {
