@@ -75,3 +75,12 @@ test("cutout: ภาพ 880x1184 เร็วพอ", async () => {
   await cutout(src, path.join(dir, "big-out.png"));
   assert.ok(Date.now() - t < 2000, `ช้าไป ${Date.now() - t}ms`);
 });
+
+test("cutout: ไม่มีไฟล์ต้นฉบับ -> VfError USAGE", async () => {
+  await assert.rejects(cutout(path.join(dir, "missing.png"), path.join(dir, "x.png")), (e) => e.code === "USAGE");
+});
+
+test("cutout: เขียนปลายทางไม่ได้ -> VfError INTERNAL", async () => {
+  const src = make("w.png", square);
+  await assert.rejects(cutout(src, path.join(dir, "no-such-dir", "x.png")), (e) => e.code === "INTERNAL");
+});

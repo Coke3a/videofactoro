@@ -14,7 +14,7 @@ async function decode(src) {
     if (!w || !h || stdout.length < w * h * 3) throw new Error("decode ไม่ครบ");
     return { w, h, px: stdout };
   } catch (e) {
-    throw new VfError("IMAGE", `อ่านรูปไม่ได้: ${src}`, { err: String(e.message).slice(0, 200) });
+    throw new VfError("USAGE", `อ่านรูปไม่ได้: ${src}`, { err: String(e.message).slice(0, 200) });
   }
 }
 
@@ -139,7 +139,7 @@ export async function cutout(src, dst, { tol = 30, shadowTol = 190, islandFrac =
   }
   await new Promise((res, rej) => {
     const p = execFile("ffmpeg", ["-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", `${w}x${h}`, "-i", "-", "-frames:v", "1", dst],
-      (e) => (e ? rej(new VfError("IMAGE", `เขียน PNG ไม่ได้: ${dst}`, { err: String(e.message).slice(0, 200) })) : res()));
+      (e) => (e ? rej(new VfError("INTERNAL", `เขียน PNG ไม่ได้: ${dst}`, { err: String(e.message).slice(0, 200) })) : res()));
     p.stdin.end(rgba);
   });
   return { w, h, transparent: clear / n, restored };
