@@ -13,7 +13,7 @@ import { sha } from "./project-create.mjs";
 import { tts, mediaInfo } from "./audio.mjs";
 import { LIBRARY_TRACK_SEC } from "./music-lib.mjs";
 import { WORDS_PER_SEC, CHARS_PER_SEC } from "./clip.mjs";
-import { makeKeyframe, makeVideo, pool, keyframeModel, SOFTEN } from "./shots.mjs";
+import { makeKeyframe, makeVideo, pool, keyframeModel, SOFTEN, GROUNDED_RULES } from "./shots.mjs";
 import { ffmpeg, frameSize, normalizeArgs, concatArgs, concatList } from "./assemble.mjs";
 import { COMMON_OPTIONS, parseCommon, validateParts, finishAudio } from "./longform.mjs";
 import { pinInput, pinRun, costSince, contextMessage, loadProject, planRows, llmRow, imageRow, qaRow, runEntity } from "./entities.mjs";
@@ -63,6 +63,7 @@ export function filmSystemPrompt(lang, total, { narrator = false, musicStyle = "
     "- first_frame_prompt (ภาษาอังกฤษ): ภาพนิ่งเฟรมแรกของช็อต บอกตำแหน่ง ท่าทาง สีหน้า มุมกล้อง ไม่มีตัวอักษร ป้าย หรือโลโก้",
     "- video_prompt (ภาษาอังกฤษ): เส้นเวลา 2–3 จังหวะต่อ 5 วินาที เช่น \"0-2s: ... 2-5s: ...\" การเคลื่อนกล้อง และเสียงจริงในฉากเท่านั้น (ห้ามดนตรีหรือเสียงประกอบการ์ตูน)",
     "- ห้ามใช้ชื่อคนจริง แบรนด์ หรือตัวละครมีลิขสิทธิ์",
+    ...GROUNDED_RULES,
     narrator
       ? `- narration: คำบรรยาย ภาษา ${lang} ของแต่ละช็อต 0–2 ประโยคสั้น เล่าเรื่องต่อเนื่องกันทั้งเรื่อง (ไม่บรรยายภาพตรงๆ) พูดจบในเวลาช็อตลบ 1 วินาที: ไม่เกิน ${WORDS_PER_SEC} คำ/วินาที (ภาษาไม่เว้นวรรค ${CHARS_PER_SEC} ตัวอักษร/วินาที) เว้นว่างบางช็อตได้ให้ภาพเล่าเอง`
       : '- narration: "" ทุกช็อต (project นี้ไม่มีผู้บรรยาย)',

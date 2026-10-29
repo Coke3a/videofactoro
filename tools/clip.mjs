@@ -16,7 +16,7 @@ import { MODELS } from "./models.mjs";
 import { estimate } from "./pricing.mjs";
 import { sha } from "./project-create.mjs";
 import { tts, music as makeMusic, mix, mediaInfo, narrationTempo, MUSIC_GAIN, MUSIC_GAIN_UNDER_VOICE } from "./audio.mjs";
-import { makeKeyframe, makeVideo, keyframeModel } from "./shots.mjs";
+import { makeKeyframe, makeVideo, keyframeModel, GROUNDED_RULES } from "./shots.mjs";
 import { pinInput, pinRun, costSince, contextMessage, loadProject, planRows, llmRow, imageRow, qaRow, runEntity } from "./entities.mjs";
 
 const execFileP = promisify(execFile);
@@ -77,6 +77,7 @@ export function clipSystemPrompt(lang, { narrator = false, musicStyle = "" } = {
     "- video_prompt (ภาษาอังกฤษ): สิ่งที่เกิดขึ้นในคลิปเป็นเส้นเวลา 2–3 จังหวะต่อ 5 วินาที เช่น \"0-2s: ... 2-5s: ...\" บอกการเคลื่อนไหวของกล้องและเสียงในฉาก ถ้ามีบทพูดให้ใส่ในเครื่องหมายคำพูด",
     "- เสียงใน video_prompt เป็นเสียงจริงในฉากเท่านั้น (เสียงฝีเท้า จาน เห่า ร้อง) ห้ามมีดนตรี เครื่องดนตรี หรือเสียงประกอบแบบการ์ตูน (เช่น strings, xylophone, drum, jingle) เพราะเพลงใส่ทีหลัง",
     "- ห้ามใช้ชื่อคนจริง แบรนด์ หรือตัวละครมีลิขสิทธิ์",
+    ...GROUNDED_RULES,
     narrator
       ? `- narration: คำบรรยายของผู้บรรยาย 1–2 ประโยคสั้นๆ ภาษา ${lang} ที่เล่าเรื่องในช็อตนี้ (ไม่อ่านสิ่งที่เห็นซ้ำตรงๆ) ต้องพูดจบในเวลาคลิปลบ 1 วินาที: ไม่เกิน ${WORDS_PER_SEC} คำต่อวินาที (ภาษาที่ไม่เว้นวรรค: ${CHARS_PER_SEC} ตัวอักษรต่อวินาที)`
       : '- narration: "" (project นี้ไม่มีผู้บรรยาย)',

@@ -395,3 +395,15 @@ test("pool: จำกัดงานพร้อมกัน คืนผลต�
   assert.equal(peak, 2);
   await assert.rejects(pool([1, 2], 2, async (x) => { if (x === 2) throw new Error("no"); return x; }), /no/);
 });
+
+test("film/clip: system prompt มีกฎฟิสิกส์ติดพื้น (โมเดลวิดีโอทำฉากผาดโผนไม่ได้)", async () => {
+  const { filmSystemPrompt } = await import("../tools/film.mjs");
+  const { clipSystemPrompt } = await import("../tools/clip.mjs");
+  const { GROUNDED_RULES } = await import("../tools/shots.mjs");
+  assert.ok(GROUNDED_RULES.length >= 3);
+  for (const p of [filmSystemPrompt("en", 60), clipSystemPrompt("en")]) {
+    for (const r of GROUNDED_RULES) assert.ok(p.includes(r), r);
+  }
+  const all = GROUNDED_RULES.join(" ");
+  for (const w of ["รองรับ", "ลอย", "แกว่ง", "ในบ้าน", "นอกบ้าน"]) assert.ok(all.includes(w), w);
+});

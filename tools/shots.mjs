@@ -15,6 +15,15 @@ import { llmJson } from "./llm.mjs";
 
 export const NO_MUSIC = "No background music.";
 export const OUTPUT_FLAG_RETRIES = 3;
+// กฎวางแผนช็อตที่ส่งเข้าโมเดลวิดีโอ (film/clip): โมเดลทำฉากผาดโผนไม่ได้ ได้ของลอย บันไดหัก ตัวละครซ้ำหรือเปลี่ยนชนิด
+// (พบใน mochi-agent "The Ladder Lookout" 2026-10-29)
+export const GROUNDED_RULES = [
+  "- ฟิสิกส์ต้องเป็นไปได้จริง: ตัวละครและของทุกชิ้นมีสิ่งรองรับที่เห็นในภาพ (พื้น โต๊ะ ชั้น ตะขอบนผนัง) ห้ามของลอยหรือแขวนจากสิ่งที่ไม่อยู่ในภาพ",
+  "- ห้ามฉากผาดโผนที่ใช้ฟิสิกส์ซับซ้อน: ของแกว่งเป็นลูกตุ้ม กระโดดหรือเหวี่ยงตัวไปคว้าของกลางอากาศ ห้อยโหน ของพังเป็นชิ้น · ใช้มุกติดพื้นแทน: ลื่น ชน สะดุด ล้มลงบนของนุ่ม ติดอยู่ในกล่องหรือผ้าห่ม ของเบาๆ หล่นใส่หัว",
+  "- แต่ละช็อตอยู่สถานที่เดียว first_frame_prompt บอกให้ชัดว่าในบ้านหรือนอกบ้าน (เช่น inside the garage, ceiling visible) และของในฉากต้องเข้ากับสถานที่นั้น",
+  "- ตัวละครแต่ละตัวมีในภาพตัวเดียว ทุกครั้งที่เอ่ยชื่อใน prompt ให้บอกชนิดสัตว์ด้วย (เช่น Bean the corgi) ห้ามเพิ่มสัตว์หรือตัวละครอื่น",
+];
+
 export const SOFTEN = "Gentle, family-friendly cartoon tone: playful and harmless, no injury, no peril, no scary moments.";
 
 // project.json "keyframe_quality": "high" ใช้ klein-9b กับ keyframe/ภาพนิ่ง (ค่าเริ่มต้นใช้ 4b ที่ถูกกว่า)
