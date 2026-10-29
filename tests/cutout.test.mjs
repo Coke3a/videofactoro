@@ -13,16 +13,17 @@ after(() => { fs.rmSync(dir, { recursive: true, force: true }); });
 
 const CREAM = "0xF5EBD2", BROWN = "0x5A3A1E", TAN = "0xCDB996", DARK = "0x281E14";
 // สร้างภาพทดสอบด้วย ffmpeg: พื้นครีม + กล่องวาดตามลำดับ [x,y,w,h,color]
-function make(name, boxes, size = "200x200") {
+function make(name, boxes, size = "200x200", bg = CREAM) {
   const f = path.join(dir, name);
   const vf = boxes.map(([x, y, w, h, c]) => `drawbox=x=${x}:y=${y}:w=${w}:h=${h}:color=${c}:t=fill`).join(",");
-  execFileSync("ffmpeg", ["-v", "error", "-y", "-f", "lavfi", "-i", `color=c=${CREAM}:s=${size}`, ...(vf ? ["-vf", vf] : []), "-frames:v", "1", f]);
+  execFileSync("ffmpeg", ["-v", "error", "-y", "-f", "lavfi", "-i", `color=c=${bg}:s=${size}`, ...(vf ? ["-vf", vf] : []), "-frames:v", "1", f]);
   return f;
 }
-function alphaAt(png, w, h) {
+function rgbaAt(png, w) {
   const raw = execFileSync("ffmpeg", ["-v", "error", "-i", png, "-f", "rawvideo", "-pix_fmt", "rgba", "-"], { maxBuffer: 1 << 28 });
-  return (x, y) => raw[(y * w + x) * 4 + 3];
+  return (x, y) => [...raw.subarray((y * w + x) * 4, (y * w + x) * 4 + 4)];
 }
+const alphaAt = (png, w) => { const at = rgbaAt(png, w); return (x, y) => at(x, y)[3]; };
 const square = [[50, 40, 100, 100, BROWN], [54, 44, 92, 92, CREAM]];
 
 test("cutout: ตัวกล่องทึบ พื้นหลังโปร่ง", async () => {
@@ -74,6 +75,29 @@ test("cutout: ภาพ 880x1184 เร็วพอ", async () => {
   const t = Date.now();
   await cutout(src, path.join(dir, "big-out.png"));
   assert.ok(Date.now() - t < 2000, `ช้าไป ${Date.now() - t}ms`);
+});
+
+// พื้นเขียว chroma key: ขนสีขาวที่โดนแสงเขียวสะท้อน (เขียวเกินแค่ ~40) ต้องไม่ถูกเจาะเป็นรู
+const GREEN = "0x00FF00", WHITE = "0xF0F0F0", SPILL = "0xC8F0C8", SHADOW = "0x10B010";
+const furry = [[50, 40, 100, 100, WHITE], [50, 110, 100, 30, SPILL], [40, 150, 120, 20, SHADOW]];
+
+test("cutout: พื้นเขียว -> green key, ขนโดนแสงเขียวยังทึบ", async () => {
+  const src = make("g.png", furry, "200x200", GREEN), dst = path.join(dir, "g-out.png");
+  const r = await cutout(src, dst);
+  assert.equal(r.mode, "green");
+  const at = rgbaAt(dst, 200);
+  assert.equal(at(2, 2)[3], 0);
+  assert.equal(at(100, 160)[3], 0); // เงาเขียวเข้ม
+  assert.equal(at(100, 90)[3], 255);
+  assert.equal(at(100, 125)[3], 255); // กลางแถบเขียวสะท้อน ห่างจากพื้นหลัง > band
+  assert.ok(at(100, 139)[3] < 255); // ขอบติดพื้นหลัง: alpha นุ่ม
+  const [rr, g, b] = at(100, 125);
+  assert.ok(g <= Math.max(rr, b), `despill ไม่ทำงาน: ${[rr, g, b]}`);
+});
+
+test("cutout: พื้นครีม -> flood เดิม", async () => {
+  const r = await cutout(make("f.png", square), path.join(dir, "f-out.png"));
+  assert.equal(r.mode, "flood");
 });
 
 test("cutout: ไม่มีไฟล์ต้นฉบับ -> VfError USAGE", async () => {

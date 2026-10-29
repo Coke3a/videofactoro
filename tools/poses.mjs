@@ -17,10 +17,12 @@ export const DEFAULT_POSES = {
   curious: "head tilted to one side, one ear raised, curious look, sniffing forward",
   run: "running to the right, side view, legs stretched mid-stride, ears flapping",
 };
-export const POSE_FRAME = "Full body, centered, whole character visible with space around it. The character is isolated on a perfectly flat, uniform light cream background: no ground, no floor line, no cast shadow under the feet, no props, no other characters.";
-// prompt แก้ภาพ (ไม่ใส่ style_prompt เพราะภาพต้นฉบับมีสไตล์อยู่แล้ว และห้ามเพิ่มฉากหลัง)
+// พื้นเขียว chroma key ตัดด้วย greenKey ใน cutout.mjs; ไม่ใส่ style_prompt ของ project เพราะ style แนว 3D/ภาพยนตร์
+// พาฉากหลัง แสงไล่ระดับ และเงามาด้วย พื้นจึงไม่เรียบและตัดไม่ออก (ภาพ ref มีสไตล์อยู่แล้ว)
+export const POSE_FRAME = "Full body, centered, whole character visible with generous empty space around it, including above the head and ears. The character is isolated on a solid flat pure chroma-key green (#00FF00) background, evenly lit, no gradient, no vignette, no ground, no floor line, no cast shadow, no scenery, no props, no other characters. Clean studio cut-out look.";
+// prompt แก้ภาพ (ไม่ใส่ style_prompt เพราะภาพต้นฉบับมีสไตล์อยู่แล้ว และห้ามเพิ่มฉากหลัง ต้องคงพื้นเขียวไว้)
 // ตาต้องเหมือนเดิมเป๊ะ ไม่งั้นตากระพริบทุกครั้งที่ปากขยับ
-export const TALK_PROMPT = "Edit image 1. Keep everything identical: the same character, same pose, same size and position in the frame, same plain flat light cream background with nothing else in it. Keep the eyes exactly as they are (open or closed, gaze direction, shape and size), and keep the eyebrows, ears, paws, tail, body and every other detail unchanged; add nothing new to the face. Change only the mouth: open it slightly as if saying \"ah\". Do not add any room, furniture, window or scenery.";
+export const TALK_PROMPT = "Edit image 1. Keep everything identical: the same character, same pose, same size and position in the frame, same solid flat pure green (#00FF00) background with nothing else in it. Keep the eyes exactly as they are (open or closed, gaze direction, shape and size), and keep the eyebrows, ears, paws, tail, body and every other detail unchanged; add nothing new to the face. Change only the mouth: open it slightly as if saying \"ah\". Do not add any room, furniture, window or scenery.";
 // ห้ามเอ่ยถึงน้ำตาใน prompt: ตัวแก้ภาพเติมน้ำตาให้ท่าที่ไม่ได้ร้องไห้ (Pip happy/run)
 // seed ภาพอ้าปาก = base + 8, 9, 10 (ไม่ชน seed ของท่าที่ใช้ 0..maxRerolls)
 const TALK_ATTEMPT = 8;
@@ -55,7 +57,7 @@ export async function makePoses({ dir, slug, char, poses = DEFAULT_POSES, maxRer
         maxRerolls,
         generate: (attempt) => generateImage({
           projectDir: dir, model: MODELS.imageFast, refs: [ref], aspect: "3:4", seed: seedAt(base, attempt),
-          prompt: `The same character as in image 1 (${char.look}), now ${action}. Keep exactly the same character design, colors and art style as image 1. ${POSE_FRAME} ${pj.style_prompt}`,
+          prompt: `The same character as in image 1 (${char.look}), now ${action}. Keep exactly the same character design, colors and art style as image 1. ${POSE_FRAME}`,
           need: `pose:${cid}:${name}`, kind: "character-pose", characters: [cid], tags: [name], meta,
         }),
         check: (c) => check(c, RULES.characterPose, ctx, meta),

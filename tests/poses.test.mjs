@@ -104,7 +104,9 @@ test("รันจริง: 12 ไฟล์ + poses.json 6 ท่า, talk ใ�
   assert.ok(talk.every((p) => !p.includes(style)));
   const pose = prompts.filter((p) => !p.includes("Edit image 1"));
   assert.equal(pose.length, 6);
-  assert.ok(pose.every((p) => p.includes(style) && p.includes("flat, uniform light cream background")));
+  // พื้นเขียว chroma key และไม่มี style_prompt (style 3D พาฉาก/แสงมาด้วย ตัดพื้นไม่ออก)
+  assert.ok(pose.every((p) => !p.includes(style) && p.includes("chroma-key green (#00FF00) background")));
+  assert.ok(talk.every((p) => p.includes("green") && !p.includes("cream")));
   // QA ท่า 6 ครั้ง (ภาพเดียว มีคำถามเรื่องตาพร้อมชื่อท่า) + QA ภาพอ้าปาก 6 ครั้ง (ภาพท่า + ภาพอ้าปาก)
   const qa = clefCalls().map((c) => c.body);
   assert.equal(qa.length, 12);

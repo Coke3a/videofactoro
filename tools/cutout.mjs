@@ -1,4 +1,5 @@
-// ตัดพื้นหลังกระดาษเรียบออกจากรูปตัวละคร/prop -> RGBA png (ffmpeg ถอดรหัส/เข้ารหัส, ที่เหลือเป็น typed array)
+// ตัดพื้นหลังออกจากรูปตัวละคร/prop -> RGBA png (ffmpeg ถอดรหัส/เข้ารหัส, ที่เหลือเป็น typed array)
+// พื้นเขียว chroma key -> greenKey; พื้นเรียบสีอื่น (ครีม) -> flood จากขอบ
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { VfError } from "./out.mjs";
@@ -68,12 +69,94 @@ function boxFilter(m, w, h, r, isMin, out) {
   return res;
 }
 
+// ทิ้งเกาะทึบเล็ก ๆ (เศษกระดาษ/เศษเงา)
+function dropIslands(alpha, w, h, minPx) {
+  const n = w * h, comp = new Uint8Array(n), q = new Int32Array(n);
+  for (let s = 0; s < n; s++) {
+    if (!alpha[s] || comp[s]) continue;
+    let head = 0, tail = 0;
+    q[tail++] = s; comp[s] = 1;
+    while (head < tail) {
+      const i = q[head++], x = i % w;
+      if (x > 0 && alpha[i - 1] && !comp[i - 1]) { comp[i - 1] = 1; q[tail++] = i - 1; }
+      if (x < w - 1 && alpha[i + 1] && !comp[i + 1]) { comp[i + 1] = 1; q[tail++] = i + 1; }
+      if (i >= w && alpha[i - w] && !comp[i - w]) { comp[i - w] = 1; q[tail++] = i - w; }
+      if (i < n - w && alpha[i + w] && !comp[i + w]) { comp[i + w] = 1; q[tail++] = i + w; }
+    }
+    if (tail < minPx) for (let k = 0; k < tail; k++) alpha[q[k]] = 0;
+  }
+}
+
+const greenExcess = (px, i) => px[i * 3 + 1] - Math.max(px[i * 3], px[i * 3 + 2]);
+
+// ขอบรูปเกือบทั้งหมดเป็นเขียวจัด = ภาพสั่งพื้น chroma key มา
+export function isGreenBg(w, h, px, hi = 70) {
+  const b = borderIdx(w, h);
+  return b.filter((i) => greenExcess(px, i) >= hi).length >= b.length * 0.9;
+}
+
+// แกน = เขียวจัด (>= hi) ที่ต่อกับขอบรูป -> โปร่ง; แถบ band px ถัดจากแกนที่ยังเขียวเกิน lo -> alpha นุ่ม
+// ไม่ไหลผ่านพิกเซลเขียวอ่อน ขนขาวที่โดนแสงเขียวสะท้อนกลางตัวจึงไม่เป็นรู
+function greenKey(w, h, px, alpha, { lo = 25, hi = 70, band = 3 } = {}) {
+  const n = w * h, d = new Uint8Array(n).fill(255), q = new Int32Array(n);
+  let head = 0, tail = 0;
+  const core = (i) => { if (d[i] === 255 && greenExcess(px, i) >= hi) { d[i] = 0; q[tail++] = i; } };
+  for (const i of borderIdx(w, h)) core(i);
+  while (head < tail) {
+    const i = q[head++], x = i % w;
+    if (x > 0) core(i - 1);
+    if (x < w - 1) core(i + 1);
+    if (i >= w) core(i - w);
+    if (i < n - w) core(i + w);
+  }
+  head = 0;
+  while (head < tail) {
+    const i = q[head++], x = i % w;
+    if (d[i] >= band) continue;
+    for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, i - w, i + w]) {
+      if (j < 0 || j >= n || d[j] !== 255 || greenExcess(px, j) <= lo) continue;
+      d[j] = d[i] + 1; q[tail++] = j;
+    }
+  }
+  for (let i = 0; i < n; i++) {
+    if (d[i] === 0) alpha[i] = 0;
+    else if (d[i] !== 255) alpha[i] = Math.round(255 * Math.min(1, (hi - greenExcess(px, i)) / (hi - lo)));
+  }
+  // despill: ตัดเขียวส่วนเกินทั้งภาพ (แสงเขียวสะท้อนบนขน)
+  for (let i = 0; i < n; i++) if (greenExcess(px, i) > 0) px[i * 3 + 1] = Math.max(px[i * 3], px[i * 3 + 2]);
+}
+
 export async function cutout(src, dst, { tol = 30, shadowTol = 190, islandFrac = 1 / 400, leakRadius = 4 } = {}) {
   const { w, h, px } = await decode(src);
   const n = w * h;
+  const alpha = new Uint8Array(n).fill(255);
+  let restored = 0, mode = "flood";
+  if (isGreenBg(w, h, px)) {
+    mode = "green";
+    greenKey(w, h, px, alpha);
+    dropIslands(alpha, w, h, Math.floor(n * islandFrac));
+  } else restored = floodCut(w, h, px, alpha, { tol, shadowTol, islandFrac, leakRadius });
+
+  const rgba = Buffer.alloc(n * 4);
+  let clear = 0;
+  for (let i = 0; i < n; i++) {
+    rgba[i * 4] = px[i * 3]; rgba[i * 4 + 1] = px[i * 3 + 1]; rgba[i * 4 + 2] = px[i * 3 + 2];
+    rgba[i * 4 + 3] = alpha[i];
+    if (!alpha[i]) clear++;
+  }
+  await new Promise((res, rej) => {
+    const p = execFile("ffmpeg", ["-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", `${w}x${h}`, "-i", "-", "-frames:v", "1", dst],
+      (e) => (e ? rej(new VfError("INTERNAL", `เขียน PNG ไม่ได้: ${dst}`, { err: String(e.message).slice(0, 200) })) : res()));
+    p.stdin.end(rgba);
+  });
+  return { w, h, transparent: clear / n, restored, mode };
+}
+
+// พื้นเรียบ (ครีม): คืนจำนวนพิกเซลที่กู้คืนจากรูรั่ว
+function floodCut(w, h, px, alpha, { tol, shadowTol, islandFrac, leakRadius }) {
+  const n = w * h;
   const bg = [px[0], px[1], px[2]], bgSum = bg[0] + bg[1] + bg[2];
   const dist = (i) => Math.abs(px[i * 3] - bg[0]) + Math.abs(px[i * 3 + 1] - bg[1]) + Math.abs(px[i * 3 + 2] - bg[2]);
-  const alpha = new Uint8Array(n).fill(255);
 
   // 1) พื้นหลังจากขอบรูป
   const seen = new Uint8Array(n);
@@ -99,22 +182,8 @@ export async function cutout(src, dst, { tol = 30, shadowTol = 190, islandFrac =
     }, y0);
   }
 
-  // 3) ทิ้งเกาะทึบเล็ก ๆ (เศษกระดาษ/เศษเงา)
-  const minPx = Math.floor(n * islandFrac);
-  const comp = new Uint8Array(n), q = new Int32Array(n);
-  for (let s = 0; s < n; s++) {
-    if (!alpha[s] || comp[s]) continue;
-    let head = 0, tail = 0;
-    q[tail++] = s; comp[s] = 1;
-    while (head < tail) {
-      const i = q[head++], x = i % w;
-      if (x > 0 && alpha[i - 1] && !comp[i - 1]) { comp[i - 1] = 1; q[tail++] = i - 1; }
-      if (x < w - 1 && alpha[i + 1] && !comp[i + 1]) { comp[i + 1] = 1; q[tail++] = i + 1; }
-      if (i >= w && alpha[i - w] && !comp[i - w]) { comp[i - w] = 1; q[tail++] = i - w; }
-      if (i < n - w && alpha[i + w] && !comp[i + w]) { comp[i + w] = 1; q[tail++] = i + w; }
-    }
-    if (tail < minPx) for (let k = 0; k < tail; k++) alpha[q[k]] = 0;
-  }
+  // 3) ทิ้งเกาะทึบเล็ก ๆ
+  dropIslands(alpha, w, h, Math.floor(n * islandFrac));
 
   // 4) กู้ส่วนที่รั่ว: โปร่งที่ถึงจากขอบได้เฉพาะผ่านช่องแคบ (< ~2*leakRadius px) ให้กลับเป็นทึบ
   let restored = 0;
@@ -129,18 +198,5 @@ export async function cutout(src, dst, { tol = 30, shadowTol = 190, islandFrac =
     const keep = boxFilter(reached, w, h, leakRadius, false, 0);
     for (let i = 0; i < n; i++) if (tr[i] && !keep[i]) { alpha[i] = 255; restored++; }
   }
-
-  const rgba = Buffer.alloc(n * 4);
-  let clear = 0;
-  for (let i = 0; i < n; i++) {
-    rgba[i * 4] = px[i * 3]; rgba[i * 4 + 1] = px[i * 3 + 1]; rgba[i * 4 + 2] = px[i * 3 + 2];
-    rgba[i * 4 + 3] = alpha[i];
-    if (!alpha[i]) clear++;
-  }
-  await new Promise((res, rej) => {
-    const p = execFile("ffmpeg", ["-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", `${w}x${h}`, "-i", "-", "-frames:v", "1", dst],
-      (e) => (e ? rej(new VfError("INTERNAL", `เขียน PNG ไม่ได้: ${dst}`, { err: String(e.message).slice(0, 200) })) : res()));
-    p.stdin.end(rgba);
-  });
-  return { w, h, transparent: clear / n, restored };
+  return restored;
 }
