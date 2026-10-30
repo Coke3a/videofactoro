@@ -274,6 +274,8 @@ async function work({ dir, ctx, state, key, id: given, prompt, total, audio, pla
     const propInfo = Object.fromEntries(listProps(dir).map((p) => [p.id, p]));
     const html = composeHtml({
       plan, times, lines, stage: stages, size: SIZE, fps: FPS, lang,
+      // project.json motion_zoom: ช่องที่อยากเห็นตัวละคร/สินค้าใกล้ขึ้น (เช่นคลิปขายของ) ค่าเดิม 1 = ไม่ซูม
+      zoom: Number(pj.motion_zoom) > 1 ? Number(pj.motion_zoom) : 1,
       font: { family: FONT_FOR(lang).family, file: basename(font) },
       assets: {
         plate: (pid) => plates[pid],

@@ -24,6 +24,25 @@ const FLOOR_PERSPECTIVE = 1400;
 // ระยะกึ่งกลางขั้นต่ำ = SEP × ความกว้างเฉลี่ยของคู่: ตัวละครจริงกินแค่ ~78% ของกว้างภาพท่า (ขอบใส)
 export const SEP = 0.8;
 const RIDE_BOTTOM = "30%";
+const CAP_BOTTOM = 0.43;
+// ซูมทั้งฉาก (ฉากหลัง + ตัวละคร + prop) รอบระดับเท้า: ตัวใหญ่ขึ้นโดยสัดส่วนกับห้องไม่เพี้ยน
+// ลดซูมลงจนทุกชิ้นยังอยู่ในเฟรม และหาจุดยึดแนวนอนที่ไม่ดันชิ้นไหนหลุดขอบ
+const ZOOM_STEP = 0.05;
+const ZOOM_MARGIN = 0.02;
+export function worldZoom({ zoom = 1, W, extents }) {
+  if (!(zoom > 1) || !extents.length) return { z: 1, ox: W / 2 };
+  const lo = Math.min(...extents.map((e) => e[0]));
+  const hi = Math.max(...extents.map((e) => e[1]));
+  const m = W * ZOOM_MARGIN;
+  for (let z = Math.min(zoom, 3); z > 1 + 1e-9; z -= ZOOM_STEP) {
+    // จุด x หลังซูม = ox + (x − ox)·z → ต้องการ lo' ≥ m และ hi' ≤ W − m
+    const min = (hi * z - (W - m)) / (z - 1);
+    const max = (lo * z - m) / (z - 1);
+    const a = Math.max(0, min), b = Math.min(W, max);
+    if (a <= b) return { z: r3(z), ox: Math.min(b, Math.max(a, (lo + hi) / 2)) };
+  }
+  return { z: 1, ox: W / 2 };
+}
 const NARRATOR_COLOR = "#ffffff";
 // สีอิ่มตัว ตัดกับขอบดำ: สีพาสเทล (#ffb36b เดิม) จมไปกับ plate สีครีม
 const CAP_COLORS = ["#ffd60a", "#3ad7ff", "#6dff4f", "#ff5fa8", "#ff8c1a"];
@@ -191,7 +210,7 @@ const defaultFont = (lang) => {
 };
 
 // font: { family, file } — file คือชื่อไฟล์ใน fonts/ ของโฟลเดอร์ render (ค่าเริ่มต้นจาก FONT_FOR)
-export function composeHtml({ plan, times, lines = {}, stage, assets, size = { w: 1080, h: 1920 }, fps = 30, lang = "en", font }) {
+export function composeHtml({ plan, times, lines = {}, stage, assets, size = { w: 1080, h: 1920 }, fps = 30, lang = "en", font, zoom = 1 }) {
   const W = size.w;
   const H = size.h;
   // ค่าพิกเซลในชุดท่าทางอ้างอิงเฟรม 1080×1920
@@ -291,17 +310,22 @@ export function composeHtml({ plan, times, lines = {}, stage, assets, size = { w
       return `<div id="${eid(`o-${safe(p.id)}`)}" class="prop" style="left:${left}px;bottom:${r3(bottom)}px;width:${r3(pw)}px;height:${r3(ph)}px">`
         + `${img}${ride}</div>`;
     };
+    const view = worldZoom({ zoom, W, extents: Object.values(el).map((e) => [(e.x0 - e.w / 2) * W, (e.x0 + e.w / 2) * W]) });
+    // คำบรรยายลอยเหนือหัวเสมอ: ซูมแล้วหัวสูงขึ้นตาม จึงยกคำบรรยายตาม (ค่าเดิม 43% ใน base.css)
+    const capAt = view.z > 1 ? `;bottom:${r3(feetPx + (CAP_BOTTOM * H - feetPx) * view.z)}px` : "";
     const caps = t.lines.map((l, i) => {
       const words = captionChunks(sc.lines[i].text, lang);
       const id = eid(`cap${i + 1}`);
-      return { id, words, html: `<div id="${id}" class="cap" style="color:${colors[l.who] ?? NARRATOR_COLOR}">${words.map((w) => `<span>${esc(w)}</span>`).join("")}</div>` };
+      return { id, words, html: `<div id="${id}" class="cap" style="color:${colors[l.who] ?? NARRATOR_COLOR}${capAt}">${words.map((w) => `<span>${esc(w)}</span>`).join("")}</div>` };
     });
     const stamps = beats.filter((b) => b.fx === "stamp").map((b, i) => `<div id="${eid(`stamp${i + 1}`)}" class="stamp">${esc(b.text)}</div>`);
     html.push([
       `<section id="${sid}" class="clip" data-start="${r3(t.start)}" data-duration="${t.dur}" data-track-index="1">`,
+      ...(view.z > 1 ? [`<div class="world" style="transform-origin:${r3(view.ox)}px ${r3(H - feetPx)}px;transform:scale(${view.z})">`] : []),
       `<img id="${eid("plate")}" class="plate" src="${esc(assets.plate(sc.place))}" />`,
       ...props.map(propHtml),
       ...cast.filter((c) => !rides(c)).map(actorHtml),
+      ...(view.z > 1 ? ["</div>"] : []),
       ...caps.map((c) => c.html),
       ...stamps,
       "</section>",

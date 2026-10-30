@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { sceneTimes, mouthFrames, composeHtml, audioCues, FONT_FOR, fontFile, captionChunks, layoutX, ACTOR_SIZE, CROWD_SIZE, SEP } from "../tools/hf-compose.mjs";
+import { sceneTimes, mouthFrames, composeHtml, audioCues, FONT_FOR, fontFile, captionChunks, layoutX, ACTOR_SIZE, CROWD_SIZE, SEP, worldZoom } from "../tools/hf-compose.mjs";
 import { DEFAULT_STAGE } from "../tools/stage.mjs";
 import { LEAD, GAP, TAIL, SCENE_MIN } from "../tools/motion-plan.mjs";
 
@@ -363,4 +363,27 @@ test("composeHtml: floor prop ที่ enter drop คลี่ออกตา�
   p.scenes[0].cast[0].ride = undefined;
   const up = compose({ plan: p, assets: withInfo({ mat: { placement: "upright", size_cm: 50, aspect: 1, trimmed: true } }) });
   assert.match(up, /tl\.fromTo\("#sc1-o-mat", \{"y":/);
+});
+
+test("worldZoom: ไม่ซูม = 1; ซูมแล้วทุกชิ้นยังอยู่ในเฟรม; ชิ้นกระจายกว้างจนซูมไม่ได้ = 1", () => {
+  assert.deepEqual(worldZoom({ zoom: 1, W: 1080, extents: [[300, 700]] }), { z: 1, ox: 540 });
+  const fit = (v, ex) => ex.every(([l, r]) => v.ox + (l - v.ox) * v.z >= 0 && v.ox + (r - v.ox) * v.z <= 1080);
+  const one = [[340, 740]];
+  const v1 = worldZoom({ zoom: 1.5, W: 1080, extents: one });
+  assert.equal(v1.z, 1.5);
+  assert.ok(fit(v1, one));
+  const two = [[60, 500], [600, 1000]];
+  const v2 = worldZoom({ zoom: 1.6, W: 1080, extents: two });
+  assert.ok(v2.z > 1 && v2.z < 1.6 && fit(v2, two), JSON.stringify(v2));
+  assert.equal(worldZoom({ zoom: 1.5, W: 1080, extents: [[0, 1080]] }).z, 1);
+});
+
+test("composeHtml zoom: ห่อฉากหลัง/ตัวละคร/prop ใน .world ยึดระดับเท้า คำบรรยายอยู่นอกและยกสูงขึ้น", () => {
+  const plain = compose({ plan: matPlan() });
+  assert.doesNotMatch(plain, /class="world"/);
+  const p = matPlan();
+  p.scenes[0].lines = [{ who: "pim", text: "hello there friend" }];
+  const html = compose({ plan: p, lines: { "1-1": { seconds: 1, rms: loud(30) } }, zoom: 1.4 });
+  assert.match(html, /<div class="world" style="transform-origin:[\d.]+px [\d.]+px;transform:scale\(1\.4\)">\s*<img id="sc1-plate"/);
+  assert.match(html, /<\/div>\s*<\/div>\s*<div id="sc1-cap1" class="cap" style="color:[^;"]+;bottom:[\d.]+px"/);
 });
