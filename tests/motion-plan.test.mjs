@@ -454,3 +454,12 @@ test("hook: ต้องมีป้าย ยาวไม่เกิน HOOK_M
   assert.match(issues((p) => { p.scenes[0].lines.push({ who: "narrator", text: "one two three four five six seven eight" }); }), /the first scene \(the hook\) is about/);
   assert.match(scenesSystemPrompt("th", 30, ASSETS), /hook: a short title in th/);
 });
+
+test("close/low: ตัวที่ focus ห้ามเดินไปจุดอื่น (กล้องไม่ตาม)", () => {
+  const p = plan();
+  Object.assign(p.scenes[3], { shot: "low", focus: "biscuit" });
+  assert.match(validateScenePlan(p, ASSETS, OPTS(p)).join("\n"), /camera does not follow/);
+  p.scenes[3].beats[0].move = "hop";
+  delete p.scenes[3].beats[0].to_spot;
+  assert.doesNotMatch(validateScenePlan(p, ASSETS, OPTS(p)).join("\n"), /camera does not follow/);
+});

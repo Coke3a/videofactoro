@@ -455,3 +455,20 @@ test("composeHtml hook: ป้ายบนฉากแรกเท่านั�
   assert.equal((html.match(/class="hook"/g) ?? []).length, 1);
   assert.doesNotMatch(compose({ plan: cardPlan(), assets: cardAssets, lines: { "1-1": { seconds: 1, rms: loud(30) } } }), /class="hook"/);
 });
+
+test("composeHtml close/low: ตัวที่ focus ยืนริมห้องถูกเลื่อนมากลางจอ ไม่หลุดขอบ", () => {
+  const screenX = (shot) => {
+    const p = matPlan();
+    p.scenes[0].cast = [{ who: "pim", spot: "far-left", pose: "idle" }];
+    p.scenes[0].props = [];
+    Object.assign(p.scenes[0], { shot, focus: "pim" });
+    const html = compose({ plan: p });
+    const s = styleOf(html, "sc1-c-pim");
+    const m = /class="world" style="transform-origin:0 0;transform:translate\(([-\d.]+)px,[-\d.]+px\) scale\(([\d.]+)\)"/.exec(html);
+    const [tx, z] = m ? [Number(m[1]), Number(m[2])] : [0, 1];
+    return ((num(s, "left") + num(s, "width") / 2) * z + tx) / 1080;
+  };
+  for (const shot of ["close", "low"]) assert.ok(Math.abs(screenX(shot) - 0.5) < 0.05, `${shot}: ${screenX(shot)}`);
+  // wide ไม่เลื่อน: ยังอยู่ริมซ้าย
+  assert.ok(screenX("wide") < 0.3);
+});

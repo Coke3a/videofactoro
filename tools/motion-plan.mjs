@@ -229,7 +229,7 @@ export function scenesSystemPrompt(lang, total, raw, { narrator = false } = {}) 
     `- beats: { at, who?, pose?, move?, to_spot?, dur?, fx?, sfx?, text? }. at is seconds from scene start as a string ("1.5") or "line<N>" / "line<N>-end" (N counts from 1 within the scene). who is a cast id or a prop id in the scene. move: ${MOVES.join(", ")} (to and run-to need to_spot). fx: stamp (needs text) or shake. sfx: ${(assets.sfx ?? []).join(", ")}.`,
     `- No on-screen text except stamps: a sound word or 1–2 words, at most ${STAMP_MAX} characters (e.g. BONK!, THE END).`,
     "- Every line also has en: its meaning in plain English (one short sentence), used to check the picture.",
-    `- shot per scene: wide (whole room), medium (closer on the cast), close (one character's face, set focus), low (floor level close on one character's feet and what they stand on, set focus). Vary the shot: never 3 scenes in a row with the same shot; use close for reactions (surprise, fear, joy) and low for feet, falls and things on the floor.`,
+    `- shot per scene: wide (whole room), medium (closer on the cast), close (one character's face, set focus), low (floor level close on one character's feet and what they stand on, set focus). Vary the shot: never 3 scenes in a row with the same shot; use close for reactions (surprise, fear, joy) and low for feet, falls and things on the floor. In close and low shots the camera does not follow: the focus character stays on its spot (hop, jump, shiver are fine; to/run-to need a wide or medium shot).`,
     `- Keep scenes short (about ${SCENE_TARGET}s, usually one line each): many quick cuts.`,
     `- hook: a short title in ${lang} (at most ${HOOK_MAX} characters) shown at the top of the first scene: a question or tease that makes people stay (e.g. "What if the cat meets a vacuum?"). The first scene is the hook: at most ${HOOK_SCENE_MAX}s, and something happens in its first second (a beat at "0"–"1" or "line1").`,
     `- Stamps are in the clip language (${lang}), e.g. a Thai sound word for a Thai clip.`,
@@ -424,6 +424,10 @@ export function validateScenePlan(plan, raw, { total, lang = "en", narrator = fa
     if (sc.shot !== undefined && !SHOTS.includes(sc.shot)) issues.push(`${tag}: shot "${sc.shot}" must be one of ${SHOTS.join(", ")}`);
     if ((sc.shot === "close" || sc.shot === "low") && !arr(sc.cast).some((c) => c?.who === sc.focus)) {
       issues.push(`${tag}: shot "${sc.shot}" needs focus set to a character in this scene's cast`);
+    }
+    // กล้อง close/low ไม่ตามตัว: ตัวที่ focus เดินไปจุดอื่นจะหลุดเฟรม
+    if ((sc.shot === "close" || sc.shot === "low") && arr(sc.beats).some((b) => b?.who === sc.focus && (b.move === "to" || b.move === "run-to"))) {
+      issues.push(`${tag}: in a ${sc.shot} shot the camera does not follow, so ${sc.focus} cannot move to another spot (use hop, jump or shiver, or a wide/medium shot)`);
     }
 
     const placeOk = Object.hasOwn(assets.places, sc.place ?? "");

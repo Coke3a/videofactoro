@@ -393,11 +393,15 @@ export function composeHtml({ plan, times, lines = {}, stage, assets, size = { w
     // จัดตำแหน่งตัวที่ยืนบนพื้น + prop ที่มีคนขี่ (กว้างเท่าตัวที่ขี่) ด้วยกัน; prop เปล่าแค่ไม่ให้หลุดขอบ
     const riders = (p) => cast.filter((c) => (rides(c) || onMat(c)) && c.ride === p.id);
     const bodyW = (p) => Math.max(propW(p), ...riders(p).map(actorW));
+    // close/low: เลื่อนทั้งฉากให้ตัวที่ focus อยู่กลางจอ — กล้องเล็งได้ไม่เกินขอบภาพ ตัวที่ยืนข้าง ๆ เลยหลุดขอบ
+    const focusSpot = SHOT_AIM[sc.shot] ? cast.find((c) => c.who === sc.focus)?.spot : undefined;
+    const sx = focusSpot ? 0.5 - spotX(st, focusSpot) : 0;
+    const xAt = (spot) => spotX(st, spot) + sx;
     const pos = layoutX([
-      ...cast.filter((c) => !rides(c) && !onMat(c)).map((c) => ({ key: `c:${c.who}`, x: spotX(st, c.spot), w: actorW(c) })),
-      ...props.filter((p) => riders(p).length).map((p) => ({ key: `o:${p.id}`, x: spotX(st, p.spot), w: bodyW(p) })),
+      ...cast.filter((c) => !rides(c) && !onMat(c)).map((c) => ({ key: `c:${c.who}`, x: xAt(c.spot), w: actorW(c) })),
+      ...props.filter((p) => riders(p).length).map((p) => ({ key: `o:${p.id}`, x: xAt(p.spot), w: bodyW(p) })),
     ]);
-    const propX = Object.fromEntries(props.map((p) => [p.id, pos[`o:${p.id}`] ?? inFrame(spotX(st, p.spot), propW(p))]));
+    const propX = Object.fromEntries(props.map((p) => [p.id, pos[`o:${p.id}`] ?? inFrame(xAt(p.spot), propW(p))]));
     // who ใน beat: หาใน cast ก่อน แล้วค่อย props (cast ทับ props)
     const el = Object.create(null);
     for (const p of props) el[p.id] = { sel: `#${eid(`o-${safe(p.id)}`)}`, x0: propX[p.id], w: bodyW(p), body: false, cur: 0 };
@@ -509,7 +513,7 @@ export function composeHtml({ plan, times, lines = {}, stage, assets, size = { w
         tw(e.sel, { x: e.cur }, { x: r3(e.cur - X(9)), duration: 0.05, ease: "none", yoyo: true, repeat: Math.round(dur / 0.05) | 1 }, at);
       } else if (b.move === "to" || b.move === "run-to") {
         // ระยะสะสมต่อ element ในฉาก → เดินหลายครั้งต่อกันได้ไม่กระตุกกลับ
-        const dx = r3((inFrame(spotX(st, b.to_spot), e.w) - e.x0) * W);
+        const dx = r3((inFrame(xAt(b.to_spot), e.w) - e.x0) * W);
         tw(e.sel, { x: e.cur }, { x: dx, duration: dur, ease: b.move === "run-to" ? "none" : "power1.inOut" }, at);
         e.cur = dx;
         if (b.move === "run-to" && e.body) {
