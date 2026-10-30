@@ -99,7 +99,8 @@ export function scenesSchema(raw = {}) {
             },
             lines: {
               type: "array",
-              items: { type: "object", properties: { who: oneOf(["narrator", ...chars]), text: str }, required: ["who", "text"] },
+              // en: ความหมายภาษาอังกฤษของบท ให้ clef ตรวจว่าท่าตรงกับบท (โหมดสินค้า)
+              items: { type: "object", properties: { who: oneOf(["narrator", ...chars]), text: str, ...(assets.product ? { en: str } : {}) }, required: ["who", "text", ...(assets.product ? ["en"] : [])] },
             },
             beats: {
               type: "array",
@@ -215,6 +216,7 @@ export function scenesSystemPrompt(lang, total, raw, { narrator = false } = {}) 
     narrator ? "- The narrator tells the story briefly; characters speak their own short lines." : "- There is no narrator in this project: every line is spoken by a character in the cast.",
     `- beats: { at, who?, pose?, move?, to_spot?, dur?, fx?, sfx?, text? }. at is seconds from scene start as a string ("1.5") or "line<N>" / "line<N>-end" (N counts from 1 within the scene). who is a cast id or a prop id in the scene. move: ${MOVES.join(", ")} (to and run-to need to_spot). fx: stamp (needs text) or shake. sfx: ${(assets.sfx ?? []).join(", ")}.`,
     `- No on-screen text except stamps: a sound word or 1–2 words, at most ${STAMP_MAX} characters (e.g. BONK!, THE END).`,
+    pr ? "- Every line also has en: its meaning in plain English (one short sentence), used to check the picture." : "",
     "- The pose must show what is said: while a line is spoken, the speaker (or, for the narrator, the character it describes) wears a pose that shows that action or feeling. Change pose at a line start (\"line<N>\") or after it ends (\"line<N>-end\"), never to a pose that contradicts the line being spoken. Only write lines about actions some pose shows.",
     "- Make it move: most scenes need at least one beat. Every beat must change something: a pose, a move, an fx or an sfx (a beat with only text, who or dur is dropped). End on the button gag.",
     pr

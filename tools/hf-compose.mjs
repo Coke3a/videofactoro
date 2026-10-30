@@ -175,6 +175,14 @@ function atSec(at, lines) {
   return m[2] ? l.end : l.start;
 }
 
+// ท่าของตัวละครแต่ละตัว ณ เวลา sec จากต้นฉาก (ท่าใน cast แล้วไล่ beat ที่เปลี่ยนท่าตามเวลา)
+export function poseAt(sc, t, sec) {
+  const pose = Object.fromEntries((sc.cast ?? []).map((c) => [c.who, c.pose]));
+  const beats = (sc.beats ?? []).filter((b) => b.pose && b.who in pose).map((b) => ({ ...b, at: beatAt(b, t) })).sort(byAt);
+  for (const b of beats) if (b.at <= sec) pose[b.who] = b.pose;
+  return pose;
+}
+
 // เวลา beat ถูกบีบไว้ในช่วงฉาก → tween และ sfx ไม่ล้นไปฉากถัดไป
 const beatAt = (b, t) => Math.min(t.dur, Math.max(0, atSec(b.at, t.lines)));
 
