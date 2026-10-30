@@ -1,12 +1,18 @@
 import { riskFindings } from "./risk.mjs";
 import { narrationBudget, narrationSize, CHARS_PER_SEC } from "./clip.mjs";
 import { ID_RE } from "./bible.mjs";
+import { forbiddenHits } from "./product.mjs";
 
 export const CAMERAS = ["push", "push-fast", "pan-left", "pan-right", "static"];
 export const ENTERS = ["drop", "slide-left", "slide-right"];
 export const MOVES = ["hop", "jump", "shiver", "run-to", "to", "loop"];
 export const FX = ["stamp", "shake"];
 export const PARTS = ["setup", "problem", "escalation", "twist", "button"];
+// โหมดสินค้า (project มี product.json): ฉากแทรกรูปสินค้าจริงเต็มจอ + ฉากปิดบอกราคา + ขนาดมุมกล้อง
+export const KINDS = ["scene", "insert", "endcard"];
+export const SHOTS = ["wide", "medium", "close", "low"];
+export const CHIP_MAX = 18;
+export const INSERTS_MIN = 2;
 
 // เวลาต่อฉาก (วินาที) ต้องตรงกับ composer: lead + บท + ช่องว่างระหว่างบท + tail ขั้นต่ำ SCENE_MIN
 export const LEAD = 0.45;
@@ -36,7 +42,9 @@ const uniq = (xs) => [...new Set(xs)];
 const arr = (v) => (Array.isArray(v) ? v : []);
 const withDefaults = (a) => ({
   poses: a?.poses ?? {}, places: a?.places ?? {}, props: arr(a?.props), sfx: arr(a?.sfx),
+  floorProps: arr(a?.floorProps), product: a?.product ?? null,
 });
+const kindOf = (sc) => (KINDS.includes(sc?.kind) ? sc.kind : "scene");
 const spaced = (lang) => narrationBudget(lang, 1).unit === "คำ";
 const unitEn = (lang) => (spaced(lang) ? "words" : "characters");
 const rate = (lang) => (spaced(lang) ? MOTION_WPS : CHARS_PER_SEC);
@@ -78,6 +86,10 @@ export function scenesSchema(raw = {}) {
           type: "object",
           properties: {
             id: str,
+            ...(assets.product ? {
+              kind: oneOf(KINDS), shot: oneOf(SHOTS), focus: oneOf(chars),
+              image: oneOf(assets.product.images.map((im) => im.id)), chip: str,
+            } : {}),
             place: oneOf(Object.keys(assets.places)),
             camera: oneOf(CAMERAS),
             cast: { type: "array", items: { type: "object", properties: cast, required: ["who", "spot", "pose"] } },
@@ -117,9 +129,39 @@ export function scenesSchema(raw = {}) {
   };
 }
 
+// ข้อมูลสินค้าที่ LLM ใช้ได้ (ข้อเท็จจริงและคำอ้างจาก listing เท่านั้น)
+const productLines = (pr) => [
+  `- The product: ${pr.name}${pr.brand ? ` (brand ${pr.brand})` : ""}${pr.price_text ? `, price ${pr.price_text}` : ""}.`,
+  "- Facts you may state (nothing else about size, material or numbers):",
+  ...(pr.facts.length ? pr.facts.map((f) => `  - ${f}`) : ["  (none)"]),
+  "- Benefits you may claim (no other claims):",
+  ...(pr.claims_allowed.length ? pr.claims_allowed.map((f) => `  - ${f}`) : ["  (none)"]),
+  pr.forbidden_words.length ? `- Never say or show: ${pr.forbidden_words.join(", ")}; no comparisons with other products, no prices other than the one above, no discounts or free shipping.` : "- No comparisons with other products, no discounts or free shipping.",
+];
+
+function productStoryPrompt(lang, total, ctx, chars, props) {
+  const pr = ctx.product;
+  return [
+    `You write the story for a ${total}-second vertical product clip (TikTok/Reels/Shorts) made of cut-out cartoon characters on painted backgrounds, with real product photos shown full screen. Reply with JSON matching the schema only.`,
+    ctx.direction ? `- Project direction: ${ctx.direction}` : "",
+    ...productLines(pr),
+    pr.angles.length ? `- Story angles from the product brief (pick one): ${pr.angles.join(" | ")}` : "",
+    "- beats: exactly 5, in this order. setup: an everyday situation without the product (the hook, first 3 seconds). problem: the pain gets worse, funny but relatable. escalation: the product appears (shown as its real photo). twist: the character uses it and the problem is gone, showing one or two benefits. button: the price and a short call to buy. Each text is 1–2 plain English sentences.",
+    "- Use only these characters, and only actions their poses can show:",
+    ...(chars.length ? chars : ["  (none)"]),
+    `- Places available: ${(ctx.places ?? []).join(", ") || "(none)"}. One place is fine; only change place when the story needs it.`,
+    "- Existing props (the product prop is the real product photo):",
+    ...(props.length ? props : ["  (none)"]),
+    "- props_needed: reuse existing ids; avoid new props (0–1 small ones at most). Never invent a prop that is another version of the product.",
+    "- music_prompt (English): one upbeat background track, mood, instruments and BPM, no vocals.",
+    `- title and summary in ${lang}.`,
+  ].filter(Boolean).join("\n");
+}
+
 export function storySystemPrompt(lang, total, ctx = {}) {
   const chars = (ctx.characters ?? []).map((c) => `  - ${c.id} (${c.name ?? c.id}): ${c.personality ?? ""} · poses: ${(c.poses ?? []).join(", ")}`);
   const props = (ctx.props ?? []).map((p) => `  - ${p.id}: ${p.desc ?? ""}${p.placement === "floor" ? " (lies flat on the floor; characters can stand or exercise on it)" : ""}`);
+  if (ctx.product) return productStoryPrompt(lang, total, ctx, chars, props);
   return [
     `You write the story for a ${total}-second kids' cartoon gag clip made of cut-out characters on painted backgrounds. Reply with JSON matching the schema only.`,
     ctx.direction ? `- Project direction: ${ctx.direction}` : "",
@@ -141,10 +183,11 @@ export function storySystemPrompt(lang, total, ctx = {}) {
 
 export function scenesSystemPrompt(lang, total, raw, { narrator = false } = {}) {
   const assets = withDefaults(raw);
-  const n = Math.round(total / 5);
+  const n = Math.round(total / (assets.product ? 3.5 : 5));
   const max = lineMax(lang);
   const poses = Object.entries(assets.poses).map(([c, ps]) => `  - ${c}: ${ps.join(", ")}`);
   const places = Object.entries(assets.places).map(([p, ss]) => `  - ${p}: ${ss.join(", ")}`);
+  const pr = assets.product;
   return [
     `You turn a 5-part gag outline into the scene list of a ${total}-second kids' cartoon. Reply with JSON matching the schema only.`,
     `- scenes: about ${n} (${SCENES_MIN}–${SCENES_MAX}), following the outline in order. Each scene has a short id (s01, s02, ...), one place, one camera move (${CAMERAS.join(", ")}).`,
@@ -154,7 +197,7 @@ export function scenesSystemPrompt(lang, total, raw, { narrator = false } = {}) 
     ...poses,
     "- Spots per place:",
     ...places,
-    places.length >= 2
+    places.length >= 2 && !pr
       ? `- Use 2–3 different places, following where the outline says things happen: change place at a story turn (a chase leads into another room, the twist or button happens somewhere new). Keep neighbouring scenes in one place while the action stays there. With ${MULTI_PLACE_SCENES}+ scenes, one place for the whole clip is rejected.`
       : "",
     `- props: { id, spot, enter? } from: ${(assets.props ?? []).join(", ") || "(none)"}.`,
@@ -166,9 +209,28 @@ export function scenesSystemPrompt(lang, total, raw, { narrator = false } = {}) 
     `- beats: { at, who?, pose?, move?, to_spot?, dur?, fx?, sfx?, text? }. at is seconds from scene start as a string ("1.5") or "line<N>" / "line<N>-end" (N counts from 1 within the scene). who is a cast id or a prop id in the scene. move: ${MOVES.join(", ")} (to and run-to need to_spot). fx: stamp (needs text) or shake. sfx: ${(assets.sfx ?? []).join(", ")}.`,
     `- No on-screen text except stamps: a sound word or 1–2 words, at most ${STAMP_MAX} characters (e.g. BONK!, THE END).`,
     "- Make it move: most scenes need at least one beat. Every beat must change something: a pose, a move, an fx or an sfx (a beat with only text, who or dur is dropped). End on the button gag.",
-    `- Every scene needs 1–${MAX_CAST} cast characters, each standing on a named spot; never leave cast empty.`,
-    "- No real people, brands or copyrighted characters.",
+    pr
+      ? `- Every kind "scene" needs 1–${MAX_CAST} cast characters, each standing on a named spot. insert and endcard scenes have empty cast, props and beats.`
+      : `- Every scene needs 1–${MAX_CAST} cast characters, each standing on a named spot; never leave cast empty.`,
+    ...(pr ? productScenesLines(pr, assets) : ["- No real people, brands or copyrighted characters."]),
   ].filter(Boolean).join("\n");
+}
+
+function productScenesLines(pr, assets) {
+  const imgs = pr.images.map((im) => `  - ${im.id} (${im.role}): ${im.shows || im.role}${im.feature ? ` · feature: ${im.feature}` : ""}`);
+  return [
+    "- This is a product clip. Scene kinds (field kind):",
+    `  - scene (default): characters in a place, as above. shot: wide (whole room), medium (closer on the cast), close (one character's face, set focus), low (floor level close on one character's feet and what they stand on, set focus). Vary the shot: never 3 scenes in a row with the same shot; use close for reactions (pain, surprise, joy) and low for the product in use on the floor.`,
+    "  - insert: the real product photo full screen with a slow zoom. Set image to one of the images below and chip to a 1–4 word label of what it shows (at most " + CHIP_MAX + " characters, in the clip language, only from the facts/benefits). The narrator says one short line about it. Use the hero image when the product first appears.",
+    `  - endcard: the last scene only, exactly one: the hero photo, product name, price and a call to buy. The narrator says one short line with the price${pr.cta ? ` and "${pr.cta}"` : ""}.`,
+    "- Product images:",
+    ...imgs,
+    `- At least ${INSERTS_MIN} insert scenes, showing different images; put a scene with a character using the product between inserts.`,
+    (assets.floorProps ?? []).length ? "- After the product appears, show the character using the real product prop in at least one scene." : "",
+    "- Keep scenes short (3–4 s): about one line each. Hook in the first scene.",
+    ...productLines(pr).slice(1),
+    "- No real people and no other brands.",
+  ];
 }
 
 const lineSeconds = (lang, text) => narrationSize(lang, String(text ?? "")) / rate(lang);
@@ -249,6 +311,36 @@ export function validateScenePlan(plan, raw, { total, lang = "en", narrator = fa
   };
   if (scenes.length < SCENES_MIN || scenes.length > SCENES_MAX) issues.push(`scenes must be ${SCENES_MIN}–${SCENES_MAX} (got ${scenes.length})`);
   const seen = new Set();
+  const pr = assets.product;
+  const imageIds = new Set((pr?.images ?? []).map((im) => im.id));
+  const banned = (label, t) => {
+    for (const w of forbiddenHits(pr, t)) issues.push(`${label} uses a forbidden claim: ${w}`);
+  };
+  const lineCheck = (label, l) => {
+    if (typeof l?.text !== "string" || !l.text.trim()) return issues.push(`${label}: text must not be empty`);
+    const n = narrationSize(lang, l.text);
+    if (n > max) issues.push(`${label} is too long: ${n} ${unitEn(lang)} > ${max} (one line must fit about ${LINE_SECONDS - 1}s); shorten or split it`);
+    risky(`${label} text`, l.text);
+    banned(label, l.text);
+  };
+  // insert/endcard: รูปสินค้าจริงเต็มจอ ไม่มีตัวละคร บทเป็นเสียงผู้บรรยาย
+  const productCard = (sc, i, tag, kind) => {
+    if (arr(sc.cast).length || arr(sc.props).length || arr(sc.beats).length) issues.push(`${tag}: ${kind} scenes have empty cast, props and beats`);
+    if (kind === "insert") {
+      if (!imageIds.has(sc.image)) issues.push(`${tag}: insert image "${sc.image}" must be one of ${[...imageIds].join(", ")}`);
+      const chip = typeof sc.chip === "string" ? sc.chip.trim() : "";
+      if ([...chip].length > CHIP_MAX) issues.push(`${tag}: chip "${chip}" is ${[...chip].length} characters, max ${CHIP_MAX}`);
+      banned(`${tag} chip`, chip);
+      risky(`${tag} chip`, chip);
+    } else if (i !== scenes.length - 1) issues.push(`${tag}: endcard must be the last scene`);
+    arr(sc.lines).forEach((l, j) => {
+      const label = `${tag} line ${j + 1}`;
+      if (l?.who !== "narrator" || !narrator) issues.push(`${label}: ${kind} lines are spoken by the narrator${narrator ? "" : " (this project has no narrator: leave lines empty)"}`);
+      lineCheck(label, l);
+    });
+    const secs = sceneSeconds(sc, lang);
+    if (secs > SCENE_MAX) issues.push(`${tag} (scene ${i + 1}) is about ${secs.toFixed(1)}s, max ${SCENE_MAX}s: split it or cut lines`);
+  };
 
   scenes.forEach((sc, i) => {
     const tag = typeof sc?.id === "string" && sc.id.trim() ? sc.id : `scene ${i + 1}`;
@@ -256,6 +348,15 @@ export function validateScenePlan(plan, raw, { total, lang = "en", narrator = fa
     if (typeof sc.id !== "string" || !sc.id.trim()) issues.push(`${tag}: id must be a non-empty string`);
     else if (seen.has(sc.id)) issues.push(`${tag}: duplicate scene id`);
     seen.add(sc.id);
+
+    if (pr && sc.kind !== undefined && !KINDS.includes(sc.kind)) issues.push(`${tag}: kind "${sc.kind}" must be one of ${KINDS.join(", ")}`);
+    if (!pr && sc.kind !== undefined && sc.kind !== "scene") issues.push(`${tag}: kind "${sc.kind}" needs a product (this project has none)`);
+    const kind = kindOf(sc);
+    if (kind !== "scene") return productCard(sc, i, tag, kind);
+    if (sc.shot !== undefined && !SHOTS.includes(sc.shot)) issues.push(`${tag}: shot "${sc.shot}" must be one of ${SHOTS.join(", ")}`);
+    if ((sc.shot === "close" || sc.shot === "low") && !arr(sc.cast).some((c) => c?.who === sc.focus)) {
+      issues.push(`${tag}: shot "${sc.shot}" needs focus set to a character in this scene's cast`);
+    }
 
     const placeOk = Object.hasOwn(assets.places, sc.place ?? "");
     if (!placeOk) issues.push(`${tag}: place "${sc.place}" does not exist (have: ${Object.keys(assets.places).join(", ")})`);
@@ -312,10 +413,7 @@ export function validateScenePlan(plan, raw, { total, lang = "en", narrator = fa
       if (l?.who === "narrator") {
         if (!narrator) issues.push(`${label}: this project has no narrator; give the line to a character in the cast`);
       } else if (!inCast.has(l?.who)) issues.push(`${label}: speaker "${l?.who}" is not in this scene's cast`);
-      if (typeof l?.text !== "string" || !l.text.trim()) return issues.push(`${label}: text must not be empty`);
-      const n = narrationSize(lang, l.text);
-      if (n > max) issues.push(`${label} is too long: ${n} ${unitEn(lang)} > ${max} (one line must fit about ${LINE_SECONDS - 1}s); shorten or split it`);
-      risky(`${label} text`, l.text);
+      lineCheck(label, l);
     });
 
     const beats = Array.isArray(sc.beats) ? sc.beats : [];
@@ -348,6 +446,7 @@ export function validateScenePlan(plan, raw, { total, lang = "en", narrator = fa
       }
       if (b?.sfx && !sfx.has(b.sfx)) issues.push(`${label}: sfx "${b.sfx}" must be one of ${[...sfx].join(", ")}`);
       risky(`${label} text`, b?.text);
+      banned(label, b?.text);
     });
 
     const secs = sceneSeconds(sc, lang);
@@ -356,7 +455,24 @@ export function validateScenePlan(plan, raw, { total, lang = "en", narrator = fa
 
   const placeIds = Object.keys(assets.places);
   const used = uniq(scenes.map((sc) => sc?.place).filter((p) => Object.hasOwn(assets.places, p ?? "")));
-  if (placeIds.length >= 2 && scenes.length >= MULTI_PLACE_SCENES && used.length === 1) {
+  if (pr) {
+    const kinds = scenes.map(kindOf);
+    const inserts = scenes.filter((sc) => kindOf(sc) === "insert");
+    if (kinds.filter((k) => k === "endcard").length !== 1) issues.push("a product clip needs exactly one endcard scene, last");
+    if (new Set(inserts.map((sc) => sc.image)).size < Math.min(INSERTS_MIN, imageIds.size)) {
+      issues.push(`a product clip needs at least ${INSERTS_MIN} insert scenes with different images (have ${inserts.length})`);
+    }
+    const hero = pr.images.find((im) => im.role === "hero")?.id;
+    const first = inserts[0];
+    if (first && first.image !== hero) issues.push(`the first insert must show the hero image "${hero}" (it shows "${first.image}")`);
+    const shots = scenes.map((sc) => (kindOf(sc) === "scene" ? sc.shot ?? "wide" : kindOf(sc)));
+    for (let k = 2; k < shots.length; k++) {
+      if (kinds[k] === "scene" && shots[k] === shots[k - 1] && shots[k] === shots[k - 2]) {
+        issues.push(`scenes ${k - 1}–${k + 1} all use shot "${shots[k]}": vary the shot`);
+        break;
+      }
+    }
+  } else if (placeIds.length >= 2 && scenes.length >= MULTI_PLACE_SCENES && used.length === 1) {
     issues.push(`all ${scenes.length} scenes are in ${used[0]}: move the story through 2–3 places (have: ${placeIds.join(", ")})`);
   }
 

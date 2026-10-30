@@ -24,11 +24,36 @@ const FLOOR_PERSPECTIVE = 1400;
 // ระยะกึ่งกลางขั้นต่ำ = SEP × ความกว้างเฉลี่ยของคู่: ตัวละครจริงกินแค่ ~78% ของกว้างภาพท่า (ขอบใส)
 export const SEP = 0.8;
 const RIDE_BOTTOM = "30%";
+const SPRITE_FOOT = 0.19;
 const CAP_BOTTOM = 0.43;
 // ซูมทั้งฉาก (ฉากหลัง + ตัวละคร + prop) รอบระดับเท้า: ตัวใหญ่ขึ้นโดยสัดส่วนกับห้องไม่เพี้ยน
 // ลดซูมลงจนทุกชิ้นยังอยู่ในเฟรม และหาจุดยึดแนวนอนที่ไม่ดันชิ้นไหนหลุดขอบ
 const ZOOM_STEP = 0.05;
 const ZOOM_MARGIN = 0.02;
+const CAP_LOW = 0.1;
+const CAP_HIGH = 0.72;
+export const MEDIUM_ZOOM = 1.35;
+export const CLOSE_ZOOM = 2;
+// close: หน้าไปอยู่ที่ 36% จากบน · low: เท้าไปอยู่ที่ 66% จากบน (เห็นพื้นและของที่ยืนอยู่)
+const SHOT_AIM = { close: ["face", 0.36], low: ["feet", 0.66] };
+
+// มุมกล้องของฉาก → transform ของ .world (origin 0 0): x' = x·z + tx
+// wide/medium = worldZoom รอบระดับเท้า (medium ซูมเพิ่มให้พอดีตัวละคร) · close/low = เล็งจุดบนตัวละครที่ focus
+export function shotView({ shot = "wide", zoom = 1, W, H, feetPx, extents, focus }) {
+  const aim = SHOT_AIM[shot];
+  if (aim && focus) {
+    const z = Math.max(CLOSE_ZOOM, zoom);
+    const [mark, at] = aim;
+    // ขอบ world ต้องคลุมเฟรมเสมอ: tx ∈ [W(1−z), 0]
+    const tx = Math.min(0, Math.max(W * (1 - z), W / 2 - focus.x * z));
+    const ty = Math.min(0, Math.max(H * (1 - z), H * at - focus[mark] * z));
+    return { z, tx: r3(tx), ty: r3(ty), tight: true };
+  }
+  const v = worldZoom({ zoom: shot === "medium" ? Math.max(zoom, 1) * MEDIUM_ZOOM : zoom, W, extents });
+  const oy = H - feetPx;
+  return { z: v.z, tx: r3(v.ox * (1 - v.z)), ty: r3(oy * (1 - v.z)), tight: false };
+}
+
 export function worldZoom({ zoom = 1, W, extents }) {
   if (!(zoom > 1) || !extents.length) return { z: 1, ox: W / 2 };
   const lo = Math.min(...extents.map((e) => e[0]));
@@ -233,11 +258,96 @@ export function composeHtml({ plan, times, lines = {}, stage, assets, size = { w
   };
   const set = (sel, vars, at) => js.push(`tl.set(${json(sel)}, ${json(vars)}, ${r3(at)});`);
 
+  // ภาษาไม่เว้นวรรค (ไทย): ช่วงที่ตัดด้วย Segmenter ต้องติดกัน เว้นเฉพาะตรงที่ต้นฉบับมีช่องว่าง
+  const makeCaps = (sc, t, eid, capAt) => t.lines.map((l, i) => {
+    const text = sc.lines[i].text;
+    const words = captionChunks(text, lang);
+    const id = eid(`cap${i + 1}`);
+    const tight = !spaced(lang);
+    const starts = new Set();
+    if (tight) {
+      let k = 0;
+      String(text ?? "").trim().split(/\s+/).filter(Boolean).forEach((part, pi) => {
+        if (pi > 0) starts.add(k);
+        k += captionChunks(part, lang).length;
+      });
+    }
+    const spans = words.map((w, wi) => `<span${starts.has(wi) ? ' class="g"' : ""}>${esc(w)}</span>`).join("");
+    return { id, words, html: `<div id="${id}" class="cap${tight ? " tight" : ""}" style="color:${colors[l.who] ?? NARRATOR_COLOR}${capAt}">${spans}</div>` };
+  });
+  const capTweens = (caps, t, T) => t.lines.forEach((l, i) => {
+    const c = caps[i];
+    tw(`#${c.id} span`, { opacity: 0, y: Y(20) }, { opacity: 1, y: 0, duration: 0.12, stagger: r3((l.end - l.start) / Math.max(1, c.words.length)) }, T(l.start));
+    tw(`#${c.id}`, { opacity: 1 }, { opacity: 0, duration: 0.15 }, T(Math.min(t.dur - 0.15, l.end + 0.25)));
+  });
+
+  // insert = รูปสินค้าจริงเต็มจอ ซูมช้า + ป้าย · endcard = hero + ชื่อ + ราคา + ชวนซื้อ
+  // รูปจริงแสดงทั้งรูปเสมอ (contain) ไม่ครอป ไม่บิด: สินค้าต้องเห็นครบเหมือนในร้าน
+  const cardScene = (sc, t, sid, eid, T) => {
+    const pr = assets.product ?? {};
+    const imgOf = (id) => {
+      const im = assets.productImage?.(id);
+      if (!im) throw new VfError("INTERNAL", `ไม่มีรูปสินค้า ${id}`);
+      return im;
+    };
+    const fit = (im, bw, bh) => {
+      const k = Math.min(bw / im.w, bh / im.h);
+      return { w: r3(im.w * k), h: r3(im.h * k) };
+    };
+    const photo = (id, im, box, cy) => {
+      const { w, h } = fit(im, box.w, box.h);
+      const cls = im.cutout ? "card-photo cutout" : "card-photo framed";
+      return {
+        w, h, top: r3(cy - h / 2),
+        html: `<div id="${id}" class="${cls}" style="left:${r3((W - w) / 2)}px;top:${r3(cy - h / 2)}px;width:${w}px;height:${h}px"><img id="${id}-img" src="${esc(im.src)}" /></div>`,
+      };
+    };
+    const caps = makeCaps(sc, t, eid, `;bottom:${r3((sc.kind === "endcard" ? 0.05 : CAP_LOW) * H)}px`);
+    const parts = [];
+    if (sc.kind === "insert") {
+      const im = imgOf(sc.image);
+      const ph = photo(eid("photo"), im, { w: W * 0.86, h: H * 0.6 }, H * 0.42);
+      parts.push(ph.html);
+      const chip = typeof sc.chip === "string" ? sc.chip.trim() : "";
+      if (chip) parts.push(`<div id="${eid("chip")}" class="chip" style="top:${r3(ph.top + ph.h + Y(40))}px">${esc(chip)}</div>`);
+      tw(`#${eid("photo")}`, { opacity: 0, scale: 0.9 }, { opacity: 1, scale: 1, duration: 0.35, ease: "power2.out" }, T(0));
+      // ซูมช้าทั้งฉาก (Ken Burns) ให้ภาพนิ่งมีชีวิต
+      tw(`#${eid("photo")}-img`, { scale: 1 }, { scale: 1.07, duration: t.dur, ease: "none" }, T(0));
+      if (chip) tw(`#${eid("chip")}`, { opacity: 0, scale: 0.6 }, { opacity: 1, scale: 1, duration: 0.3, ease: "back.out(2.5)" }, T(0.45));
+    } else {
+      const hero = assets.product?.images?.find((x) => x.role === "hero");
+      if (!hero) throw new VfError("INTERNAL", "endcard ต้องมีรูป hero");
+      const ph = photo(eid("photo"), imgOf(hero.id), { w: W * 0.8, h: H * 0.4 }, H * 0.28);
+      const y0 = ph.top + ph.h + Y(50);
+      parts.push(ph.html);
+      parts.push(`<div id="${eid("name")}" class="end-name" style="top:${r3(y0)}px">${esc(pr.name)}</div>`);
+      // ชื่อยาวขึ้นได้ 2 บรรทัด (66px × 1.2) → ราคาเริ่มใต้ 2 บรรทัดเสมอ
+      if (pr.price_text) parts.push(`<div id="${eid("price")}" class="end-price" style="top:${r3(y0 + Y(190))}px">${esc(pr.price_text)}</div>`);
+      if (pr.cta) parts.push(`<div id="${eid("cta")}" class="end-cta" style="top:${r3(y0 + Y(420))}px"><span>${esc(pr.cta)}</span></div>`);
+      tw(`#${eid("photo")}`, { opacity: 0, y: Y(60) }, { opacity: 1, y: 0, duration: 0.4, ease: "power2.out" }, T(0));
+      tw(`#${eid("name")}`, { opacity: 0, y: Y(30) }, { opacity: 1, y: 0, duration: 0.3, ease: "power2.out" }, T(0.25));
+      if (pr.price_text) tw(`#${eid("price")}`, { opacity: 0, scale: 2.2 }, { opacity: 1, scale: 1, duration: 0.3, ease: "back.out(2)" }, T(0.5));
+      if (pr.cta) {
+        tw(`#${eid("cta")}`, { opacity: 0, y: Y(40) }, { opacity: 1, y: 0, duration: 0.3, ease: "power2.out" }, T(0.8));
+        const n = Math.max(0, Math.floor((t.dur - 1.2) / 0.5) - 1);
+        tw(`#${eid("cta")} span`, { scale: 1 }, { scale: 1.08, duration: 0.5, ease: "sine.inOut", yoyo: true, repeat: n }, T(1.1));
+      }
+    }
+    html.push([
+      `<section id="${sid}" class="clip card" data-start="${r3(t.start)}" data-duration="${t.dur}" data-track-index="1">`,
+      ...parts,
+      ...caps.map((c) => c.html),
+      "</section>",
+    ].join("\n    "));
+    capTweens(caps, t, T);
+  };
+
   plan.scenes.forEach((sc, si) => {
     const t = times[si];
     const sid = `sc${si + 1}`;
     const eid = (k) => `${sid}-${k}`;
     const T = (s) => t.start + s;
+    if (sc.kind === "insert" || sc.kind === "endcard") return cardScene(sc, t, sid, eid, T);
     const st = stage?.[sc.place];
     if (!st) throw new VfError("INTERNAL", `ไม่มี stage ของสถานที่ ${sc.place}`);
     const floorPx = (1 - st.floor) * H;
@@ -246,6 +356,9 @@ export function composeHtml({ plan, times, lines = {}, stage, assets, size = { w
     const beats = sc.beats ?? [];
 
     const actorW = (c) => c.size ?? (cast.length >= 3 ? CROWD_SIZE : ACTOR_SIZE);
+    // ขอบล่างกล่องตัวละคร: เท้าอยู่ที่ floor + 13% ของความสูงภาพ · ที่ว่างใต้เท้าเดิมถือว่า 19% ทุกท่า
+    // assets.spriteFoot(who, pose) = ที่ว่างที่วัดจากภาพจริง (ท่าวิดพื้นมีมากกว่าท่ายืนมาก)
+    const boxBottom = (c, ah) => floorPx + ah * (0.13 - (assets.spriteFoot?.(c.who, c.pose) ?? SPRITE_FOOT));
     const byId = Object.fromEntries(props.map((p) => [p.id, p]));
     const info = (p) => ({ ...PROP_DEFAULT, ...(assets.propInfo?.(p.id) ?? {}) });
     const flat = (p) => info(p).placement === "floor";
@@ -287,7 +400,7 @@ export function composeHtml({ plan, times, lines = {}, stage, assets, size = { w
       const at = rides(c)
         // ภาพท่ามีที่ว่างใต้เท้า ~19% → จมลงในยอด prop นิดหน่อยให้ดูนั่งอยู่จริง ไม่ลอย
         ? `left:50%;margin-left:${r3(-aw / 2)}px;bottom:${RIDE_BOTTOM}`
-        : `left:${r3(el[c.who].x0 * W - aw / 2)}px;bottom:${r3(floorPx - ah * 0.06)}px`;
+        : `left:${r3(el[c.who].x0 * W - aw / 2)}px;bottom:${r3(boxBottom(c, ah))}px`;
       return `<div id="${id}" class="actor" style="${at};width:${r3(aw)}px;height:${r3(ah)}px"><div id="${id}-body" class="body">${imgs}</div></div>`;
     };
     // ระดับเท้าของตัวละครขนาดมาตรฐาน (ขอบล่างกล่อง −6% + ที่ว่างใต้เท้า 19%)
@@ -310,18 +423,30 @@ export function composeHtml({ plan, times, lines = {}, stage, assets, size = { w
       return `<div id="${eid(`o-${safe(p.id)}`)}" class="prop" style="left:${left}px;bottom:${r3(bottom)}px;width:${r3(pw)}px;height:${r3(ph)}px">`
         + `${img}${ride}</div>`;
     };
-    const view = worldZoom({ zoom, W, extents: Object.values(el).map((e) => [(e.x0 - e.w / 2) * W, (e.x0 + e.w / 2) * W]) });
-    // คำบรรยายลอยเหนือหัวเสมอ: ซูมแล้วหัวสูงขึ้นตาม จึงยกคำบรรยายตาม (ค่าเดิม 43% ใน base.css)
-    const capAt = view.z > 1 ? `;bottom:${r3(feetPx + (CAP_BOTTOM * H - feetPx) * view.z)}px` : "";
-    const caps = t.lines.map((l, i) => {
-      const words = captionChunks(sc.lines[i].text, lang);
-      const id = eid(`cap${i + 1}`);
-      return { id, words, html: `<div id="${id}" class="cap" style="color:${colors[l.who] ?? NARRATOR_COLOR}${capAt}">${words.map((w) => `<span>${esc(w)}</span>`).join("")}</div>` };
+    // พิกัดจากขอบบนของจุดสำคัญของตัวละคร (ใช้เล็งกล้อง close/low และวางคำบรรยาย)
+    const marks = (c) => {
+      const ah = actorW(c) * W * SPRITE_RATIO;
+      const box = boxBottom(c, ah);
+      return { x: el[c.who].x0 * W, face: H - (box + ah * 0.8), feet: H - (box + ah * 0.19), head: H - (box + ah * 0.92) };
+    };
+    const ext = (e) => [(e.x0 - e.w / 2) * W, (e.x0 + e.w / 2) * W];
+    const focusC = cast.find((c) => c.who === sc.focus) ?? cast[0];
+    const view = shotView({
+      shot: sc.shot, zoom, W, H, feetPx,
+      extents: (sc.shot === "medium" ? cast.map((c) => el[c.who]) : Object.values(el)).map(ext),
+      focus: focusC && marks(focusC),
     });
+    // คำบรรยายลอยเหนือหัวเสมอ: ซูมแล้วหัวสูงขึ้นตาม จึงยกคำบรรยายตาม (ค่าเดิม 43% ใน base.css)
+    // close/low หัวหลุดเฟรมหรือเต็มจอ → คำบรรยายไปอยู่ล่างจอ
+    const heads = cast.filter((c) => !rides(c)).map((c) => marks(c).head);
+    const capAt = view.z <= 1 ? ""
+      : view.tight || !heads.length ? `;bottom:${r3(CAP_LOW * H)}px`
+        : `;bottom:${r3(Math.min(CAP_HIGH * H, Math.max(CAP_LOW * H, H - (Math.min(...heads) * view.z + view.ty) + 24)))}px`;
+    const caps = makeCaps(sc, t, eid, capAt);
     const stamps = beats.filter((b) => b.fx === "stamp").map((b, i) => `<div id="${eid(`stamp${i + 1}`)}" class="stamp">${esc(b.text)}</div>`);
     html.push([
       `<section id="${sid}" class="clip" data-start="${r3(t.start)}" data-duration="${t.dur}" data-track-index="1">`,
-      ...(view.z > 1 ? [`<div class="world" style="transform-origin:${r3(view.ox)}px ${r3(H - feetPx)}px;transform:scale(${view.z})">`] : []),
+      ...(view.z > 1 ? [`<div class="world" style="transform-origin:0 0;transform:translate(${r3(view.tx)}px,${r3(view.ty)}px) scale(${view.z})">`] : []),
       `<img id="${eid("plate")}" class="plate" src="${esc(assets.plate(sc.place))}" />`,
       ...props.map(propHtml),
       ...cast.filter((c) => !rides(c)).map(actorHtml),
@@ -394,11 +519,7 @@ export function composeHtml({ plan, times, lines = {}, stage, assets, size = { w
       }
     }
 
-    t.lines.forEach((l, i) => {
-      const c = caps[i];
-      tw(`#${c.id} span`, { opacity: 0, y: Y(20) }, { opacity: 1, y: 0, duration: 0.12, stagger: r3((l.end - l.start) / Math.max(1, c.words.length)) }, T(l.start));
-      tw(`#${c.id}`, { opacity: 1 }, { opacity: 0, duration: 0.15 }, T(Math.min(t.dur - 0.15, l.end + 0.25)));
-    });
+    capTweens(caps, t, T);
 
     // สลับภาพทีละเฟรม: ท่าจาก beat + ปากจากความดังของบทตัวเอง
     const frames = Math.round(t.dur * fps);

@@ -72,6 +72,13 @@ export function opaqueBox({ w, h, px }) {
   return x1 < 0 ? null : { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
 }
 
+// สัดส่วนที่ว่างใสใต้วัตถุ (0–1 ของความสูงภาพ) เช่น ที่ว่างใต้เท้าของภาพท่า
+export async function bottomGap(file) {
+  const img = await readRgba(file);
+  const b = opaqueBox(img);
+  return b ? Math.round(((img.h - b.y - b.h) / img.h) * 1000) / 1000 : 0;
+}
+
 // prop จากรูปจริง เช่น สินค้า (ไม่เรียก API ไม่เสียเงิน): ตัดขอบใสออก
 // floor: หมุนให้ด้านยาวเป็นแนวนอน เพราะตอนวางฉากจะเอียงภาพลงไปนอนกับพื้นตามแนวกว้างของจอ
 // size_cm = ความยาวด้านยาวสุดของของจริง ใช้กำหนดขนาดเทียบกับตัวละคร (ไม่มี = ขนาดมาตรฐาน)

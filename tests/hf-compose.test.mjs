@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { sceneTimes, mouthFrames, composeHtml, audioCues, FONT_FOR, fontFile, captionChunks, layoutX, ACTOR_SIZE, CROWD_SIZE, SEP, worldZoom } from "../tools/hf-compose.mjs";
+import { sceneTimes, mouthFrames, composeHtml, audioCues, FONT_FOR, fontFile, captionChunks, layoutX, ACTOR_SIZE, CROWD_SIZE, SEP, worldZoom, shotView, CLOSE_ZOOM } from "../tools/hf-compose.mjs";
 import { DEFAULT_STAGE } from "../tools/stage.mjs";
 import { LEAD, GAP, TAIL, SCENE_MIN } from "../tools/motion-plan.mjs";
 
@@ -190,7 +190,8 @@ test("composeHtml ภาษาไทย: ใช้ฟอนต์ไทยแล
   p.scenes[0].lines[1].text = "สวัสดีครับ วันนี้อากาศดีมาก!";
   const html = compose({ plan: p, lang: "th" });
   assert.match(html, /src: url\("fonts\/Loma-Bold\.otf"\)/);
-  assert.match(html, /<span>สวัสดี<\/span><span>ครับ<\/span><span>วันนี้<\/span><span>อากาศ<\/span><span>ดีมาก!<\/span>/);
+  // ช่วงที่ตัดเองติดกัน (class tight ไม่มี margin) · ช่วงที่ต้นฉบับเว้นวรรคไว้ได้ class g
+  assert.match(html, /class="cap tight"[^>]*><span>สวัสดี<\/span><span>ครับ<\/span><span class="g">วันนี้<\/span><span>อากาศ<\/span><span>ดีมาก!<\/span>/);
   assert.deepEqual(captionChunks("Hi  there you", "en"), ["Hi", "there", "you"]);
 });
 
@@ -384,6 +385,61 @@ test("composeHtml zoom: ห่อฉากหลัง/ตัวละคร/pro
   const p = matPlan();
   p.scenes[0].lines = [{ who: "pim", text: "hello there friend" }];
   const html = compose({ plan: p, lines: { "1-1": { seconds: 1, rms: loud(30) } }, zoom: 1.4 });
-  assert.match(html, /<div class="world" style="transform-origin:[\d.]+px [\d.]+px;transform:scale\(1\.4\)">\s*<img id="sc1-plate"/);
+  assert.match(html, /<div class="world" style="transform-origin:0 0;transform:translate\(-?[\d.]+px,-?[\d.]+px\) scale\(1\.4\)">\s*<img id="sc1-plate"/);
   assert.match(html, /<\/div>\s*<\/div>\s*<div id="sc1-cap1" class="cap" style="color:[^;"]+;bottom:[\d.]+px"/);
+});
+
+test("shotView: close เล็งหน้าไปที่ 36% จากบน, low เล็งเท้า 66%, world คลุมเฟรมเสมอ; ไม่มี focus = wide", () => {
+  const base = { W: 1080, H: 1920, feetPx: 200, extents: [[400, 700]], focus: { x: 540, face: 900, feet: 1700, head: 800 } };
+  const c = shotView({ ...base, shot: "close" });
+  assert.equal(c.z, CLOSE_ZOOM);
+  assert.ok(Math.abs(900 * c.z + c.ty - 0.36 * 1920) < 0.01 && c.tight);
+  const l = shotView({ ...base, shot: "low" });
+  // เท้าใกล้ขอบล่าง: เลื่อนได้ไม่เกินขอบ world → ty ถูกบีบที่ H(1−z)
+  assert.equal(l.ty, 1920 * (1 - CLOSE_ZOOM));
+  const edge = shotView({ ...base, shot: "close", focus: { ...base.focus, x: 30 } });
+  assert.equal(edge.tx, 0);
+  assert.deepEqual(shotView({ ...base, shot: "close", focus: undefined }), { z: 1, tx: 0, ty: 0, tight: false });
+  const m = shotView({ ...base, shot: "medium" });
+  assert.ok(m.z > 1 && !m.tight);
+});
+
+const cardAssets = {
+  ...assets,
+  product: { name: "Mat", price_text: "฿108", cta: "Buy", images: [{ id: "hero", role: "hero" }, { id: "d1", role: "detail" }] },
+  productImage: (id) => ({ hero: { src: "assets/product-hero.png", w: 276, h: 712, cutout: true }, d1: { src: "assets/product-d1.jpg", w: 600, h: 600, cutout: false } })[id],
+};
+const cardPlan = () => ({
+  scenes: [
+    { id: "s01", kind: "insert", image: "hero", chip: "Yoga <mat>", place: "living", camera: "static", cast: [], props: [], beats: [], lines: [{ who: "narrator", text: "meet it" }] },
+    { id: "s02", kind: "insert", image: "d1", place: "living", camera: "static", cast: [], props: [], beats: [], lines: [] },
+    { id: "s03", kind: "endcard", place: "living", camera: "static", cast: [], props: [], beats: [], lines: [] },
+  ],
+});
+
+test("composeHtml insert/endcard: รูปจริงทั้งรูปตามสัดส่วน ไม่ใช้ plate, ป้าย escape, ฉากปิดมีชื่อ ราคา ชวนซื้อ", () => {
+  const html = compose({ plan: cardPlan(), assets: cardAssets, lines: { "1-1": { seconds: 1, rms: loud(30) } } });
+  assert.doesNotMatch(html, /class="plate"/);
+  const hero = /id="sc1-photo" class="card-photo cutout" style="left:[\d.]+px;top:[\d.]+px;width:([\d.]+)px;height:([\d.]+)px"/.exec(html);
+  assert.ok(hero, "hero photo");
+  assert.ok(Math.abs(Number(hero[1]) / Number(hero[2]) - 276 / 712) < 0.001);
+  assert.match(html, /class="card-photo framed"[^>]*><img id="sc2-photo-img" src="assets\/product-d1\.jpg"/);
+  assert.match(html, /class="chip"[^>]*>Yoga &lt;mat&gt;<\/div>/);
+  assert.match(html, /tl\.fromTo\("#sc1-photo-img", \{"scale":1\}, \{"scale":1\.07/);
+  assert.match(html, /class="end-name"[^>]*>Mat<\/div>/);
+  assert.match(html, /class="end-price"[^>]*>฿108<\/div>/);
+  assert.match(html, /class="end-cta"[^>]*><span>Buy<\/span>/);
+  assert.match(html, /id="sc1-cap1" class="cap"[^>]*bottom:192px/);
+});
+
+test("composeHtml spriteFoot: ที่ว่างใต้เท้าจริงยกหรือลดกล่องตัวละคร; ไม่ส่ง = ค่าเดิม", () => {
+  const bottomOf = (html) => num(styleOf(html, "sc1-c-pim"), "bottom");
+  const p = matPlan();
+  p.scenes[0].cast[0].ride = undefined;
+  p.scenes[0].props = [];
+  const def = bottomOf(compose({ plan: p }));
+  const same = bottomOf(compose({ plan: p, assets: { ...assets, spriteFoot: () => 0.19 } }));
+  const low = bottomOf(compose({ plan: p, assets: { ...assets, spriteFoot: () => 0.03 } }));
+  assert.ok(Math.abs(def - same) < 0.01);
+  assert.ok(low > def);
 });

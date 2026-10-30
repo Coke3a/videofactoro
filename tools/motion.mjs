@@ -20,7 +20,8 @@ import { ffmpeg } from "./assemble.mjs";
 import { SFX_KINDS } from "./fx.mjs";
 import { pool } from "./shots.mjs";
 import { loadPoses } from "./poses.mjs";
-import { listProps, makeProp } from "./props.mjs";
+import { listProps, makeProp, bottomGap } from "./props.mjs";
+import { loadProduct, productDir, imageSize } from "./product.mjs";
 import { stageFor, upgradeStage } from "./stage.mjs";
 import { STORY_SCHEMA, storySystemPrompt, validateStory, scenesSchema, scenesSystemPrompt, validateScenePlan, normalizeScenePlan } from "./motion-plan.mjs";
 import { FONT_FOR, fontFile, sceneTimes, audioCues, composeHtml } from "./hf-compose.mjs";
@@ -151,6 +152,8 @@ async function work({ dir, ctx, state, key, id: given, prompt, total, audio, pla
   const warnings = [...early];
   const narrator = audio.narrator;
   const poses = Object.fromEntries(characters.map((c) => [c.id, loadPoses(dir, c.id).names]));
+  // มี product/product.json = คลิปขายของ: ฉากแทรกรูปจริง + ฉากปิดบอกราคา + มุมกล้องหลายขนาด
+  const product = loadProduct(dir);
 
   const story = await step(state, "story", async () => {
     log("ขั้น story (โครงมุก 5 ช่วง)");
@@ -158,7 +161,7 @@ async function work({ dir, ctx, state, key, id: given, prompt, total, audio, pla
     const { data } = await llmJson({
       system: storySystemPrompt(lang, total, {
         characters: characters.map((c) => ({ id: c.id, name: c.name, personality: c.personality, poses: poses[c.id] })),
-        places: places.map((p) => p.id), props: listProps(dir),
+        places: places.map((p) => p.id), props: listProps(dir), product,
       }),
       user, schema: STORY_SCHEMA, validate: validateStory, maxTokens: 4000,
       meta: { project: slug, step: "motion-story", item: key, run }, costDir,
@@ -197,6 +200,7 @@ async function work({ dir, ctx, state, key, id: given, prompt, total, audio, pla
     props: listProps(dir).map((p) => p.id),
     floorProps: listProps(dir).filter((p) => p.placement === "floor").map((p) => p.id),
     sfx: SFX_KINDS,
+    product,
   };
   const plan = await step(state, "scenes", async () => {
     log("ขั้น scenes (แผนฉาก)");
@@ -261,9 +265,12 @@ async function work({ dir, ctx, state, key, id: given, prompt, total, audio, pla
       plates[pid] = `assets/plate-${pid}${extname(src) || ".png"}`;
       copyFileSync(src, join(hdir, plates[pid]));
     }
+    const foot = {};
     for (const cid of new Set(plan.scenes.flatMap((s) => s.cast.map((c) => c.who)))) {
       const ps = loadPoses(dir, cid);
       for (const pose of ps.names) {
+        // วัดที่ว่างใต้เท้าจริงเฉพาะโหมดสินค้าก่อน: ช่องเดิมยังไม่ได้ตรวจภาพกับค่าใหม่ (ตัวละครจะขยับ)
+        if (product) foot[`${cid}/${pose}`] = await bottomGap(ps.file(pose));
         copyFileSync(ps.file(pose), join(hdir, "assets", `${cid}-${pose}.png`));
         copyFileSync(ps.file(pose, true), join(hdir, "assets", `${cid}-${pose}-talk.png`));
       }
@@ -272,6 +279,13 @@ async function work({ dir, ctx, state, key, id: given, prompt, total, audio, pla
       copyFileSync(join(dir, "props", pid, "prop.png"), join(hdir, "assets", `prop-${pid}.png`));
     }
     const propInfo = Object.fromEntries(listProps(dir).map((p) => [p.id, p]));
+    const productImages = {};
+    for (const im of product?.images ?? []) {
+      const src = join(productDir(dir), im.file);
+      const rel = `assets/product-${im.file}`;
+      copyFileSync(src, join(hdir, rel));
+      productImages[im.id] = { src: rel, ...(await imageSize(src)), cutout: im.cutout };
+    }
     const html = composeHtml({
       plan, times, lines, stage: stages, size: SIZE, fps: FPS, lang,
       // project.json motion_zoom: ช่องที่อยากเห็นตัวละคร/สินค้าใกล้ขึ้น (เช่นคลิปขายของ) ค่าเดิม 1 = ไม่ซูม
@@ -282,6 +296,9 @@ async function work({ dir, ctx, state, key, id: given, prompt, total, audio, pla
         sprite: (who, pose, talk) => `assets/${who}-${pose}${talk ? "-talk" : ""}.png`,
         prop: (pid) => `assets/prop-${pid}.png`,
         propInfo: (pid) => propInfo[pid],
+        product: product ?? undefined,
+        productImage: (iid) => productImages[iid],
+        spriteFoot: (who, pose) => foot[`${who}/${pose}`],
       },
     });
     writeFileSync(join(hdir, "index.html"), html);
@@ -307,7 +324,10 @@ async function work({ dir, ctx, state, key, id: given, prompt, total, audio, pla
     const snaps = join(dir, ".vf", "motion-check", id);
     rmSync(snaps, { recursive: true, force: true });
     mkdirSync(snaps, { recursive: true });
-    const at = times.map((t) => r3(t.start + t.dur / 2));
+    // ตรวจเฉพาะฉากตัวละครมุมกว้าง/กลาง: close/low ตั้งใจให้ตัวล้นขอบ, insert/endcard ไม่มีตัวละคร
+    const checked = plan.scenes.map((sc, i) => i).filter((i) => (plan.scenes[i].kind ?? "scene") === "scene" && !["close", "low"].includes(plan.scenes[i].shot));
+    const at = checked.map((i) => r3(times[i].start + times[i].dur / 2));
+    if (!at.length) return { scores: [], warnings: [] };
     const pngs = (await hfSnapshot(hdir, at, snaps, { tmpDir })).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
     if (pngs.length !== at.length) throw new VfError("INTERNAL", `hyperframes snapshot ได้ ${pngs.length} ภาพ (ขอ ${at.length})`);
     const scores = [];
@@ -320,12 +340,12 @@ async function work({ dir, ctx, state, key, id: given, prompt, total, audio, pla
         });
         const v = Number(answers?.[STAGING_KEY]?.noul);
         scores.push(Number.isFinite(v) ? v : null);
-        if (v >= STAGING_WARN) found.push(`ฉาก ${i + 1}: ตัวละครอาจยืนบนเฟอร์นิเจอร์ หลุดขอบภาพ หรือลอยอยู่ (clef ${v.toFixed(2)})`);
+        if (v >= STAGING_WARN) found.push(`ฉาก ${checked[i] + 1}: ตัวละครอาจยืนบนเฟอร์นิเจอร์ หลุดขอบภาพ หรือลอยอยู่ (clef ${v.toFixed(2)})`);
       } catch (err) {
         // ขั้นนี้แค่เตือน: ผู้ให้บริการล่มไม่ควรทำให้ทั้งคลิปพัง
         if (!(err instanceof VfError && err.code === "PROVIDER")) throw err;
         scores.push(null);
-        found.push(`ฉาก ${i + 1}: ตรวจภาพไม่สำเร็จ (${err.message.slice(0, 120)})`);
+        found.push(`ฉาก ${checked[i] + 1}: ตรวจภาพไม่สำเร็จ (${err.message.slice(0, 120)})`);
       }
     }
     return { scores, warnings: found };

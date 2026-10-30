@@ -353,3 +353,54 @@ test("scenesSystemPrompt บอกว่าทุก beat ต้องเปล�
   assert.match(t, /Every beat must change something/);
   assert.match(t, /Every scene needs 1–\d+ cast characters/);
 });
+
+// โหมดสินค้า: insert/endcard/shot
+const PRODUCT = {
+  name: "Yoga mat", brand: "ACME", price_text: "฿108", cta: "Buy now",
+  facts: ["8 mm thick"], claims_allowed: ["non-slip"], forbidden_words: ["IPX7", "TOP 1"], angles: [],
+  images: [{ id: "hero", role: "hero", file: "hero.png", feature: "" }, { id: "detail-1", role: "detail", file: "d1.jpg", feature: "8 mm" }],
+};
+const PA = { ...ASSETS, product: PRODUCT };
+const productPlan = () => ({
+  scenes: [
+    { id: "s01", place: "living", camera: "static", shot: "wide", cast: [{ who: "biscuit", spot: "center", pose: "idle" }], props: [], lines: [{ who: "biscuit", text: "My knees hurt" }], beats: [] },
+    { id: "s02", place: "living", camera: "static", shot: "close", focus: "biscuit", cast: [{ who: "biscuit", spot: "center", pose: "scared" }], props: [], lines: [{ who: "biscuit", text: "Ouch ouch" }], beats: [] },
+    { id: "s03", kind: "insert", image: "hero", chip: "Yoga mat", place: "living", camera: "static", cast: [], props: [], beats: [], lines: [{ who: "narrator", text: "Meet the mat" }] },
+    { id: "s04", place: "living", camera: "push", shot: "medium", cast: [{ who: "biscuit", spot: "center", pose: "happy" }], props: [], lines: [{ who: "biscuit", text: "So soft" }], beats: [] },
+    { id: "s05", kind: "insert", image: "detail-1", chip: "8 mm", place: "living", camera: "static", cast: [], props: [], beats: [], lines: [{ who: "narrator", text: "Eight millimetres thick" }] },
+    { id: "s06", kind: "endcard", place: "living", camera: "static", cast: [], props: [], beats: [], lines: [{ who: "narrator", text: "Only 108 baht" }] },
+  ],
+});
+
+test("โหมดสินค้า: แผนที่ถูกต้องผ่าน; schema มี kind/shot/image เฉพาะเมื่อมีสินค้า", () => {
+  assert.deepEqual(validateScenePlan(productPlan(), PA, { lang: "en", narrator: true }), []);
+  const props = scenesSchema(PA).properties.scenes.items.properties;
+  assert.deepEqual(props.image.enum, ["hero", "detail-1"]);
+  assert.ok(props.kind && props.shot && props.focus);
+  assert.equal(scenesSchema(ASSETS).properties.scenes.items.properties.kind, undefined);
+  assert.match(scenesSystemPrompt("en", 20, PA, { narrator: true }), /insert: the real product photo/);
+  assert.doesNotMatch(scenesSystemPrompt("en", 20, ASSETS, { narrator: true }), /insert/);
+  assert.match(storySystemPrompt("en", 20, { product: PRODUCT }), /Never say or show: IPX7, TOP 1/);
+});
+
+test("โหมดสินค้า: จับ endcard ไม่อยู่ท้าย, insert มีตัวละคร, รูปไม่มีจริง, insert แรกไม่ใช่ hero, คำต้องห้าม, close ไม่มี focus", () => {
+  const check = (edit, re) => {
+    const p = productPlan();
+    edit(p);
+    const issues = validateScenePlan(p, PA, { lang: "en", narrator: true });
+    assert.ok(issues.some((i) => re.test(i)), `${re} not in ${JSON.stringify(issues)}`);
+  };
+  check((p) => p.scenes.push(p.scenes.splice(5, 1)[0], { ...p.scenes[0], id: "s07" }), /endcard must be the last scene/);
+  check((p) => { p.scenes[2].cast = [{ who: "biscuit", spot: "center", pose: "idle" }]; }, /insert scenes have empty cast/);
+  check((p) => { p.scenes[4].image = "nope"; }, /insert image "nope"/);
+  check((p) => { p.scenes[2].image = "detail-1"; p.scenes[4].image = "hero"; }, /first insert must show the hero/);
+  check((p) => { p.scenes[3].lines[0].text = "it is ipx7 proof"; }, /forbidden claim: IPX7/);
+  check((p) => { p.scenes[2].chip = "TOP 1 mat"; }, /chip uses a forbidden claim: TOP 1/);
+  check((p) => { delete p.scenes[1].focus; }, /needs focus/);
+  check((p) => { p.scenes[4].kind = "scene"; p.scenes[4].cast = [{ who: "biscuit", spot: "left", pose: "idle" }]; }, /at least 2 insert scenes/);
+  check((p) => { p.scenes[2].lines[0].who = "biscuit"; }, /spoken by the narrator/);
+  check((p) => { p.scenes[1].shot = "wide"; p.scenes[3].shot = "wide"; p.scenes.splice(2, 1); }, /all use shot "wide"/);
+  // ไม่มีสินค้า → kind อื่นนอกจาก scene ใช้ไม่ได้
+  const issues = validateScenePlan(productPlan(), ASSETS, { lang: "en", narrator: true });
+  assert.ok(issues.some((i) => /needs a product/.test(i)));
+});

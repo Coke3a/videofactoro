@@ -18,5 +18,20 @@ body { margin: 0; background: #000; }
        /* วงเงาเข้มรอบตัวอักษร: อ่านออกแม้ plate สว่าง (stroke อย่างเดียวบางเกินบนพื้นครีม) */
        text-shadow: 0 0 3px #111, 3px 3px 0 #111, -3px 3px 0 #111, 3px -3px 0 #111, -3px -3px 0 #111, 0 6px 10px rgba(0, 0, 0, 0.55); }
 .cap span { display: inline-block; margin: 0 7px; opacity: 0; }
+.cap.tight span { margin: 0; }
+.cap.tight span.g { margin-left: 0.3em; }
 .stamp { position: absolute; top: 330px; left: 0; right: 0; text-align: center; font-size: 190px; font-weight: 700; color: #ffd23f;
          -webkit-text-stroke: 14px #3b2a1a; paint-order: stroke fill; opacity: 0; }
+/* ฉากรูปสินค้าจริง (insert / endcard): พื้นอบอุ่นไล่เฉด รูปแสดงทั้งรูป ไม่ครอป */
+.card { background: radial-gradient(120% 80% at 50% 38%, #fffaf0 0%, #f6e7cf 55%, #e9cfa9 100%); }
+.card-photo { position: absolute; }
+.card-photo img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.card-photo.framed { border-radius: 36px; overflow: hidden; background: #fff; box-shadow: 0 30px 60px rgba(60, 35, 10, 0.28), 0 0 0 10px #fff; }
+.card-photo.cutout img { filter: drop-shadow(0 34px 30px rgba(60, 35, 10, 0.35)); }
+.chip { position: absolute; left: 0; right: 0; margin: 0 auto; width: fit-content; padding: 18px 46px; border-radius: 999px; background: #ff5a1f; color: #fff;
+        font-size: 62px; line-height: 1.1; box-shadow: 0 12px 24px rgba(120, 40, 0, 0.3); opacity: 0; }
+.end-name { position: absolute; left: 60px; right: 60px; text-align: center; font-size: 66px; line-height: 1.2; color: #3b2a1a; opacity: 0; }
+.end-price { position: absolute; left: 0; right: 0; text-align: center; font-size: 190px; line-height: 1; color: #ff5a1f;
+             -webkit-text-stroke: 10px #fff; paint-order: stroke fill; text-shadow: 0 14px 24px rgba(120, 40, 0, 0.35); opacity: 0; }
+.end-cta { position: absolute; left: 0; right: 0; text-align: center; opacity: 0; }
+.end-cta span { display: inline-block; padding: 24px 64px; border-radius: 999px; background: #3b2a1a; color: #ffd60a; font-size: 64px; }
