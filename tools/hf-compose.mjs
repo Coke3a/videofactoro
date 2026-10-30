@@ -326,7 +326,12 @@ export function composeHtml({ plan, times, lines = {}, stage, assets, size = { w
       const n = Math.max(0, Math.floor(t.dur / 0.5) - 1);
       tw(`${e.sel}-body`, { scaleY: 1, scaleX: 1 }, { scaleY: 0.97, scaleX: 1.02, duration: 0.5, ease: "sine.inOut", yoyo: true, repeat: n }, T(c.enter === "drop" ? 1 : 0));
     }
-    for (const p of props) enter(el[p.id], p.enter, T(0.05));
+    for (const p of props) {
+      // ของปูพื้นที่หล่นจากฟ้าดูเป็นแผ่นลอย: คลี่ออกจากซ้ายไปขวาแทน เหมือนปูเสื่อ
+      if (flat(p) && p.enter === "drop") {
+        tw(el[p.id].sel, { scaleX: 0, transformOrigin: "0% 50%" }, { scaleX: 1, duration: 0.6, ease: "power2.out" }, T(0.05));
+      } else enter(el[p.id], p.enter, T(0.05));
+    }
 
     const move = (e, b, at) => {
       const dur = b.dur ?? MOVE_DUR[b.move];

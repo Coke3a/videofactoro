@@ -353,3 +353,14 @@ test("composeHtml: upright รูปจริงคงสัดส่วน (ส
   assert.ok(Math.abs(num(s1, "height") - num(s1, "width") / 0.5) < 0.01);
   assert.ok(Math.abs(num(s2, "width") / num(s1, "width") - 4) < 0.01);
 });
+
+test("composeHtml: floor prop ที่ enter drop คลี่ออกตามแนวนอน ไม่หล่นจากฟ้า; upright ยังหล่นแบบเดิม", () => {
+  const p = matPlan();
+  p.scenes[0].props[0].enter = "drop";
+  const floor = compose({ plan: p, assets: withInfo({ mat: { placement: "floor", size_cm: 185, aspect: 2.5, trimmed: true } }) });
+  assert.match(floor, /tl\.fromTo\("#sc1-o-mat", \{"scaleX":0,"transformOrigin":"0% 50%"\}/);
+  assert.doesNotMatch(floor, /tl\.fromTo\("#sc1-o-mat", \{"y":/);
+  p.scenes[0].cast[0].ride = undefined;
+  const up = compose({ plan: p, assets: withInfo({ mat: { placement: "upright", size_cm: 50, aspect: 1, trimmed: true } }) });
+  assert.match(up, /tl\.fromTo\("#sc1-o-mat", \{"y":/);
+});
