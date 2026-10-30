@@ -362,11 +362,12 @@ const PRODUCT = {
 };
 const PA = { ...ASSETS, product: PRODUCT };
 const productPlan = () => ({
+  use_pose: "run",
   scenes: [
-    { id: "s01", place: "living", camera: "static", shot: "wide", cast: [{ who: "biscuit", spot: "center", pose: "idle" }], props: [], lines: [{ who: "biscuit", text: "My knees hurt" }], beats: [] },
-    { id: "s02", place: "living", camera: "static", shot: "close", focus: "biscuit", cast: [{ who: "biscuit", spot: "center", pose: "scared" }], props: [], lines: [{ who: "biscuit", text: "Ouch ouch" }], beats: [] },
+    { id: "s01", place: "living", camera: "static", shot: "wide", cast: [{ who: "biscuit", spot: "center", pose: "run" }], props: [], lines: [{ who: "biscuit", text: "My knees hurt" }], beats: [{ at: "0.5", sfx: "whoosh" }] },
+    { id: "s02", place: "living", camera: "static", shot: "close", focus: "biscuit", cast: [{ who: "biscuit", spot: "center", pose: "scared" }], props: [], lines: [{ who: "biscuit", text: "Ouch ouch" }], beats: [{ at: "0.5", sfx: "bang" }] },
     { id: "s03", kind: "insert", image: "hero", chip: "Yoga mat", place: "living", camera: "static", cast: [], props: [], beats: [], lines: [{ who: "narrator", text: "Meet the mat" }] },
-    { id: "s04", place: "living", camera: "push", shot: "medium", cast: [{ who: "biscuit", spot: "center", pose: "happy" }], props: [], lines: [{ who: "biscuit", text: "So soft" }], beats: [] },
+    { id: "s04", place: "living", camera: "push", shot: "medium", cast: [{ who: "biscuit", spot: "center", pose: "run" }], props: [], lines: [{ who: "biscuit", text: "So soft" }], beats: [{ at: "line1-end", who: "biscuit", pose: "happy", sfx: "ding" }] },
     { id: "s05", kind: "insert", image: "detail-1", chip: "8 mm", place: "living", camera: "static", cast: [], props: [], beats: [], lines: [{ who: "narrator", text: "Eight millimetres thick" }] },
     { id: "s06", kind: "endcard", place: "living", camera: "static", cast: [], props: [], beats: [], lines: [{ who: "narrator", text: "Pim uses this now" }] },
   ],
@@ -412,4 +413,25 @@ test("poseList: ใส่หน้าตาของท่าในวงเล�
   const scenes = scenesSystemPrompt("th", 30, { ...ASSETS, poseActions: { biscuit: { idle: "standing still" } } });
   assert.match(scenes, /idle \(standing still\)/);
   assert.match(scenes, /The pose must show what is said/);
+});
+
+test("โหมดสินค้า: ฉากพิสูจน์ use_pose, stamp ภาษาเดียวกับคลิป, เสียงประกอบขั้นต่ำ", () => {
+  const issues = (edit, lang = "en") => {
+    const p = productPlan();
+    edit(p);
+    return validateScenePlan(p, PA, { lang, narrator: true }).join("\n");
+  };
+  assert.match(issues((p) => { delete p.use_pose; }), /use_pose is missing/);
+  assert.match(issues((p) => { p.scenes[3].cast[0].pose = "happy"; p.scenes[3].beats = [{ at: "1", sfx: "ding" }]; }), /after the product appears/);
+  assert.match(issues((p) => { p.scenes[0].cast[0].pose = "idle"; }), /show the problem first/);
+  assert.match(issues((p) => { p.scenes[0].beats = []; p.scenes[1].beats = []; }), /sound effect/);
+  assert.match(issues((p) => { p.scenes[1].beats.push({ at: "1", fx: "stamp", text: "OUCH!" }); }, "th"), /must be in Thai/);
+  assert.doesNotMatch(issues((p) => { p.scenes[1].beats.push({ at: "1", fx: "stamp", text: "โอ๊ย!" }); }, "th"), /must be in Thai/);
+  // มี floor prop: ท่าใช้งานต้องอยู่บนสินค้า (ride) ไม่ใช่แค่ทำท่าเดิมข้าง ๆ
+  const floor = { ...PA, props: ["vacuum", "mat"], floorProps: ["mat"] };
+  assert.match(validateScenePlan(productPlan(), floor, { lang: "en", narrator: true }).join("\n"), /while riding the product prop/);
+  const ok = productPlan();
+  ok.scenes[3].props = [{ id: "mat", spot: "center" }];
+  ok.scenes[3].cast[0].ride = "mat";
+  assert.doesNotMatch(validateScenePlan(ok, floor, { lang: "en", narrator: true }).join("\n"), /use_pose/);
 });

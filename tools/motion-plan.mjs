@@ -23,6 +23,8 @@ export const SCENES_MIN = 4;
 export const SCENES_MAX = 14;
 export const MAX_CAST = 3;
 export const STAMP_MAX = 12;
+// โหมดสินค้า: ฉากตัวละครที่มีเสียงประกอบอย่างน้อยเท่านี้ (คลิปเงียบดูแบน)
+export const SFX_MIN = 3;
 // ±15% ปล่อยคลิปที่สองเป้า 60 วิให้ออกมา 71.7 วิ
 export const TOTAL_TOLERANCE = 0.1;
 export const SCENE_MAX = 12;
@@ -125,8 +127,10 @@ export function scenesSchema(raw = {}) {
           required: ["id", "place", "camera", "cast", "props", "lines", "beats"],
         },
       },
+      // ท่าที่แสดงการใช้สินค้า (เช่น pushup): ต้องโผล่ตอนปัญหา (ก่อนสินค้า) และตอนพิสูจน์ (บนสินค้า)
+      ...(assets.product ? { use_pose: oneOf(uniq(Object.values(assets.poses).flat())) } : {}),
     },
-    required: ["scenes"],
+    required: ["scenes", ...(assets.product ? ["use_pose"] : [])],
   };
 }
 
@@ -222,11 +226,11 @@ export function scenesSystemPrompt(lang, total, raw, { narrator = false } = {}) 
     pr
       ? `- Every kind "scene" needs 1–${MAX_CAST} cast characters, each standing on a named spot. insert and endcard scenes have empty cast, props and beats.`
       : `- Every scene needs 1–${MAX_CAST} cast characters, each standing on a named spot; never leave cast empty.`,
-    ...(pr ? productScenesLines(pr, assets) : ["- No real people, brands or copyrighted characters."]),
+    ...(pr ? productScenesLines(pr, assets, lang) : ["- No real people, brands or copyrighted characters."]),
   ].filter(Boolean).join("\n");
 }
 
-function productScenesLines(pr, assets) {
+function productScenesLines(pr, assets, lang) {
   const imgs = pr.images.map((im) => `  - ${im.id} (${im.role}): ${im.shows || im.role}${im.feature ? ` · feature: ${im.feature}` : ""}`);
   return [
     "- This is a product clip. Scene kinds (field kind):",
@@ -235,6 +239,9 @@ function productScenesLines(pr, assets) {
     `  - endcard: the last scene only, exactly one: the hero photo and product name${pr.show_price && pr.price_text ? " and price" : ""}${pr.cta ? `, with the note "${pr.cta}"` : ""}. The narrator says at most one short, casual line (e.g. what the character uses now); no pushy call to buy${pr.show_price ? "" : ", no price"}.`,
     "- Product images:",
     ...imgs,
+    "- use_pose: the pose that shows the product being used for the story's problem (e.g. an exercise pose for a mat). A scene before the product appears shows the problem with this pose, and a scene after it appears shows the same pose with the product (riding the product prop) — the proof. Sitting or standing on it is not enough.",
+    `- Stamps are in the clip language (${lang}), e.g. a Thai sound word for a Thai clip.`,
+    `- Sound: give at least ${SFX_MIN} character scenes an sfx beat on their main action (impact for a fall or pain, pop or ding for the product, whoosh for a move).`,
     `- At least ${INSERTS_MIN} insert scenes, showing different images; put a scene with a character using the product between inserts. Most of the clip is the story with characters, not inserts.`,
     (assets.floorProps ?? []).length ? "- After the product appears, show the character using the real product prop in at least one scene." : "",
     "- Keep scenes short (3–4 s): about one line each. Hook in the first scene.",
@@ -305,6 +312,24 @@ export function normalizeScenePlan(plan) {
     if (sc && Array.isArray(sc.beats)) sc.beats = sc.beats.filter((b) => b && (b.pose || b.move || b.fx || b.sfx));
   }
   return plan;
+}
+
+// ท่าที่ตัวละครใส่ในฉาก (ท่าเริ่ม + ท่าจาก beat)
+const posesIn = (sc, who) => [...arr(sc.cast).filter((c) => c?.who === who).map((c) => c.pose), ...arr(sc.beats).filter((b) => b?.who === who && b.pose).map((b) => b.pose)];
+
+// ฉากพิสูจน์: use_pose ต้องโผล่ก่อนสินค้า (ปัญหา) และหลังสินค้าปรากฏ (บน floor prop ถ้ามี)
+function useIssues(plan, assets) {
+  const pose = plan.use_pose;
+  if (typeof pose !== "string" || !pose) return ["use_pose is missing: name the pose that shows the product being used (e.g. the exercise)"];
+  const scenes = arr(plan.scenes);
+  const firstInsert = scenes.findIndex((sc) => kindOf(sc) === "insert");
+  if (firstInsert < 0) return [];
+  const floor = new Set(assets.floorProps);
+  const wears = (sc, onProduct) => arr(sc.cast).some((c) => (!onProduct || !floor.size || floor.has(c?.ride)) && posesIn(sc, c?.who).includes(pose));
+  const issues = [];
+  if (!scenes.slice(0, firstInsert).some((sc) => kindOf(sc) === "scene" && wears(sc, false))) issues.push(`use_pose "${pose}": show the problem first, a scene before the product appears where a character does ${pose}`);
+  if (!scenes.slice(firstInsert + 1).some((sc) => kindOf(sc) === "scene" && wears(sc, true))) issues.push(`use_pose "${pose}": after the product appears, a scene must show a character doing ${pose}${floor.size ? " while riding the product prop (ride)" : ""}: this is the proof the product helps`);
+  return issues;
 }
 
 export function validateScenePlan(plan, raw, { total, lang = "en", narrator = false } = {}) {
@@ -453,6 +478,7 @@ export function validateScenePlan(plan, raw, { total, lang = "en", narrator = fa
         const t = typeof b.text === "string" ? b.text.trim() : "";
         if (!t) issues.push(`${label}: stamp needs text (at most ${STAMP_MAX} characters)`);
         else if ([...t].length > STAMP_MAX) issues.push(`${label}: stamp text "${t}" is ${[...t].length} characters, max ${STAMP_MAX}`);
+        else if (pr && /^th/i.test(lang) && !/[\u0E00-\u0E7F]/.test(t)) issues.push(`${label}: stamp text "${t}" must be in Thai like the clip (e.g. โอ๊ย!, เย้!)`);
       }
       if (b?.sfx && !sfx.has(b.sfx)) issues.push(`${label}: sfx "${b.sfx}" must be one of ${[...sfx].join(", ")}`);
       risky(`${label} text`, b?.text);
@@ -475,6 +501,10 @@ export function validateScenePlan(plan, raw, { total, lang = "en", narrator = fa
     const hero = pr.images.find((im) => im.role === "hero")?.id;
     const first = inserts[0];
     if (first && first.image !== hero) issues.push(`the first insert must show the hero image "${hero}" (it shows "${first.image}")`);
+    issues.push(...useIssues(plan, assets));
+    const sfxScenes = scenes.filter((sc) => kindOf(sc) === "scene" && arr(sc.beats).some((b) => b?.sfx)).length;
+    const charScenes = kinds.filter((k) => k === "scene").length;
+    if (sfxScenes < Math.min(SFX_MIN, charScenes)) issues.push(`only ${sfxScenes} character scenes have a sound effect: give at least ${Math.min(SFX_MIN, charScenes)} of them an sfx beat on their main action`);
     const shots = scenes.map((sc) => (kindOf(sc) === "scene" ? sc.shot ?? "wide" : kindOf(sc)));
     for (let k = 2; k < shots.length; k++) {
       if (kinds[k] === "scene" && shots[k] === shots[k - 1] && shots[k] === shots[k - 2]) {

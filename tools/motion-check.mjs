@@ -35,7 +35,7 @@ export const FIX_RULES = [
 export function fixMessage(plan, found, poseActions) {
   return [
     "Current plan (JSON):",
-    JSON.stringify({ scenes: plan.scenes }),
+    JSON.stringify({ scenes: plan.scenes, ...(plan.use_pose ? { use_pose: plan.use_pose } : {}) }),
     "",
     "Problems found by checking the picture:",
     ...found.map((f) => `- scene ${plan.scenes[f.si].id} line ${f.li + 1} (${f.who}, "${f.en}"): shown pose "${f.pose}"${poseActions?.[f.who]?.[f.pose] ? ` (${poseActions[f.who][f.pose]})` : ""} does not fit the line`),

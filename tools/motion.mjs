@@ -222,7 +222,7 @@ async function work({ dir, ctx, state, key, id: given, prompt, total, audio, pla
       validate: (p) => validateScenePlan(normalizeScenePlan(p), assets, { total, lang, narrator }), maxTokens: SCENES_MAX_TOKENS,
       meta: { project: slug, step: "motion-scenes", item: key, run }, costDir,
     });
-    return { scenes: normalizeScenePlan(data).scenes };
+    return { scenes: normalizeScenePlan(data).scenes, ...(data.use_pose ? { use_pose: data.use_pose } : {}) };
   });
 
   // --id ที่ผู้ใช้ตั้ง = id คลิปและชื่อไฟล์ render ตรง ๆ; ไม่ใส่ → ตั้งจากชื่อเรื่อง + ท้าย hash
@@ -370,7 +370,7 @@ async function work({ dir, ctx, state, key, id: given, prompt, total, audio, pla
         },
         maxTokens: SCENES_MAX_TOKENS, meta: { ...meta, step: "motion-fix" }, costDir,
       });
-      fixedPlan = { scenes: normalizeScenePlan(data).scenes };
+      fixedPlan = { scenes: normalizeScenePlan(data).scenes, ...(data.use_pose ? { use_pose: data.use_pose } : {}) };
     } catch (err) {
       if (!(err instanceof VfError)) throw err;
       return { scores, warnings: [...failed, ...wrong.map(note), `แก้ท่าไม่สำเร็จ: ${err.message.slice(0, 120)}`], fixed: 0 };
