@@ -10,20 +10,37 @@ import { DEFAULT_POSES, TALK_MAX_REROLLS, makePoses, posesDir } from "./poses.mj
 
 const OPTIONS = {
   poses: { type: "string" },
+  pose: { type: "string", multiple: true },
   replace: { type: "boolean" },
   foreground: { type: "boolean" },
   "dry-run": { type: "boolean" },
 };
 const MAX_REROLLS = 1;
 
-function pickPoses(list) {
-  if (list === undefined) return DEFAULT_POSES;
+const POSE_NAME_RE = /^[a-z][a-z0-9-]{0,23}$/;
+
+// --pose name="action": ท่าที่กำหนดเอง (เช่น pushup ของคลิปสินค้า) หรือเขียนท่ามาตรฐานใหม่
+// (ท่ามาตรฐานเขียนไว้สำหรับสัตว์ เช่น scared มี "ears flying up" ตัวละครคนจึงงอกหู)
+export function parseCustomPoses(list = []) {
+  const out = {};
+  for (const kv of list) {
+    const i = kv.indexOf("=");
+    const name = i > 0 ? kv.slice(0, i).trim() : "";
+    const action = i > 0 ? kv.slice(i + 1).trim() : "";
+    if (!POSE_NAME_RE.test(name) || !action) throw new VfError("USAGE", `--pose ต้องเป็น <ชื่อ>="<ท่าทางภาษาอังกฤษ>" ชื่อเป็น a-z0-9- ขึ้นต้นด้วยตัวอักษร: ${kv}`);
+    out[name] = action;
+  }
+  return out;
+}
+
+export function pickPoses(list, custom = {}) {
+  if (list === undefined) return Object.keys(custom).length ? custom : DEFAULT_POSES;
   const names = list.split(",").map((s) => s.trim()).filter(Boolean);
   const bad = names.filter((n) => !(n in DEFAULT_POSES));
   if (!names.length || bad.length) {
     throw new VfError("USAGE", `--poses ไม่รู้จัก: ${bad.join(", ") || "(ว่าง)"} (ใช้ได้: ${Object.keys(DEFAULT_POSES).join(", ")})`);
   }
-  return Object.fromEntries([...new Set(names)].map((n) => [n, DEFAULT_POSES[n]]));
+  return { ...Object.fromEntries([...new Set(names)].map((n) => [n, DEFAULT_POSES[n]])), ...custom };
 }
 
 function dryRun(n) {
@@ -99,24 +116,33 @@ async function work({ dir, ctx, state, char, poses, replace, partial, run: fresh
 export async function main(argv) {
   const { values, positionals } = parse(argv, OPTIONS);
   const [ref, cid] = positionals;
-  if (!cid) throw new VfError("USAGE", "ใช้: vf character poses <project> <character> [--poses idle,happy] [--replace]");
+  if (!cid) throw new VfError("USAGE", 'ใช้: vf character poses <project> <character> [--poses idle,happy] [--pose name="action"]... [--replace]');
   const replace = values.replace === true;
-  const partial = replace && values.poses !== undefined;
-  const poses = pickPoses(values.poses);
+  const custom = parseCustomPoses(values.pose);
+  const poses = pickPoses(values.poses, custom);
   const dir = resolveProject(ref);
   const ctx = loadProject(dir);
   const char = ctx.characters.find((c) => c.id === cid);
   if (!char) throw new VfError("USAGE", `ไม่พบตัวละคร "${cid}" ใน project (ดู vf project show ${ctx.slug})`);
-  if (!replace && existsSync(join(posesDir(dir, cid), "poses.json"))) {
-    throw new VfError("USAGE", `มีท่าแล้ว ใช้ --replace เพื่อสร้างใหม่ทั้งชุด หรือ --replace --poses <ท่า> เพื่อสร้างใหม่เฉพาะท่านั้น (ของเดิมจะถูกเก็บไว้ใน poses-old-*): ${cid}`);
+  const have = existsSync(join(posesDir(dir, cid), "poses.json")) ? readSet(posesDir(dir, cid)) : null;
+  // เพิ่มท่าใหม่ (--pose ที่ยังไม่มี) เข้าชุดเดิมได้โดยไม่ต้อง --replace
+  const adding = !replace && have && Object.keys(custom).length && values.poses === undefined;
+  if (adding) {
+    const dup = Object.keys(custom).filter((n) => n in have);
+    if (dup.length) throw new VfError("USAGE", `มีท่า ${dup.join(", ")} แล้ว ใช้ --replace --pose ... เพื่อสร้างใหม่: ${cid}`);
+  } else if (!replace && have) {
+    throw new VfError("USAGE", `มีท่าแล้ว ใช้ --replace เพื่อสร้างใหม่ทั้งชุด หรือ --replace --poses <ท่า> เพื่อสร้างใหม่เฉพาะท่านั้น (ของเดิมจะถูกเก็บไว้ใน poses-old-*) หรือ --pose <ชื่อใหม่>="..." เพื่อเพิ่มท่า: ${cid}`);
   }
+  // partial = รวมกับชุดเดิม (แทนบางท่า หรือเพิ่มท่า) แทนการแทนทั้งชุด
+  const partial = Boolean(adding) || (replace && (values.poses !== undefined || Object.keys(custom).length > 0));
   if (values["dry-run"]) return dryRun(Object.keys(poses).length);
 
   const stateDir = join(dir, ".vf");
   const stateName = `poses-${cid}-state.json`;
   const openRun = () => {
     let state = openState(stateDir, stateName);
-    if (replace && state.get("files")?.status === "done") {
+    // รอบก่อนจบแล้ว (สร้างใหม่หรือเพิ่มท่า) → เริ่ม state ใหม่ ไม่งั้น input ไม่ตรงกับที่ pin ไว้
+    if ((replace || adding) && state.get("files")?.status === "done") {
       renameSync(join(stateDir, stateName), join(stateDir, `poses-${cid}-state.${stamp()}-${Date.now()}.json`));
       state = openState(stateDir, stateName);
     }
@@ -126,7 +152,12 @@ export async function main(argv) {
     return state;
   };
   // ใส่ --poses เฉพาะเมื่อผู้ใช้ระบุ: กับ --replace มันเปลี่ยนความหมาย (แทนบางท่า vs ทั้งชุด)
-  const command = ["character", "poses", dir, cid, ...(values.poses !== undefined ? [`--poses=${Object.keys(poses).join(",")}`] : []), ...(replace ? ["--replace"] : [])];
+  const command = [
+    "character", "poses", dir, cid,
+    ...(values.poses !== undefined ? [`--poses=${Object.keys(poses).filter((n) => !(n in custom)).join(",")}`] : []),
+    ...Object.entries(custom).map(([n, a]) => `--pose=${n}=${a}`),
+    ...(replace ? ["--replace"] : []),
+  ];
   return await runEntity({
     dir, projectRef: ref, slug: ctx.slug, command, label: `character poses ${cid}`, foreground: values.foreground,
     work: ({ run }) => work({ dir, ctx, state: openRun(), char, poses, replace, partial, run }),

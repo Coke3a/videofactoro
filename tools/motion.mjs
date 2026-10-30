@@ -195,6 +195,7 @@ async function work({ dir, ctx, state, key, id: given, prompt, total, audio, pla
     poses,
     places: Object.fromEntries(places.map((p) => [p.id, Object.keys(stages[p.id].spots)])),
     props: listProps(dir).map((p) => p.id),
+    floorProps: listProps(dir).filter((p) => p.placement === "floor").map((p) => p.id),
     sfx: SFX_KINDS,
   };
   const plan = await step(state, "scenes", async () => {
@@ -270,6 +271,7 @@ async function work({ dir, ctx, state, key, id: given, prompt, total, audio, pla
     for (const pid of new Set(plan.scenes.flatMap((s) => (s.props ?? []).map((p) => p.id)))) {
       copyFileSync(join(dir, "props", pid, "prop.png"), join(hdir, "assets", `prop-${pid}.png`));
     }
+    const propInfo = Object.fromEntries(listProps(dir).map((p) => [p.id, p]));
     const html = composeHtml({
       plan, times, lines, stage: stages, size: SIZE, fps: FPS, lang,
       font: { family: FONT_FOR(lang).family, file: basename(font) },
@@ -277,6 +279,7 @@ async function work({ dir, ctx, state, key, id: given, prompt, total, audio, pla
         plate: (pid) => plates[pid],
         sprite: (who, pose, talk) => `assets/${who}-${pose}${talk ? "-talk" : ""}.png`,
         prop: (pid) => `assets/prop-${pid}.png`,
+        propInfo: (pid) => propInfo[pid],
       },
     });
     writeFileSync(join(hdir, "index.html"), html);

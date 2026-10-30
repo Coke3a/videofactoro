@@ -14,6 +14,13 @@ export const ACTOR_SIZE = 0.42;
 // ฉาก 3 ตัว: 0.42 × 3 กว้างเกินเฟรม → ย่อลงให้วางห่างกันได้ครบในเฟรม
 export const CROWD_SIZE = 0.34;
 const PROP_SIZE = 0.26;
+// prop ที่ไม่บอกข้อมูล = ภาพจากโมเดล 1:1 ตั้งบนพื้น (พฤติกรรมเดิม)
+const PROP_DEFAULT = { placement: "upright", size_cm: null, aspect: 1, trimmed: false };
+// ตัวละครขนาดมาตรฐานถือว่าสูง 160 ซม.: ส่วนที่เห็นจริงในภาพท่า ≈ 73% ของความสูงภาพ (เว้นใต้เท้า 19% เหนือหัว ~8%)
+const CHAR_CM = 160;
+const W_PER_CM = (ACTOR_SIZE * SPRITE_RATIO * 0.73) / CHAR_CM;
+const FLOOR_TILT = 72;
+const FLOOR_PERSPECTIVE = 1400;
 // ระยะกึ่งกลางขั้นต่ำ = SEP × ความกว้างเฉลี่ยของคู่: ตัวละครจริงกินแค่ ~78% ของกว้างภาพท่า (ขอบใส)
 export const SEP = 0.8;
 const RIDE_BOTTOM = "30%";
@@ -220,22 +227,34 @@ export function composeHtml({ plan, times, lines = {}, stage, assets, size = { w
     const beats = sc.beats ?? [];
 
     const actorW = (c) => c.size ?? (cast.length >= 3 ? CROWD_SIZE : ACTOR_SIZE);
-    const propW = (p) => p.size ?? PROP_SIZE;
+    const byId = Object.fromEntries(props.map((p) => [p.id, p]));
+    const info = (p) => ({ ...PROP_DEFAULT, ...(assets.propInfo?.(p.id) ?? {}) });
+    const flat = (p) => info(p).placement === "floor";
+    // ขนาดจริง (size_cm) ชนะ size ที่ LLM เดา: สินค้าต้องดูใหญ่เท่าของจริงเมื่อเทียบกับตัวละคร
+    const realW = (p) => {
+      const i = info(p);
+      if (!i.size_cm) return null;
+      const long = i.size_cm * W_PER_CM;
+      return Math.min(0.95, flat(p) || i.aspect >= 1 ? long : long * i.aspect);
+    };
+    const propW = (p) => realW(p) ?? p.size ?? PROP_SIZE;
     const propIds = new Set(props.map((p) => p.id));
-    const rides = (c) => c.ride && propIds.has(c.ride);
+    // ขี่ prop ที่ตั้งบนพื้น = อยู่ในกล่องของ prop · ยืนบน prop ที่ปูพื้น (onMat) = ยืนบนพื้นตรงจุดของ prop
+    const rides = (c) => c.ride && propIds.has(c.ride) && !flat(byId[c.ride]);
+    const onMat = (c) => c.ride && propIds.has(c.ride) && flat(byId[c.ride]);
     // จัดตำแหน่งตัวที่ยืนบนพื้น + prop ที่มีคนขี่ (กว้างเท่าตัวที่ขี่) ด้วยกัน; prop เปล่าแค่ไม่ให้หลุดขอบ
-    const riders = (p) => cast.filter((c) => rides(c) && c.ride === p.id);
+    const riders = (p) => cast.filter((c) => (rides(c) || onMat(c)) && c.ride === p.id);
     const bodyW = (p) => Math.max(propW(p), ...riders(p).map(actorW));
     const pos = layoutX([
-      ...cast.filter((c) => !rides(c)).map((c) => ({ key: `c:${c.who}`, x: spotX(st, c.spot), w: actorW(c) })),
+      ...cast.filter((c) => !rides(c) && !onMat(c)).map((c) => ({ key: `c:${c.who}`, x: spotX(st, c.spot), w: actorW(c) })),
       ...props.filter((p) => riders(p).length).map((p) => ({ key: `o:${p.id}`, x: spotX(st, p.spot), w: bodyW(p) })),
     ]);
     const propX = Object.fromEntries(props.map((p) => [p.id, pos[`o:${p.id}`] ?? inFrame(spotX(st, p.spot), propW(p))]));
     // who ใน beat: หาใน cast ก่อน แล้วค่อย props (cast ทับ props)
     const el = Object.create(null);
     for (const p of props) el[p.id] = { sel: `#${eid(`o-${safe(p.id)}`)}`, x0: propX[p.id], w: bodyW(p), body: false, cur: 0 };
-    // ตัวที่ขี่ prop อยู่ในกล่องของ prop → ระยะเดินนับจากจุดของ prop
-    for (const c of cast) el[c.who] = { sel: `#${eid(`c-${safe(c.who)}`)}`, x0: rides(c) ? propX[c.ride] : pos[`c:${c.who}`], w: actorW(c), body: true, cur: 0 };
+    // ตัวที่ขี่/ยืนบน prop → ระยะเดินนับจากจุดของ prop
+    for (const c of cast) el[c.who] = { sel: `#${eid(`c-${safe(c.who)}`)}`, x0: rides(c) || onMat(c) ? propX[c.ride] : pos[`c:${c.who}`], w: actorW(c), body: true, cur: 0 };
 
     const posesOf = (c) => uniq([c.pose, ...beats.filter((b) => b.who === c.who && b.pose).map((b) => b.pose)]);
     const actorHtml = (c) => {
@@ -252,11 +271,25 @@ export function composeHtml({ plan, times, lines = {}, stage, assets, size = { w
         : `left:${r3(el[c.who].x0 * W - aw / 2)}px;bottom:${r3(floorPx - ah * 0.06)}px`;
       return `<div id="${id}" class="actor" style="${at};width:${r3(aw)}px;height:${r3(ah)}px"><div id="${id}-body" class="body">${imgs}</div></div>`;
     };
+    // ระดับเท้าของตัวละครขนาดมาตรฐาน (ขอบล่างกล่อง −6% + ที่ว่างใต้เท้า 19%)
+    const feetPx = floorPx + ACTOR_SIZE * W * SPRITE_RATIO * 0.13;
     const propHtml = (p) => {
+      const i = info(p);
       const pw = propW(p) * W;
-      const ride = riders(p).map(actorHtml).join("");
-      return `<div id="${eid(`o-${safe(p.id)}`)}" class="prop" style="left:${r3(propX[p.id] * W - pw / 2)}px;bottom:${r3(floorPx - pw * 0.12)}px;width:${r3(pw)}px;height:${r3(pw)}px">`
-        + `<img class="prop-img" src="${esc(assets.prop(p.id))}" />${ride}</div>`;
+      const ph = pw / i.aspect;
+      const ride = riders(p).filter(rides).map(actorHtml).join("");
+      const left = r3(propX[p.id] * W - pw / 2);
+      const img = `<img class="prop-img" src="${esc(assets.prop(p.id))}" />`;
+      if (flat(p)) {
+        // ปูพื้น: เอียงภาพลงนอน (ขอบล่างอยู่กับที่) ให้กลางผืนอยู่ระดับเท้า ตัวละครจึงยืนอยู่บนผืน
+        const seen = ph * Math.cos((FLOOR_TILT * Math.PI) / 180);
+        return `<div id="${eid(`o-${safe(p.id)}`)}" class="prop" style="left:${left}px;bottom:${r3(feetPx - seen / 2)}px;width:${r3(pw)}px;height:${r3(ph)}px">`
+          + `<div class="prop-flat" style="transform:perspective(${FLOOR_PERSPECTIVE}px) rotateX(${FLOOR_TILT}deg)">${img}</div></div>`;
+      }
+      // รูปจริงที่ตัดขอบใสแล้ว (trimmed) วางบนระดับเท้าพอดี · ภาพจาก prompt มีขอบใสรอบวัตถุ จึงจมลงนิดหน่อยแบบเดิม
+      const bottom = i.trimmed ? feetPx : floorPx - pw * 0.12;
+      return `<div id="${eid(`o-${safe(p.id)}`)}" class="prop" style="left:${left}px;bottom:${r3(bottom)}px;width:${r3(pw)}px;height:${r3(ph)}px">`
+        + `${img}${ride}</div>`;
     };
     const caps = t.lines.map((l, i) => {
       const words = captionChunks(sc.lines[i].text, lang);

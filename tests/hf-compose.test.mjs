@@ -307,3 +307,49 @@ test("composeHtml: ฉาก 3 ตัวย่อลงเป็น CROWD_SIZE �
   assert.ok(left("c-marmalade") + dx + aw <= W + 1e-6, String(dx));
   assert.ok(ACTOR_SIZE > CROWD_SIZE);
 });
+
+// prop จากรูปจริง: ข้อมูลมาจาก assets.propInfo (listProps)
+const matPlan = () => ({
+  scenes: [{
+    id: "s01", place: "living", camera: "static",
+    cast: [{ who: "pim", spot: "center", pose: "pushup", ride: "mat" }],
+    props: [{ id: "mat", spot: "center", size: 0.2 }],
+    lines: [], beats: [],
+  }],
+});
+const withInfo = (info) => ({ ...assets, propInfo: (id) => info[id] });
+const styleOf = (html, id) => new RegExp(`id="${id}" class="(?:actor|prop)" style="([^"]*)"`).exec(html)[1];
+const num = (style, k) => Number(new RegExp(`${k}:([-\\d.]+)px`).exec(style)[1]);
+
+test("composeHtml: prop ที่ไม่มี propInfo = กล่องจัตุรัสแบบเดิม", () => {
+  const html = compose({ plan: matPlan() });
+  const st = styleOf(html, "sc1-o-mat");
+  assert.equal(num(st, "width"), num(st, "height"));
+  // ไม่มี propInfo → ขี่อยู่ในกล่องของ prop เหมือนเดิม
+  assert.match(html, /id="sc1-o-mat" class="prop"[^>]*><img class="prop-img"[^>]*\/><div id="sc1-c-pim"/);
+});
+
+test("composeHtml: floor prop เอียงลงนอน, size_cm ชนะ size, ตัวละครยืนบนพื้นตรงจุดของ prop ไม่อยู่ในกล่อง", () => {
+  const html = compose({ plan: matPlan(), assets: withInfo({ mat: { placement: "floor", size_cm: 185, aspect: 2.5, trimmed: true } }) });
+  const st = styleOf(html, "sc1-o-mat");
+  const w = num(st, "width");
+  // 185 ซม. เทียบตัวละคร 160 ซม. → กว้างกว่า size 0.2 ของ LLM และสูง = กว้าง / aspect
+  assert.ok(w > 0.2 * 1080 * 1.5, String(w));
+  assert.ok(Math.abs(num(st, "height") - w / 2.5) < 0.01);
+  assert.match(html, /class="prop-flat" style="transform:perspective\(\d+px\) rotateX\(\d+deg\)"/);
+  // ตัวละครไม่ได้อยู่ในกล่อง prop และกึ่งกลางตรงกับ prop
+  assert.doesNotMatch(html, /id="sc1-o-mat"[^]*?<div id="sc1-c-pim"[^]*?<\/div><\/div><\/div>\s*<\/section>/);
+  const a = styleOf(html, "sc1-c-pim");
+  const centre = (s) => num(s, "left") + num(s, "width") / 2;
+  assert.ok(Math.abs(centre(a) - centre(st)) < 0.5, `${centre(a)} vs ${centre(st)}`);
+});
+
+test("composeHtml: upright รูปจริงคงสัดส่วน (สูง = กว้าง / aspect) และขนาดตาม size_cm", () => {
+  const p = matPlan();
+  p.scenes[0].cast[0].ride = undefined;
+  const small = compose({ plan: p, assets: withInfo({ mat: { placement: "upright", size_cm: 30, aspect: 0.5, trimmed: true } }) });
+  const big = compose({ plan: p, assets: withInfo({ mat: { placement: "upright", size_cm: 120, aspect: 0.5, trimmed: true } }) });
+  const s1 = styleOf(small, "sc1-o-mat"), s2 = styleOf(big, "sc1-o-mat");
+  assert.ok(Math.abs(num(s1, "height") - num(s1, "width") / 0.5) < 0.01);
+  assert.ok(Math.abs(num(s2, "width") / num(s1, "width") - 4) < 0.01);
+});

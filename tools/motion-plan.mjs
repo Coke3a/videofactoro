@@ -119,7 +119,7 @@ export function scenesSchema(raw = {}) {
 
 export function storySystemPrompt(lang, total, ctx = {}) {
   const chars = (ctx.characters ?? []).map((c) => `  - ${c.id} (${c.name ?? c.id}): ${c.personality ?? ""} · poses: ${(c.poses ?? []).join(", ")}`);
-  const props = (ctx.props ?? []).map((p) => `  - ${p.id}: ${p.desc ?? ""}`);
+  const props = (ctx.props ?? []).map((p) => `  - ${p.id}: ${p.desc ?? ""}${p.placement === "floor" ? " (lies flat on the floor; characters can stand or exercise on it)" : ""}`);
   return [
     `You write the story for a ${total}-second kids' cartoon gag clip made of cut-out characters on painted backgrounds. Reply with JSON matching the schema only.`,
     ctx.direction ? `- Project direction: ${ctx.direction}` : "",
@@ -158,6 +158,9 @@ export function scenesSystemPrompt(lang, total, raw, { narrator = false } = {}) 
       ? `- Use 2–3 different places, following where the outline says things happen: change place at a story turn (a chase leads into another room, the twist or button happens somewhere new). Keep neighbouring scenes in one place while the action stays there. With ${MULTI_PLACE_SCENES}+ scenes, one place for the whole clip is rejected.`
       : "",
     `- props: { id, spot, enter? } from: ${(assets.props ?? []).join(", ") || "(none)"}.`,
+    (assets.floorProps ?? []).length
+      ? `- Floor props lie flat on the floor (mats, rugs): ${assets.floorProps.join(", ")}. A character standing, sitting or exercising on one sets ride to its id; give the prop the same spot as that character.`
+      : "",
     `- lines: short, in ${lang}, at most ${max} ${unitEn(lang)} each. who is ${narrator ? '"narrator" or ' : ""}a character in that scene's cast.`,
     narrator ? "- The narrator tells the story briefly; characters speak their own short lines." : "- There is no narrator in this project: every line is spoken by a character in the cast.",
     `- beats: { at, who?, pose?, move?, to_spot?, dur?, fx?, sfx?, text? }. at is seconds from scene start as a string ("1.5") or "line<N>" / "line<N>-end" (N counts from 1 within the scene). who is a cast id or a prop id in the scene. move: ${MOVES.join(", ")} (to and run-to need to_spot). fx: stamp (needs text) or shake. sfx: ${(assets.sfx ?? []).join(", ")}.`,

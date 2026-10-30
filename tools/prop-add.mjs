@@ -1,15 +1,18 @@
 import { existsSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { parse, VfError } from "./out.mjs";
 import { resolveProject, slugify } from "./paths.mjs";
 import { openState } from "./state.mjs";
 import { pinInput, pinRun, costSince, loadProject, planRows, imageRow, runEntity } from "./entities.mjs";
 import { MODELS } from "./models.mjs";
-import { makeProp, propDir, PROP_ID_RE } from "./props.mjs";
+import { importProp, makeProp, propDir, PLACEMENTS, PROP_ID_RE } from "./props.mjs";
 
 const OPTIONS = {
   prompt: { type: "string" },
   id: { type: "string" },
+  image: { type: "string" },
+  placement: { type: "string" },
+  "size-cm": { type: "string" },
   foreground: { type: "boolean" },
   "dry-run": { type: "boolean" },
 };
@@ -26,7 +29,12 @@ export async function main(argv) {
   const { values, positionals } = parse(argv, OPTIONS);
   const ref = positionals[0];
   const desc = values.prompt?.trim();
-  if (!ref || !desc) throw new VfError("USAGE", 'ใช้: vf prop add <project> --prompt "<คำอธิบายวัตถุ>" [--id <id>]');
+  if (!ref || !desc) throw new VfError("USAGE", 'ใช้: vf prop add <project> --prompt "<คำอธิบายวัตถุ>" [--id <id>] [--image <png> --placement upright|floor --size-cm <N>]');
+  const image = values.image ? resolve(values.image) : null;
+  if (!image && (values.placement || values["size-cm"])) throw new VfError("USAGE", "--placement และ --size-cm ใช้คู่กับ --image เท่านั้น");
+  const placement = values.placement ?? "upright";
+  if (!PLACEMENTS.includes(placement)) throw new VfError("USAGE", `--placement ต้องเป็น ${PLACEMENTS.join(" หรือ ")}`);
+  const sizeCm = values["size-cm"] === undefined ? null : Number(values["size-cm"]);
   const first3 = desc.split(/\s+/).slice(0, 3).join(" ");
   // slugify ของข้อความที่ไม่มี a-z0-9 จะคืน hash (project-xxxx) ซึ่งไม่ใช่ id ที่ตั้งใจ
   const id = values.id ?? (/[a-z0-9]/i.test(first3) ? slugify(first3) : "");
@@ -34,6 +42,12 @@ export async function main(argv) {
   const dir = resolveProject(ref);
   const ctx = loadProject(dir);
   if (existsSync(join(propDir(dir, id), "prop.json"))) throw new VfError("USAGE", `มี prop "${id}" แล้ว ใช้ --id อื่น`);
+  // รูปจริง (เช่น สินค้า): ไม่เรียก API จึงทำทันที ไม่ต้องเป็น job
+  if (image) {
+    if (values["dry-run"]) return { dry_run: true, planned: [], estimated_usd: 0, assumptions: ["ใช้รูปที่ให้มา ตัดขอบใสในเครื่อง ไม่มีค่าใช้จ่าย"] };
+    const made = await importProp({ dir, id, desc, image, placement, sizeCm });
+    return { ...made, cost: { usd: 0 }, next: [`vf project show ${ctx.slug}`] };
+  }
   if (values["dry-run"]) return dryRun();
 
   const command = ["prop", "add", dir, `--prompt=${desc}`, `--id=${id}`];

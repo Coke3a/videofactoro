@@ -9,7 +9,8 @@ import { MODELS } from "../tools/models.mjs";
 import { main as create } from "../tools/project-create.mjs";
 import { main as prop } from "../tools/prop-add.mjs";
 import { main as show } from "../tools/project-show.mjs";
-import { listProps, PROP_ID_RE } from "../tools/props.mjs";
+import { listProps, opaqueBox, PROP_ID_RE } from "../tools/props.mjs";
+import { execFileSync } from "node:child_process";
 import { goodBible } from "./fixtures/bible.mjs";
 import { bodyOf } from "./fixtures/body.mjs";
 
@@ -92,7 +93,10 @@ test("รันจริง: props/robot-vacuum/prop.png + prop.json, prompt ม
   assert.ok(p.startsWith("robot vacuum. A single object"), p);
   assert.ok(p.includes(style), p);
   assert.equal(clefCalls().length, 0);
-  assert.deepEqual(listProps(dir), [{ id: "robot-vacuum", desc: "robot vacuum", file: "props/robot-vacuum/prop.png" }]);
+  assert.deepEqual(listProps(dir), [{
+    id: "robot-vacuum", desc: "robot vacuum", file: "props/robot-vacuum/prop.png",
+    placement: "upright", size_cm: null, aspect: 1, trimmed: false,
+  }]);
 });
 
 test("--id ใช้แทนค่าเริ่มต้น; id ซ้ำ → USAGE; id ไม่ถูกต้อง → USAGE", async () => {
@@ -116,4 +120,45 @@ test("listProps ข้าม prop.json ที่เสีย ไม่ throw", a
   await run(["--id", "bad"]);
   fs.writeFileSync(path.join(dir, "props", "bad", "prop.json"), "{not json");
   assert.deepEqual(listProps(dir).map((p) => p.id), ["good"]);
+});
+
+// รูปจริง 40×100 ทึบเฉพาะกลาง 20×80 (ขอบใส 10 px): ffmpeg สร้างจาก lavfi เพื่อไม่ต้องมีไฟล์ fixture
+function productPng(file) {
+  execFileSync("ffmpeg", ["-v", "error", "-y", "-f", "lavfi", "-i", "color=c=gray:s=20x80,format=rgba",
+    "-f", "lavfi", "-i", "color=c=black@0.0:s=40x100,format=rgba",
+    "-filter_complex", "[1][0]overlay=10:10,format=rgba", "-frames:v", "1", file]);
+  return file;
+}
+
+test("opaqueBox: กรอบของพิกเซลทึบ; โปร่งทั้งภาพ → null", () => {
+  const w = 4, h = 3, px = Buffer.alloc(w * h * 4);
+  px[(1 * w + 2) * 4 + 3] = 255;
+  px[(2 * w + 1) * 4 + 3] = 255;
+  assert.deepEqual(opaqueBox({ w, h, px }), { x: 1, y: 1, w: 2, h: 2 });
+  assert.equal(opaqueBox({ w, h, px: Buffer.alloc(w * h * 4) }), null);
+});
+
+test("--image: ไม่เรียก API, ตัดขอบใส, floor หมุนด้านยาวเป็นแนวนอน, prop.json มี placement/size_cm/aspect", async () => {
+  const img = productPng(path.join(root, "mat.png"));
+  const r = await run(["--id", "mat", "--image", img, "--placement", "floor", "--size-cm", "185"]);
+  assert.equal(r.placement, "floor");
+  assert.equal(r.size_cm, 185);
+  assert.equal(r.aspect, 4);
+  assert.equal(r.cost.usd, 0);
+  assert.equal(calls.length, 0);
+  const size = execFileSync("ffprobe", ["-v", "error", "-show_entries", "stream=width,height", "-of", "csv=p=0", path.join(dir, "props", "mat", "prop.png")]).toString().trim();
+  assert.equal(size, "80,20");
+  const [p] = listProps(dir);
+  assert.equal(p.placement, "floor");
+  assert.equal(p.trimmed, true);
+});
+
+test("--image upright คงทิศเดิม; --placement/--size-cm ผิด → USAGE; ไม่มี --image แต่ใส่ --placement → USAGE", async () => {
+  const img = productPng(path.join(root, "box.png"));
+  const r = await run(["--id", "box", "--image", img]);
+  assert.equal(r.placement, "upright");
+  assert.equal(r.aspect, 0.25);
+  await assert.rejects(run(["--id", "b2", "--image", img, "--placement", "wall"]), (e) => e.code === "USAGE");
+  await assert.rejects(run(["--id", "b3", "--image", img, "--size-cm", "-5"]), (e) => e.code === "USAGE");
+  await assert.rejects(run(["--id", "b4", "--placement", "floor"]), (e) => e.code === "USAGE");
 });

@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import * as cf from "../tools/cf.mjs";
 import { MODELS } from "../tools/models.mjs";
 import { main as create } from "../tools/project-create.mjs";
-import { main as poses } from "../tools/character-poses.mjs";
+import { main as poses, parseCustomPoses, pickPoses } from "../tools/character-poses.mjs";
 import { loadPoses, DEFAULT_POSES, TALK_PROMPT } from "../tools/poses.mjs";
 import { goodBible } from "./fixtures/bible.mjs";
 import { bodyOf } from "./fixtures/body.mjs";
@@ -228,4 +228,41 @@ test("ท่าที่ QA ไม่ผ่านถูกเก็บไว้�
   assert.ok(r.warnings[0].startsWith("idle:"));
   assert.equal(clefCalls().length, 2 + 1);
   assert.ok(fs.existsSync(path.join(posesDir(), "idle-talk.png")));
+});
+
+test("parseCustomPoses/pickPoses: ชื่อ=ท่า, ชื่อผิด → USAGE, --pose อย่างเดียว = เฉพาะท่านั้น, รวมกับ --poses ได้", () => {
+  assert.deepEqual(parseCustomPoses(["pushup=doing a push-up on the floor", "scared = flinching back"]), {
+    pushup: "doing a push-up on the floor", scared: "flinching back",
+  });
+  for (const bad of ["pushup", "=x", "Push=x", "1up=x", "pushup="]) {
+    assert.throws(() => parseCustomPoses([bad]), (e) => e.code === "USAGE", bad);
+  }
+  assert.deepEqual(pickPoses(undefined, { pushup: "a" }), { pushup: "a" });
+  assert.equal(pickPoses(undefined, {}), DEFAULT_POSES);
+  // ท่ามาตรฐานที่เขียนใหม่ใช้คำของผู้ใช้
+  assert.deepEqual(pickPoses("idle,scared", { scared: "b" }), { idle: DEFAULT_POSES.idle, scared: "b" });
+});
+
+test("--pose เพิ่มท่าใหม่เข้าชุดเดิมโดยไม่ต้อง --replace ใช้ท่าทางที่กำหนด; ชื่อซ้ำ → USAGE", async () => {
+  await run(["--poses", "idle"]);
+  calls.length = 0;
+  const r = await run(["--pose", "pushup=doing a push-up on the floor"]);
+  assert.deepEqual(r.poses, ["idle", "pushup"]);
+  const pose = klein().map((c) => c.body.input.prompt).filter((p) => !p.includes("Edit image 1"));
+  assert.equal(pose.length, 1);
+  assert.ok(pose[0].includes("doing a push-up on the floor"));
+  assert.equal(olds().length, 0);
+  assert.deepEqual(Object.keys(readPj().poses), ["idle", "pushup"]);
+  await assert.rejects(run(["--pose", "pushup=again"]), (e) => e.code === "USAGE" && e.message.includes("pushup"));
+  // เพิ่มอีกท่าได้หลังรอบก่อนจบ (state ถูกหมุน)
+  const r2 = await run(["--pose", "plank=holding a plank"]);
+  assert.deepEqual(r2.poses, ["idle", "pushup", "plank"]);
+});
+
+test("--replace --pose: เขียนท่ามาตรฐานใหม่ เก็บเฉพาะไฟล์ท่านั้นไว้ poses-old-*", async () => {
+  await run(["--poses", "idle,scared"]);
+  const r = await run(["--replace", "--pose", "scared=flinching back, hands up"]);
+  assert.deepEqual(r.poses, ["idle", "scared"]);
+  assert.equal(olds().length, 1);
+  assert.deepEqual(fs.readdirSync(oldDir()).sort(), ["poses.json", "scared-talk.png", "scared.png"]);
 });

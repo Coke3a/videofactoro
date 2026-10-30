@@ -7,7 +7,9 @@ body { margin: 0; background: #000; }
 .actor, .prop { position: absolute; }
 .body { position: absolute; inset: 0; transform-origin: 50% 100%; }
 .sprite { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; }
-.prop-img { position: absolute; inset: 0; width: 100%; height: 100%; }
+.prop-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+/* prop ที่ปูพื้น: เอียงลงนอนโดยยึดขอบล่าง (transform ใส่ใน style ของแต่ละชิ้น) */
+.prop-flat { position: absolute; inset: 0; transform-origin: 50% 100%; }
 /* คำบรรยายลอยเหนือหัวตัวละคร (เท้าอยู่ที่พื้นหน้าสุด) และใต้ stamp */
 .cap { position: absolute; left: 60px; right: 60px; bottom: 43%; text-align: center; font-size: 60px; line-height: 1.15;
        font-weight: 700; -webkit-text-stroke: 12px #111; paint-order: stroke fill;
