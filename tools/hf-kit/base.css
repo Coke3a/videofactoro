@@ -35,3 +35,7 @@ body { margin: 0; background: #000; }
              -webkit-text-stroke: 10px #fff; paint-order: stroke fill; text-shadow: 0 14px 24px rgba(120, 40, 0, 0.35); opacity: 0; }
 .end-cta { position: absolute; left: 0; right: 0; text-align: center; opacity: 0; }
 .end-cta span { display: inline-block; padding: 24px 64px; border-radius: 999px; background: #3b2a1a; color: #ffd60a; font-size: 64px; }
+/* ป้าย hook บนฉากแรก: คำถาม/คำเกริ่นสั้น ๆ ให้คนดูอยู่ต่อ */
+.hook { position: absolute; left: 0; right: 0; margin: 0 auto; width: fit-content; max-width: 920px; padding: 22px 48px; border-radius: 28px;
+        background: #fff; color: #1d1d1d; font-size: 66px; line-height: 1.15; text-align: center;
+        box-shadow: 0 10px 0 #1d1d1d, 0 18px 30px rgba(0, 0, 0, 0.35); opacity: 0; }

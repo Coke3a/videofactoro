@@ -1,4 +1,4 @@
-// clef ตรวจว่าท่าตัวละครตรงกับบทที่กำลังพูด (โหมดสินค้า): ภาพกลางบท + ความหมายบท → คะแนนว่าขัดกันไหม
+// clef ตรวจว่าท่าตัวละครตรงกับบทที่กำลังพูด: ภาพกลางบท + ความหมายบท → คะแนนว่าขัดกันไหม
 import { poseAt } from "./hf-compose.mjs";
 
 export const POSE_WARN = 0.5;
@@ -28,14 +28,14 @@ export const poseQuestion = (c, name) =>
 // ส่งกลับให้ LLM แก้เฉพาะท่าและ beat (บทพูดคงเดิม จึงไม่ต้องอัดเสียงใหม่)
 export const FIX_RULES = [
   "You are fixing an existing scene plan. Return the whole plan.",
-  "- Keep every scene's id, kind, place, camera, shot, focus, image, chip, props and every line (who, text, en) exactly as they are.",
+  "- Keep the hook and every scene's id, kind, place, camera, shot, focus, image, chip, props and every line (who, text, en) exactly as they are.",
   "- Change only cast poses and beats in the scenes listed as problems, so that while each listed line is spoken the character's pose shows what the line says. Use only poses that exist for that character.",
 ].join("\n");
 
 export function fixMessage(plan, found, poseActions) {
   return [
     "Current plan (JSON):",
-    JSON.stringify({ scenes: plan.scenes, ...(plan.use_pose ? { use_pose: plan.use_pose } : {}) }),
+    JSON.stringify({ scenes: plan.scenes, hook: plan.hook, ...(plan.use_pose ? { use_pose: plan.use_pose } : {}) }),
     "",
     "Problems found by checking the picture:",
     ...found.map((f) => `- scene ${plan.scenes[f.si].id} line ${f.li + 1} (${f.who}, "${f.en}"): shown pose "${f.pose}"${poseActions?.[f.who]?.[f.pose] ? ` (${poseActions[f.who][f.pose]})` : ""} does not fit the line`),

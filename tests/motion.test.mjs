@@ -14,13 +14,14 @@ import { validateScenePlan, validateStory } from "../tools/motion-plan.mjs";
 import { SFX_KINDS } from "../tools/fx.mjs";
 import { goodBible } from "./fixtures/bible.mjs";
 import { bodyOf } from "./fixtures/body.mjs";
+import { POSE_KEY } from "../tools/motion-check.mjs";
 import { TINY, STORY, SCENES, SILENT_SCENES, STORY_MARK, SCENES_MARK, STAGING_KEY, prepareMotionProject, stubRunner } from "./fixtures/motion.mjs";
 
 const B64 = fs.readFileSync(TINY).toString("base64");
 const ENV = { CLOUDFLARE_AI_ACCOUNT_ID: "acc1", CLOUDFLARE_AI_API_TOKEN: "tok-secret-123456" };
 const ENV_KEYS = [...Object.keys(ENV), "VF_PROJECTS", "VF_HF_FONT"];
 
-let WAV, MP3, FONT, root, dir, saved, calls, origWrite, staging, story, storyQueue, scenes;
+let WAV, MP3, FONT, root, dir, saved, calls, origWrite, staging, poseScore, story, storyQueue, scenes;
 const reply = (result) => ({ ok: true, status: 200, text: async () => JSON.stringify({ success: true, result }) });
 const posts = (model) => calls.filter((c) => c.body?.model === model);
 const clefs = () => calls.filter((c) => c.url.includes("clef-omni"));
@@ -46,6 +47,7 @@ beforeEach(async () => {
   Object.assign(process.env, ENV, { VF_PROJECTS: root, VF_HF_FONT: FONT });
   cf.setSleep(async () => {});
   staging = 0.1;
+  poseScore = 0.1;
   story = STORY();
   storyQueue = [];
   scenes = SCENES();
@@ -56,7 +58,7 @@ beforeEach(async () => {
     const body = bodyOf(url, init);
     calls.push({ url: u, method: init.method ?? "GET", body });
     if (u.includes("clef-omni")) {
-      const answers = Object.fromEntries(Object.keys(body.questions).map((k) => [k, { noul: k === STAGING_KEY ? staging : /text/.test(k) || k === "has_people_or_animals" ? 0 : 0.9 }]));
+      const answers = Object.fromEntries(Object.keys(body.questions).map((k) => [k, { noul: k === STAGING_KEY ? staging : k === POSE_KEY ? poseScore : /text/.test(k) || k === "has_people_or_animals" ? 0 : 0.9 }]));
       return reply({ answers, usage: { prompt_tokens: 1500 } });
     }
     if (body?.model === MODELS.image || body?.model === MODELS.imageFast) return reply({ image: B64 });
@@ -246,9 +248,11 @@ test("motion --dry-run: LLM 2, TTS ≈ ความยาว, clef ≈ ฉาก
   const d = await motion(["demo", "--prompt", "x", "--duration", "60", "--dry-run", "--max-rerolls", "1"]);
   assert.equal(d.dry_run, true);
   const steps = d.planned.map((p) => p.step);
-  assert.equal(d.planned.filter((p) => p.model === MODELS.llm[0]).length, 2);
+  // story + scenes + pose-fix (เฉพาะเมื่อ clef พบท่าไม่ตรงบท)
+  assert.equal(d.planned.filter((p) => p.model === MODELS.llm[0]).length, 3);
   assert.ok(steps.includes("narration") && steps.includes("qa") && steps.includes("music"));
-  assert.equal(d.planned.find((p) => p.step === "qa").count, 12 + 1);
+  // ฉากละ 3.5 วินาที → 17 ฉาก: กลางฉาก 17 + สถานที่ 1 + ท่ากับบท ~2 บทต่อฉาก
+  assert.equal(d.planned.find((p) => p.step === "qa").count, 17 + 1 + 17 * 2);
   assert.ok(d.estimated_usd > 0.2 && d.estimated_usd < 0.35, String(d.estimated_usd));
   assert.match(d.warnings.join("\n"), /max-rerolls/);
   await assert.rejects(motion(["demo", "--prompt", "x", "--duration", "10"]), (e) => e.code === "USAGE");
@@ -336,4 +340,18 @@ test("motion: beat ว่างจาก LLM ถูกตัดก่อน vali
   const plan = JSON.parse(fs.readFileSync(path.join(r.motion.dir, "plan.json"), "utf8"));
   for (const sc of plan.scenes) for (const b of sc.beats) assert.ok(b.pose || b.move || b.fx || b.sfx);
   assert.equal(calls.filter((c) => c.body?.input?.systemInstruction?.parts?.[0]?.text?.includes(SCENES_MARK)).length, 1);
+});
+
+test("motion: clef พบท่าไม่ตรงบท → LLM แก้ท่า 1 รอบ (บทเดิม ไม่อัดเสียงใหม่) → ตรวจซ้ำ → plan.json เป็นแผนที่แก้", async () => {
+  poseScore = 0.9;
+  setRunner(stubRunner());
+  const r = await motion([...ARGS, "--no-reuse"]);
+  // story + scenes + fix
+  assert.equal(posts(MODELS.llm[0]).length, 3);
+  const fix = calls.filter((c) => JSON.stringify(c.body ?? {}).includes("Problems found by checking the picture"));
+  assert.equal(fix.length, 1);
+  // ตรวจซ้ำแล้วยังไม่ผ่าน (stub ให้ 0.9 ตลอด) → เตือน
+  assert.ok(r.motion.warnings.some((w) => /หลังแก้แล้ว/.test(w)), r.motion.warnings.join("\n"));
+  const plan = JSON.parse(fs.readFileSync(path.join(r.motion.dir, "plan.json"), "utf8"));
+  assert.equal(plan.hook, "Who gets the ball?");
 });

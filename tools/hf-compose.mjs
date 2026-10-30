@@ -289,9 +289,18 @@ export function composeHtml({ plan, times, lines = {}, stage, assets, size = { w
     tw(`#${c.id}`, { opacity: 1 }, { opacity: 0, duration: 0.15 }, T(Math.min(t.dur - 0.15, l.end + 0.25)));
   });
 
+  // ป้าย hook บนฉากแรก (คำถาม/คำเกริ่นให้คนดูอยู่ต่อ) อยู่ตลอดฉากแรก นอก .world จึงไม่ถูกซูม
+  const hookPart = (si, eid, t, T) => {
+    const hook = typeof plan.hook === "string" ? plan.hook.trim() : "";
+    if (si !== 0 || !hook) return [];
+    tw(`#${eid("hook")}`, { opacity: 0, y: -Y(40), scale: 0.8 }, { opacity: 1, y: 0, scale: 1, duration: 0.3, ease: "back.out(2.5)" }, T(0));
+    tw(`#${eid("hook")}`, { opacity: 1 }, { opacity: 0, duration: 0.2 }, T(Math.max(0.5, t.dur - 0.2)));
+    return [`<div id="${eid("hook")}" class="hook" style="top:${r3(H * 0.07)}px">${esc(hook)}</div>`];
+  };
+
   // insert = รูปสินค้าจริงเต็มจอ ซูมช้า + ป้าย · endcard = hero + ชื่อ + ราคา + ชวนซื้อ
   // รูปจริงแสดงทั้งรูปเสมอ (contain) ไม่ครอป ไม่บิด: สินค้าต้องเห็นครบเหมือนในร้าน
-  const cardScene = (sc, t, sid, eid, T) => {
+  const cardScene = (sc, t, sid, eid, T, si) => {
     const pr = assets.product ?? {};
     const imgOf = (id) => {
       const im = assets.productImage?.(id);
@@ -343,6 +352,7 @@ export function composeHtml({ plan, times, lines = {}, stage, assets, size = { w
       `<section id="${sid}" class="clip card" data-start="${r3(t.start)}" data-duration="${t.dur}" data-track-index="1">`,
       ...parts,
       ...caps.map((c) => c.html),
+      ...hookPart(si, eid, t, T),
       "</section>",
     ].join("\n    "));
     capTweens(caps, t, T);
@@ -353,7 +363,7 @@ export function composeHtml({ plan, times, lines = {}, stage, assets, size = { w
     const sid = `sc${si + 1}`;
     const eid = (k) => `${sid}-${k}`;
     const T = (s) => t.start + s;
-    if (sc.kind === "insert" || sc.kind === "endcard") return cardScene(sc, t, sid, eid, T);
+    if (sc.kind === "insert" || sc.kind === "endcard") return cardScene(sc, t, sid, eid, T, si);
     const st = stage?.[sc.place];
     if (!st) throw new VfError("INTERNAL", `ไม่มี stage ของสถานที่ ${sc.place}`);
     const floorPx = (1 - st.floor) * H;
@@ -459,6 +469,7 @@ export function composeHtml({ plan, times, lines = {}, stage, assets, size = { w
       ...(view.z > 1 ? ["</div>"] : []),
       ...caps.map((c) => c.html),
       ...stamps,
+      ...hookPart(si, eid, t, T),
       "</section>",
     ].join("\n    "));
 

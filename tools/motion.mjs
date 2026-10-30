@@ -23,7 +23,7 @@ import { loadPoses } from "./poses.mjs";
 import { listProps, makeProp, bottomGap } from "./props.mjs";
 import { loadProduct, productDir, imageSize } from "./product.mjs";
 import { stageFor, upgradeStage } from "./stage.mjs";
-import { STORY_SCHEMA, storySystemPrompt, validateStory, scenesSchema, scenesSystemPrompt, validateScenePlan, normalizeScenePlan } from "./motion-plan.mjs";
+import { SCENE_TARGET, STORY_SCHEMA, storySystemPrompt, validateStory, scenesSchema, scenesSystemPrompt, validateScenePlan, normalizeScenePlan } from "./motion-plan.mjs";
 import { FONT_FOR, fontFile, sceneTimes, audioCues, composeHtml } from "./hf-compose.mjs";
 import { gsapFile, hfLint, hfSnapshot, hfRender } from "./hf.mjs";
 import { POSE_KEY, POSE_STATE, POSE_WARN, poseChecks, poseQuestion, FIX_RULES, fixMessage, sameLines } from "./motion-check.mjs";
@@ -125,21 +125,21 @@ function requirePlanPoses(dir, slug, plan) {
 }
 
 function dryRun(total, audio, places, warnings, product) {
-  const n = Math.round(total / (product ? 3.5 : 5));
+  const n = Math.round(total / SCENE_TARGET);
   return {
     dry_run: true,
     ...planRows([
       { ...llmRow(5000, 1500), step: "story" },
       { ...llmRow(8000, 5000), step: "scenes" },
       { step: "narration", model: MODELS.tts, count: n * 2, usd: estimate(MODELS.tts, { seconds: total }) },
-      qaRow(n + places.length + (product ? n * 2 : 0)),
-      ...(product ? [{ ...llmRow(9000, 5000), step: "pose-fix", note: "เฉพาะเมื่อ clef พบท่าไม่ตรงบท" }] : []),
+      qaRow(n + places.length + n * 2),
+      { ...llmRow(9000, 5000), step: "pose-fix", note: "เฉพาะเมื่อ clef พบท่าไม่ตรงบท" },
       ...(audio.music ? [{ step: "music", model: MODELS.music, count: 1, usd: estimate(MODELS.music, { seconds: Math.max(total + 1, LIBRARY_TRACK_SEC) }), note: "สูงสุด · ถ้า clef เลือกเพลงจากคลังได้ = $0" }] : []),
     ]),
     assumptions: [
-      `ประมาณ ${n} ฉาก (ฉากละ ~${product ? "3.5" : "5"} วินาที${product ? " โหมดสินค้า" : ""}) · ใช้ท่าตัวละครที่ทำไว้แล้ว ไม่สร้างภาพใหม่ ยกเว้น prop ที่ยังไม่มี (ราว $0.001 ต่อชิ้น)`,
+      `ประมาณ ${n} ฉาก (ฉากละ ~${SCENE_TARGET} วินาที${product ? " โหมดสินค้า" : ""}) · ใช้ท่าตัวละครที่ทำไว้แล้ว ไม่สร้างภาพใหม่ ยกเว้น prop ที่ยังไม่มี (ราว $0.001 ต่อชิ้น)`,
       `พากย์/บทพูดทุกบทรวม ≈ ${total} วินาที${audio.narrator ? " (มีผู้บรรยาย)" : " (ไม่มีผู้บรรยาย ตัวละครพูดเอง)"}`,
-      `clef: ตำแหน่งยืนของสถานที่ (ครั้งแรกต่อสถานที่) + ตรวจภาพกลางฉากละ 1 ครั้ง${product ? " + ตรวจท่ากับบททุกบท (ไม่ตรง → LLM แก้ท่า 1 รอบ แล้วตรวจซ้ำ)" : ""}`,
+      "clef: ตำแหน่งยืนของสถานที่ (ครั้งแรกต่อสถานที่) + ตรวจภาพกลางฉากละ 1 ครั้ง + ตรวจท่ากับบททุกบท (ไม่ตรง → LLM แก้ท่า 1 รอบ แล้วตรวจซ้ำ)",
       audio.music ? `เพลงจากคลังกลาง (clef เลือก) · ถ้าไม่มีที่เข้ากัน สร้างใหม่ ${Math.max(total + 1, LIBRARY_TRACK_SEC)} วินาทีแล้วเก็บเข้าคลัง` : "ไม่มีเพลง (--no-music)",
       `render ด้วย HyperFrames ในเครื่อง ราว ${Math.ceil((total / 20) * 73 / 60)}–${Math.ceil((total / 20) * 73 / 30)} นาที`,
     ],
@@ -222,7 +222,7 @@ async function work({ dir, ctx, state, key, id: given, prompt, total, audio, pla
       validate: (p) => validateScenePlan(normalizeScenePlan(p), assets, { total, lang, narrator }), maxTokens: SCENES_MAX_TOKENS,
       meta: { project: slug, step: "motion-scenes", item: key, run }, costDir,
     });
-    return { scenes: normalizeScenePlan(data).scenes, ...(data.use_pose ? { use_pose: data.use_pose } : {}) };
+    return { scenes: normalizeScenePlan(data).scenes, hook: data.hook, ...(data.use_pose ? { use_pose: data.use_pose } : {}) };
   });
 
   // --id ที่ผู้ใช้ตั้ง = id คลิปและชื่อไฟล์ render ตรง ๆ; ไม่ใส่ → ตั้งจากชื่อเรื่อง + ท้าย hash
@@ -328,6 +328,7 @@ async function work({ dir, ctx, state, key, id: given, prompt, total, audio, pla
   const names = Object.fromEntries(characters.map((c) => [c.id, c.name ?? c.id]));
   // ภาพกลางบท → clef ถามว่าท่าขัดกับบทไหม
   const askPoses = async (list, folder) => {
+    if (!list.length) return [];
     rmSync(folder, { recursive: true, force: true });
     mkdirSync(folder, { recursive: true });
     const pngs = (await hfSnapshot(hdir, list.map((c) => c.at), folder, { tmpDir })).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
@@ -370,7 +371,7 @@ async function work({ dir, ctx, state, key, id: given, prompt, total, audio, pla
         },
         maxTokens: SCENES_MAX_TOKENS, meta: { ...meta, step: "motion-fix" }, costDir,
       });
-      fixedPlan = { scenes: normalizeScenePlan(data).scenes, ...(data.use_pose ? { use_pose: data.use_pose } : {}) };
+      fixedPlan = { scenes: normalizeScenePlan(data).scenes, hook: plan.hook, ...(plan.use_pose ? { use_pose: plan.use_pose } : {}) };
     } catch (err) {
       if (!(err instanceof VfError)) throw err;
       return { scores, warnings: [...failed, ...wrong.map(note), `แก้ท่าไม่สำเร็จ: ${err.message.slice(0, 120)}`], fixed: 0 };
@@ -395,7 +396,6 @@ async function work({ dir, ctx, state, key, id: given, prompt, total, audio, pla
     // ตรวจเฉพาะฉากตัวละครมุมกว้าง/กลาง: close/low ตั้งใจให้ตัวล้นขอบ, insert/endcard ไม่มีตัวละคร
     const checked = plan.scenes.map((sc, i) => i).filter((i) => (plan.scenes[i].kind ?? "scene") === "scene" && !["close", "low"].includes(plan.scenes[i].shot));
     const at = checked.map((i) => r3(times[i].start + times[i].dur / 2));
-    if (!at.length && !product) return { scores: [], warnings: [] };
     const pngs = !at.length ? [] : (await hfSnapshot(hdir, at, snaps, { tmpDir })).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
     if (pngs.length !== at.length) throw new VfError("INTERNAL", `hyperframes snapshot ได้ ${pngs.length} ภาพ (ขอ ${at.length})`);
     const scores = [];
@@ -416,7 +416,6 @@ async function work({ dir, ctx, state, key, id: given, prompt, total, audio, pla
         found.push(`ฉาก ${checked[i] + 1}: ตรวจภาพไม่สำเร็จ (${err.message.slice(0, 120)})`);
       }
     }
-    if (!product) return { scores, warnings: found };
     const pose = await checkPoses(plan, snaps);
     return { scores, warnings: [...found, ...pose.warnings], poses: pose.scores, fixed: pose.fixed, ...(pose.plan ? { plan: pose.plan } : {}) };
   });

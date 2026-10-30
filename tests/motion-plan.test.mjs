@@ -18,13 +18,14 @@ const ASSETS = {
 
 // แผน spike 3 แปลง x → spot
 const plan = () => ({
+  hook: "Biscuit vs the vacuum?",
   scenes: [
     { id: "s01", place: "living", camera: "push",
       cast: [{ who: "biscuit", spot: "center", size: 0.62, pose: "idle", enter: "drop" }],
       props: [],
-      lines: [{ who: "narrator", text: "This is Biscuit. Biscuit is a very brave puppy." }, { who: "narrator", text: "Mostly." }],
-      beats: [{ at: "line2", who: "biscuit", pose: "curious" }] },
-    { id: "s02", place: "living", camera: "pan-left",
+      lines: [{ who: "narrator", text: "Biscuit is brave." }, { who: "narrator", text: "Mostly." }],
+      beats: [{ at: "line2", who: "biscuit", pose: "curious" }, { at: "0.5", sfx: "pop" }] },
+    { id: "s02", place: "living", camera: "pan-left", shot: "medium",
       cast: [{ who: "biscuit", spot: "left", size: 0.5, pose: "curious" }],
       props: [{ id: "vacuum", spot: "right", size: 0.32, enter: "slide-right" }],
       lines: [{ who: "narrator", text: "Today, a strange round thing arrived in the living room." }, { who: "biscuit", text: "Hello? Are you a new friend?" }],
@@ -40,8 +41,8 @@ const plan = () => ({
       cast: [{ who: "biscuit", spot: "far-left", size: 0.42, pose: "run" }],
       props: [],
       lines: [{ who: "narrator", text: "So Biscuit ran. Very, very fast." }],
-      beats: [{ at: 0.2, who: "biscuit", move: "run-to", to_spot: "far-right", dur: 2.4 }] },
-    { id: "s05", place: "kitchen", camera: "push",
+      beats: [{ at: 0.2, who: "biscuit", move: "run-to", to_spot: "far-right", dur: 2.4, sfx: "whoosh" }] },
+    { id: "s05", place: "kitchen", camera: "push", shot: "medium",
       cast: [{ who: "marmalade", spot: "right", size: 0.5, pose: "idle" }],
       props: [],
       lines: [{ who: "narrator", text: "In the kitchen, Marmalade was enjoying a quiet afternoon." }, { who: "marmalade", text: "Ahh. Peace and quiet." }],
@@ -56,7 +57,7 @@ const plan = () => ({
       props: [{ id: "vacuum", spot: "far-right", size: 0.3 }],
       lines: [{ who: "marmalade", text: "That? Oh, please. That is just a vacuum." }],
       beats: [{ at: 0.2, who: "vacuum", move: "to", to_spot: "center", dur: 1.6 }, { at: 0.2, sfx: "whirr" }] },
-    { id: "s08", place: "kitchen", camera: "push",
+    { id: "s08", place: "kitchen", camera: "push", shot: "medium",
       cast: [{ who: "biscuit", spot: "left", size: 0.5, pose: "scared" }, { who: "marmalade", spot: "center", size: 0.42, pose: "happy", ride: "vacuum" }],
       props: [{ id: "vacuum", spot: "center", size: 0.3 }],
       lines: [{ who: "narrator", text: "And Marmalade hopped on for a ride." }],
@@ -86,7 +87,8 @@ test("one place for a long plan when several exist → issue; short plan or one 
   const short = plan();
   short.scenes = short.scenes.slice(4, 9);
   assert.equal(short.scenes.length, 5);
-  assert.deepEqual(validateScenePlan(short, ASSETS, OPTS(short)), []);
+  // ฉากแรกของชุดที่ตัดมาไม่ใช่ hook: ดูเฉพาะเรื่องสถานที่
+  assert.deepEqual(validateScenePlan(short, ASSETS, OPTS(short)).filter((s) => /places|scenes are in/.test(s)), []);
   const two = plan();
   for (const sc of two.scenes) sc.place = "kitchen";
   two.scenes[9].place = "living";
@@ -142,7 +144,7 @@ test("total far from target names both numbers", () => {
   const p = plan();
   p.scenes = p.scenes.slice(0, 5);
   const est = estimateSeconds(p, "en");
-  assert.ok(est > 25 && est < 35, String(est));
+  assert.ok(est > 20 && est < 35, String(est));
   const issues = validateScenePlan(p, ASSETS, { total: 60, lang: "en", narrator: true });
   assert.equal(issues.length, 1, issues.join("\n"));
   assert.equal(issues[0], `estimated ${est.toFixed(1)}s, target 60s (±10%): add lines or scenes`);
@@ -164,6 +166,8 @@ test("estimateSeconds follows lead + lines + gaps + tail with a floor", () => {
 test("Thai lines use the character budget", () => {
   const p = plan();
   for (const s of p.scenes) for (const l of s.lines) l.text = "สวัสดีจ้า";
+  // คลิปไทยต้องใช้ stamp ภาษาไทย
+  for (const s of p.scenes) for (const b of s.beats) if (b.fx === "stamp") b.text = "ตูม!";
   p.scenes[1].lines[1].text = "ก".repeat(56);
   const issues = validateScenePlan(p, ASSETS, { total: Math.round(estimateSeconds(p, "th")), lang: "th", narrator: true });
   assert.equal(issues.length, 1, issues.join("\n"));
@@ -208,7 +212,7 @@ test("ids, cast count, ride, props, sfx, stamp, narrator, scene count, risk", ()
   check((p) => { p.scenes[4].lines[1].who = "biscuit"; }, "biscuit");
   check((p) => { p.scenes[4].lines[1].text = " "; }, "text");
   check(() => {}, "narrator", { narrator: false });
-  check((p) => { p.scenes = p.scenes.slice(0, 3); }, "4–14");
+  check((p) => { p.scenes = p.scenes.slice(0, 3); }, "4–20");
   check((p) => { p.scenes[1].lines[1].text = "Hello, I am Mickey Mouse"; }, "risk");
   assert.deepEqual(validateScenePlan(null, ASSETS, { total: 30, lang: "en" }), ["plan must be an object with a scenes array"]);
 });
@@ -363,6 +367,7 @@ const PRODUCT = {
 const PA = { ...ASSETS, product: PRODUCT };
 const productPlan = () => ({
   use_pose: "run",
+  hook: "Knees hurt?",
   scenes: [
     { id: "s01", place: "living", camera: "static", shot: "wide", cast: [{ who: "biscuit", spot: "center", pose: "run" }], props: [], lines: [{ who: "biscuit", text: "My knees hurt" }], beats: [{ at: "0.5", sfx: "whoosh" }] },
     { id: "s02", place: "living", camera: "static", shot: "close", focus: "biscuit", cast: [{ who: "biscuit", spot: "center", pose: "scared" }], props: [], lines: [{ who: "biscuit", text: "Ouch ouch" }], beats: [{ at: "0.5", sfx: "bang" }] },
@@ -434,4 +439,18 @@ test("โหมดสินค้า: ฉากพิสูจน์ use_pose, s
   ok.scenes[3].props = [{ id: "mat", spot: "center" }];
   ok.scenes[3].cast[0].ride = "mat";
   assert.doesNotMatch(validateScenePlan(ok, floor, { lang: "en", narrator: true }).join("\n"), /use_pose/);
+});
+
+test("hook: ต้องมีป้าย ยาวไม่เกิน HOOK_MAX, ฉากแรกไม่เกิน 4 วินาที และมี beat ในวินาทีแรก", () => {
+  const issues = (edit) => {
+    const p = plan();
+    edit(p);
+    return validateScenePlan(p, ASSETS, OPTS(p)).join("\n");
+  };
+  assert.doesNotMatch(issues(() => {}), /hook/);
+  assert.match(issues((p) => { delete p.hook; }), /hook is missing/);
+  assert.match(issues((p) => { p.hook = "x".repeat(25); }), /max 24/);
+  assert.match(issues((p) => { p.scenes[0].beats = p.scenes[0].beats.filter((b) => b.at !== "0.5"); }), /first second/);
+  assert.match(issues((p) => { p.scenes[0].lines.push({ who: "narrator", text: "one two three four five six seven eight" }); }), /the first scene \(the hook\) is about/);
+  assert.match(scenesSystemPrompt("th", 30, ASSETS), /hook: a short title in th/);
 });

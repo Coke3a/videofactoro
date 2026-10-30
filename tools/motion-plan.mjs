@@ -20,10 +20,15 @@ export const GAP = 0.3;
 export const TAIL = 0.7;
 export const SCENE_MIN = 3;
 export const SCENES_MIN = 4;
-export const SCENES_MAX = 14;
+export const SCENES_MAX = 20;
+// ฉากสั้นตัดถี่ (แนว genhaha): ทุกโหมดวางแผนราว 3.5 วินาทีต่อฉาก
+export const SCENE_TARGET = 3.5;
+// hook: ป้ายหัวเรื่องบนฉากแรก + ฉากแรกสั้นและมีอะไรเกิดในวินาทีแรก
+export const HOOK_MAX = 24;
+export const HOOK_SCENE_MAX = 4;
 export const MAX_CAST = 3;
 export const STAMP_MAX = 12;
-// โหมดสินค้า: ฉากตัวละครที่มีเสียงประกอบอย่างน้อยเท่านี้ (คลิปเงียบดูแบน)
+// ฉากตัวละครที่มีเสียงประกอบอย่างน้อยเท่านี้ (คลิปเงียบดูแบน)
 export const SFX_MIN = 3;
 // ±15% ปล่อยคลิปที่สองเป้า 60 วิให้ออกมา 71.7 วิ
 export const TOTAL_TOLERANCE = 0.1;
@@ -88,8 +93,9 @@ export function scenesSchema(raw = {}) {
           type: "object",
           properties: {
             id: str,
+            shot: oneOf(SHOTS), focus: oneOf(chars),
             ...(assets.product ? {
-              kind: oneOf(KINDS), shot: oneOf(SHOTS), focus: oneOf(chars),
+              kind: oneOf(KINDS),
               image: oneOf(assets.product.images.map((im) => im.id)), chip: str,
             } : {}),
             place: oneOf(Object.keys(assets.places)),
@@ -101,8 +107,8 @@ export function scenesSchema(raw = {}) {
             },
             lines: {
               type: "array",
-              // en: ความหมายภาษาอังกฤษของบท ให้ clef ตรวจว่าท่าตรงกับบท (โหมดสินค้า)
-              items: { type: "object", properties: { who: oneOf(["narrator", ...chars]), text: str, ...(assets.product ? { en: str } : {}) }, required: ["who", "text", ...(assets.product ? ["en"] : [])] },
+              // en: ความหมายภาษาอังกฤษของบท ให้ clef ตรวจว่าท่าตรงกับบท
+              items: { type: "object", properties: { who: oneOf(["narrator", ...chars]), text: str, en: str }, required: ["who", "text", "en"] },
             },
             beats: {
               type: "array",
@@ -129,8 +135,9 @@ export function scenesSchema(raw = {}) {
       },
       // ท่าที่แสดงการใช้สินค้า (เช่น pushup): ต้องโผล่ตอนปัญหา (ก่อนสินค้า) และตอนพิสูจน์ (บนสินค้า)
       ...(assets.product ? { use_pose: oneOf(uniq(Object.values(assets.poses).flat())) } : {}),
+      hook: str,
     },
-    required: ["scenes", ...(assets.product ? ["use_pose"] : [])],
+    required: ["scenes", "hook", ...(assets.product ? ["use_pose"] : [])],
   };
 }
 
@@ -178,6 +185,7 @@ export function storySystemPrompt(lang, total, ctx = {}) {
     `You write the story for a ${total}-second kids' cartoon gag clip made of cut-out characters on painted backgrounds. Reply with JSON matching the schema only.`,
     ctx.direction ? `- Project direction: ${ctx.direction}` : "",
     "- beats: exactly 5, in this order: setup → problem → escalation → twist → button (the button is one quick final gag). Each text is 1–2 plain English sentences saying what happens and who does it.",
+    "- setup is the hook: start in the middle of something funny or surprising in the first second, not with a calm introduction. If the setup sets a goal or question, the twist or button pays it off on screen.",
     "- Use only these characters, and only actions their poses can show (each pose is described in brackets):",
     ...(chars.length ? chars : ["  (none)"]),
     `- Places available: ${(ctx.places ?? []).join(", ") || "(none)"}. Stay in these places.`,
@@ -195,7 +203,7 @@ export function storySystemPrompt(lang, total, ctx = {}) {
 
 export function scenesSystemPrompt(lang, total, raw, { narrator = false } = {}) {
   const assets = withDefaults(raw);
-  const n = Math.round(total / (assets.product ? 3.5 : 5));
+  const n = Math.round(total / SCENE_TARGET);
   const max = lineMax(lang);
   const poses = Object.entries(assets.poses).map(([c, ps]) => `  - ${c}: ${poseList(ps, assets.poseActions[c])}`);
   const places = Object.entries(assets.places).map(([p, ss]) => `  - ${p}: ${ss.join(", ")}`);
@@ -220,7 +228,12 @@ export function scenesSystemPrompt(lang, total, raw, { narrator = false } = {}) 
     narrator ? "- The narrator tells the story briefly; characters speak their own short lines." : "- There is no narrator in this project: every line is spoken by a character in the cast.",
     `- beats: { at, who?, pose?, move?, to_spot?, dur?, fx?, sfx?, text? }. at is seconds from scene start as a string ("1.5") or "line<N>" / "line<N>-end" (N counts from 1 within the scene). who is a cast id or a prop id in the scene. move: ${MOVES.join(", ")} (to and run-to need to_spot). fx: stamp (needs text) or shake. sfx: ${(assets.sfx ?? []).join(", ")}.`,
     `- No on-screen text except stamps: a sound word or 1–2 words, at most ${STAMP_MAX} characters (e.g. BONK!, THE END).`,
-    pr ? "- Every line also has en: its meaning in plain English (one short sentence), used to check the picture." : "",
+    "- Every line also has en: its meaning in plain English (one short sentence), used to check the picture.",
+    `- shot per scene: wide (whole room), medium (closer on the cast), close (one character's face, set focus), low (floor level close on one character's feet and what they stand on, set focus). Vary the shot: never 3 scenes in a row with the same shot; use close for reactions (surprise, fear, joy) and low for feet, falls and things on the floor.`,
+    `- Keep scenes short (about ${SCENE_TARGET}s, usually one line each): many quick cuts.`,
+    `- hook: a short title in ${lang} (at most ${HOOK_MAX} characters) shown at the top of the first scene: a question or tease that makes people stay (e.g. "What if the cat meets a vacuum?"). The first scene is the hook: at most ${HOOK_SCENE_MAX}s, and something happens in its first second (a beat at "0"–"1" or "line1").`,
+    `- Stamps are in the clip language (${lang}), e.g. a Thai sound word for a Thai clip.`,
+    `- Sound: give at least ${SFX_MIN} character scenes an sfx beat on their main action (e.g. bang for a fall, whoosh for a move, ding for an idea).`,
     "- The pose must show what is said: while a line is spoken, the speaker (or, for the narrator, the character it describes) wears a pose that shows that action or feeling. Change pose at a line start (\"line<N>\") or after it ends (\"line<N>-end\"), never to a pose that contradicts the line being spoken. Only write lines about actions some pose shows.",
     "- Make it move: most scenes need at least one beat. Every beat must change something: a pose, a move, an fx or an sfx (a beat with only text, who or dur is dropped). End on the button gag.",
     pr
@@ -234,17 +247,15 @@ function productScenesLines(pr, assets, lang) {
   const imgs = pr.images.map((im) => `  - ${im.id} (${im.role}): ${im.shows || im.role}${im.feature ? ` · feature: ${im.feature}` : ""}`);
   return [
     "- This is a product clip. Scene kinds (field kind):",
-    `  - scene (default): characters in a place, as above. shot: wide (whole room), medium (closer on the cast), close (one character's face, set focus), low (floor level close on one character's feet and what they stand on, set focus). Vary the shot: never 3 scenes in a row with the same shot; use close for reactions (pain, surprise, joy) and low for the product in use on the floor.`,
+    "  - scene (default): characters in a place, as above, with a shot. Use low for the product in use on the floor.",
     "  - insert: the real product photo full screen with a slow zoom. Set image to one of the images below and chip to a 1–4 word label of what it shows (at most " + CHIP_MAX + " characters, in the clip language, only from the facts/benefits). The narrator says one short line about it. Use the hero image when the product first appears.",
     `  - endcard: the last scene only, exactly one: the hero photo and product name${pr.show_price && pr.price_text ? " and price" : ""}${pr.cta ? `, with the note "${pr.cta}"` : ""}. The narrator says at most one short, casual line (e.g. what the character uses now); no pushy call to buy${pr.show_price ? "" : ", no price"}.`,
     "- Product images:",
     ...imgs,
     "- use_pose: the pose that shows the product being used for the story's problem (e.g. an exercise pose for a mat). A scene before the product appears shows the problem with this pose, and a scene after it appears shows the same pose with the product (riding the product prop) — the proof. Sitting or standing on it is not enough.",
-    `- Stamps are in the clip language (${lang}), e.g. a Thai sound word for a Thai clip.`,
-    `- Sound: give at least ${SFX_MIN} character scenes an sfx beat on their main action (impact for a fall or pain, pop or ding for the product, whoosh for a move).`,
+    "- Sound for the product: pop or ding when it appears.",
     `- At least ${INSERTS_MIN} insert scenes, showing different images; put a scene with a character using the product between inserts. Most of the clip is the story with characters, not inserts.`,
     (assets.floorProps ?? []).length ? "- After the product appears, show the character using the real product prop in at least one scene." : "",
-    "- Keep scenes short (3–4 s): about one line each. Hook in the first scene.",
     ...productLines(pr).slice(1),
     "- No real people and no other brands.",
   ];
@@ -312,6 +323,28 @@ export function normalizeScenePlan(plan) {
     if (sc && Array.isArray(sc.beats)) sc.beats = sc.beats.filter((b) => b && (b.pose || b.move || b.fx || b.sfx));
   }
   return plan;
+}
+
+// hook: ป้ายสั้นบนฉากแรก, ฉากแรกไม่ยาวเกิน และมีอะไรเกิดขึ้นในวินาทีแรก
+function hookIssues(plan, lang, banned, risky) {
+  const issues = [];
+  const hook = typeof plan.hook === "string" ? plan.hook.trim() : "";
+  if (!hook) issues.push(`hook is missing: a short title (at most ${HOOK_MAX} characters) for the top of the first scene`);
+  else if ([...hook].length > HOOK_MAX) issues.push(`hook "${hook}" is ${[...hook].length} characters, max ${HOOK_MAX}`);
+  if (hook) {
+    banned("hook", hook);
+    risky("hook", hook);
+  }
+  const first = arr(plan.scenes)[0];
+  if (!first) return issues;
+  const secs = sceneSeconds(first, lang);
+  if (secs > HOOK_SCENE_MAX) issues.push(`the first scene (the hook) is about ${secs.toFixed(1)}s, max ${HOOK_SCENE_MAX}s: shorten its lines`);
+  const early = (b) => {
+    const s = String(b?.at ?? "").trim();
+    return s === "line1" || (/^\d+(\.\d+)?$/.test(s) && Number(s) <= 1);
+  };
+  if (kindOf(first) === "scene" && !arr(first.beats).some(early)) issues.push(`the first scene (the hook) needs a beat in its first second (at "0"–"1" or "line1"): start with action`);
+  return issues;
 }
 
 // ท่าที่ตัวละครใส่ในฉาก (ท่าเริ่ม + ท่าจาก beat)
@@ -478,7 +511,7 @@ export function validateScenePlan(plan, raw, { total, lang = "en", narrator = fa
         const t = typeof b.text === "string" ? b.text.trim() : "";
         if (!t) issues.push(`${label}: stamp needs text (at most ${STAMP_MAX} characters)`);
         else if ([...t].length > STAMP_MAX) issues.push(`${label}: stamp text "${t}" is ${[...t].length} characters, max ${STAMP_MAX}`);
-        else if (pr && /^th/i.test(lang) && !/[\u0E00-\u0E7F]/.test(t)) issues.push(`${label}: stamp text "${t}" must be in Thai like the clip (e.g. โอ๊ย!, เย้!)`);
+        else if (/^th/i.test(lang) && !/[\u0E00-\u0E7F]/.test(t)) issues.push(`${label}: stamp text "${t}" must be in Thai like the clip (e.g. โอ๊ย!, เย้!)`);
       }
       if (b?.sfx && !sfx.has(b.sfx)) issues.push(`${label}: sfx "${b.sfx}" must be one of ${[...sfx].join(", ")}`);
       risky(`${label} text`, b?.text);
@@ -502,19 +535,22 @@ export function validateScenePlan(plan, raw, { total, lang = "en", narrator = fa
     const first = inserts[0];
     if (first && first.image !== hero) issues.push(`the first insert must show the hero image "${hero}" (it shows "${first.image}")`);
     issues.push(...useIssues(plan, assets));
-    const sfxScenes = scenes.filter((sc) => kindOf(sc) === "scene" && arr(sc.beats).some((b) => b?.sfx)).length;
-    const charScenes = kinds.filter((k) => k === "scene").length;
-    if (sfxScenes < Math.min(SFX_MIN, charScenes)) issues.push(`only ${sfxScenes} character scenes have a sound effect: give at least ${Math.min(SFX_MIN, charScenes)} of them an sfx beat on their main action`);
-    const shots = scenes.map((sc) => (kindOf(sc) === "scene" ? sc.shot ?? "wide" : kindOf(sc)));
-    for (let k = 2; k < shots.length; k++) {
-      if (kinds[k] === "scene" && shots[k] === shots[k - 1] && shots[k] === shots[k - 2]) {
-        issues.push(`scenes ${k - 1}–${k + 1} all use shot "${shots[k]}": vary the shot`);
-        break;
-      }
-    }
   } else if (placeIds.length >= 2 && scenes.length >= MULTI_PLACE_SCENES && used.length === 1) {
     issues.push(`all ${scenes.length} scenes are in ${used[0]}: move the story through 2–3 places (have: ${placeIds.join(", ")})`);
   }
+
+  const allKinds = scenes.map(kindOf);
+  const sfxScenes = scenes.filter((sc) => kindOf(sc) === "scene" && arr(sc.beats).some((b) => b?.sfx)).length;
+  const charScenes = allKinds.filter((k) => k === "scene").length;
+  if (sfxScenes < Math.min(SFX_MIN, charScenes)) issues.push(`only ${sfxScenes} character scenes have a sound effect: give at least ${Math.min(SFX_MIN, charScenes)} of them an sfx beat on their main action`);
+  const shots = scenes.map((sc) => (kindOf(sc) === "scene" ? sc?.shot ?? "wide" : kindOf(sc)));
+  for (let k = 2; k < shots.length; k++) {
+    if (allKinds[k] === "scene" && shots[k] === shots[k - 1] && shots[k] === shots[k - 2]) {
+      issues.push(`scenes ${k - 1}–${k + 1} all use shot "${shots[k]}": vary the shot`);
+      break;
+    }
+  }
+  issues.push(...hookIssues(plan, lang, banned, risky));
 
   if (Number.isFinite(total)) {
     const est = estimateSeconds(plan, lang);

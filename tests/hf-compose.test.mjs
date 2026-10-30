@@ -446,3 +446,12 @@ test("composeHtml spriteFoot: ที่ว่างใต้เท้าจร�
   assert.ok(Math.abs(def - same) < 0.01);
   assert.ok(low > def);
 });
+
+test("composeHtml hook: ป้ายบนฉากแรกเท่านั้น escape แล้ว, ไม่มี hook = ไม่มีป้าย", () => {
+  const p = cardPlan();
+  p.hook = "Mat <test>?";
+  const html = compose({ plan: p, assets: cardAssets, lines: { "1-1": { seconds: 1, rms: loud(30) } } });
+  assert.match(html, /<section id="sc1"[\s\S]*id="sc1-hook" class="hook"[^>]*>Mat &lt;test&gt;\?<\/div>[\s\S]*<\/section>\s*<section id="sc2"/);
+  assert.equal((html.match(/class="hook"/g) ?? []).length, 1);
+  assert.doesNotMatch(compose({ plan: cardPlan(), assets: cardAssets, lines: { "1-1": { seconds: 1, rms: loud(30) } } }), /class="hook"/);
+});

@@ -39,16 +39,20 @@ export const STORY = () => ({
 });
 
 const sc = (i, narrator = true) => ({
-  id: `s0${i}`, place: "kitchen", camera: i % 2 ? "push" : "static",
+  id: `s0${i}`, place: "kitchen", camera: i % 2 ? "push" : "static", shot: i % 2 ? "wide" : "medium",
   cast: [{ who: "cat", spot: "left", pose: "idle", enter: "drop" }, { who: "dog", spot: "right", pose: "idle" }],
   props: i === 1 ? [{ id: "ball", spot: "center" }] : [],
   lines: [{ who: narrator ? "narrator" : "cat", text: "The cat sees something shiny." }, { who: "dog", text: "Look at that ball!" }],
   beats: [{ at: "line2", who: "cat", pose: "happy", move: "hop", sfx: "boing" }, { at: "1", fx: "shake", sfx: "whoosh" }],
 });
 // ประมาณ 5 วินาทีต่อฉาก × 4 = 20 วินาที (ตาม estimateSeconds)
-export const SCENES = ({ narrator = true } = {}) => ({ scenes: [1, 2, 3, 4].map((i) => sc(i, narrator)) });
+// ฉากแรก (hook) สั้น ≤ 4 วินาที
+export const SCENES = ({ narrator = true } = {}) => ({
+  hook: "Who gets the ball?",
+  scenes: [1, 2, 3, 4].map((i) => sc(i, narrator)).map((s, i) => (i ? s : { ...s, lines: [{ who: narrator ? "narrator" : "cat", text: "Ball!" }, { who: "dog", text: "Look at that red ball!" }] })),
+});
 // ไม่มีบทพูดเลย: ฉากละ SCENE_MIN 3 วินาที × 7 ≈ 21 วินาที
-export const SILENT_SCENES = () => ({ scenes: [1, 2, 3, 4, 5, 6, 7].map((i) => ({ ...sc(i), lines: [], beats: [{ at: "1", who: "cat", move: "hop", sfx: "pop" }] })) });
+export const SILENT_SCENES = () => ({ hook: "Who gets the ball?", scenes: [1, 2, 3, 4, 5, 6, 7].map((i) => ({ ...sc(i), lines: [], beats: [{ at: "1", who: "cat", move: "hop", sfx: "pop" }] })) });
 
 // hf runner ปลอม: lint ตามที่สั่ง, snapshot = png ต่อเวลา, render = วิดีโอดำยาวเท่า data-duration ของ root
 export function stubRunner(opt = {}) {
