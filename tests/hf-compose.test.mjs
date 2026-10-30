@@ -427,9 +427,12 @@ test("composeHtml insert/endcard: รูปจริงทั้งรูปต�
   assert.match(html, /class="chip"[^>]*>Yoga &lt;mat&gt;<\/div>/);
   assert.match(html, /tl\.fromTo\("#sc1-photo-img", \{"scale":1\}, \{"scale":1\.07/);
   assert.match(html, /class="end-name"[^>]*>Mat<\/div>/);
-  assert.match(html, /class="end-price"[^>]*>฿108<\/div>/);
+  assert.doesNotMatch(html, /class="end-price"/, "ราคาปิดเป็นค่าเริ่มต้น");
   assert.match(html, /class="end-cta"[^>]*><span>Buy<\/span>/);
+  assert.doesNotMatch(html, /"yoyo"/, "ป้ายไม่เต้น");
   assert.match(html, /id="sc1-cap1" class="cap"[^>]*bottom:192px/);
+  const priced = compose({ plan: cardPlan(), assets: { ...cardAssets, product: { ...cardAssets.product, show_price: true } }, lines: { "1-1": { seconds: 1, rms: loud(30) } } });
+  assert.match(priced, /class="end-price"[^>]*>฿108<\/div>/);
 });
 
 test("composeHtml spriteFoot: ที่ว่างใต้เท้าจริงยกหรือลดกล่องตัวละคร; ไม่ส่ง = ค่าเดิม", () => {

@@ -368,7 +368,7 @@ const productPlan = () => ({
     { id: "s03", kind: "insert", image: "hero", chip: "Yoga mat", place: "living", camera: "static", cast: [], props: [], beats: [], lines: [{ who: "narrator", text: "Meet the mat" }] },
     { id: "s04", place: "living", camera: "push", shot: "medium", cast: [{ who: "biscuit", spot: "center", pose: "happy" }], props: [], lines: [{ who: "biscuit", text: "So soft" }], beats: [] },
     { id: "s05", kind: "insert", image: "detail-1", chip: "8 mm", place: "living", camera: "static", cast: [], props: [], beats: [], lines: [{ who: "narrator", text: "Eight millimetres thick" }] },
-    { id: "s06", kind: "endcard", place: "living", camera: "static", cast: [], props: [], beats: [], lines: [{ who: "narrator", text: "Only 108 baht" }] },
+    { id: "s06", kind: "endcard", place: "living", camera: "static", cast: [], props: [], beats: [], lines: [{ who: "narrator", text: "Pim uses this now" }] },
   ],
 });
 

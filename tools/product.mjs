@@ -37,17 +37,21 @@ export function loadProduct(dir) {
   if (new Set(images.map((im) => im.id)).size !== images.length) issues.push("images id ซ้ำ");
   if (issues.length) throw new VfError("USAGE", `product.json ไม่ถูกต้อง: ${issues.join("; ")}`, { issues });
   return {
-    name, brand: text(j.brand), price_text: text(j.price_text), cta: text(j.cta),
+    // ราคาโชว์เฉพาะเมื่อเปิด show_price: ช่องนี้เล่าเรื่องนำ ไม่ hard sell
+    name, brand: text(j.brand), price_text: text(j.price_text), show_price: j.show_price === true, cta: text(j.cta),
     facts: list(j.facts), claims_allowed: list(j.claims_allowed), forbidden_words: list(j.forbidden_words),
     angles: list(j.angles), images,
   };
 }
 
 // คำต้องห้ามในบทพูด/ป้าย (เช่น IPX7, TOP 1): เทียบแบบไม่สนตัวพิมพ์และช่องว่าง
+// ไม่ show_price = ห้ามพูด/โชว์ราคาด้วย
 export function forbiddenHits(product, s) {
   const norm = (x) => String(x ?? "").toLowerCase().replace(/\s+/g, "");
   const t = norm(s);
-  return (product?.forbidden_words ?? []).filter((w) => norm(w) && t.includes(norm(w)));
+  const words = [...(product?.forbidden_words ?? [])];
+  if (product && !product.show_price) words.push(...[product.price_text, "฿", "บาท", "baht"].filter(Boolean));
+  return words.filter((w) => norm(w) && t.includes(norm(w)));
 }
 
 const run = promisify(execFile);

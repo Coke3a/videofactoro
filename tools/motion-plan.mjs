@@ -131,12 +131,14 @@ export function scenesSchema(raw = {}) {
 
 // ข้อมูลสินค้าที่ LLM ใช้ได้ (ข้อเท็จจริงและคำอ้างจาก listing เท่านั้น)
 const productLines = (pr) => [
-  `- The product: ${pr.name}${pr.brand ? ` (brand ${pr.brand})` : ""}${pr.price_text ? `, price ${pr.price_text}` : ""}.`,
+  `- The product: ${pr.name}${pr.brand ? ` (brand ${pr.brand})` : ""}${pr.show_price && pr.price_text ? `, price ${pr.price_text}` : ""}.`,
   "- Facts you may state (nothing else about size, material or numbers):",
   ...(pr.facts.length ? pr.facts.map((f) => `  - ${f}`) : ["  (none)"]),
   "- Benefits you may claim (no other claims):",
   ...(pr.claims_allowed.length ? pr.claims_allowed.map((f) => `  - ${f}`) : ["  (none)"]),
-  pr.forbidden_words.length ? `- Never say or show: ${pr.forbidden_words.join(", ")}; no comparisons with other products, no prices other than the one above, no discounts or free shipping.` : "- No comparisons with other products, no discounts or free shipping.",
+  pr.forbidden_words.length ? `- Never say or show: ${pr.forbidden_words.join(", ")}.` : "",
+  `- No comparisons with other products, no discounts or free shipping, ${pr.show_price ? "no prices other than the one above" : "never mention the price"}.`,
+  "- Soft sell: the story leads and the product is part of it. No pushy selling (no \"buy now\", \"hurry\", \"cheap\", \"must have\"); the character just uses it and it helps.",
 ];
 
 function productStoryPrompt(lang, total, ctx, chars, props) {
@@ -146,7 +148,8 @@ function productStoryPrompt(lang, total, ctx, chars, props) {
     ctx.direction ? `- Project direction: ${ctx.direction}` : "",
     ...productLines(pr),
     pr.angles.length ? `- Story angles from the product brief (pick one): ${pr.angles.join(" | ")}` : "",
-    "- beats: exactly 5, in this order. setup: an everyday situation without the product (the hook, first 3 seconds). problem: the pain gets worse, funny but relatable. escalation: the product appears (shown as its real photo). twist: the character uses it and the problem is gone, showing one or two benefits. button: the price and a short call to buy. Each text is 1–2 plain English sentences.",
+    "- The clip is content first: a funny, relatable little story (or a useful tip) people would watch even without the product. The product shows up as a natural part of the story, never as an advert.",
+    "- beats: exactly 5, in this order. setup: an everyday situation without the product (the hook, first 3 seconds). problem: the trouble grows, funny and relatable; the character may try something that fails. escalation: the product turns up naturally in the story (shown as its real photo). twist: the character uses it and things go right, showing one or two benefits in action rather than listing them. button: a last gag or warm payoff, with the product just visible; at most a light mention, no sales pitch. Each text is 1–2 plain English sentences.",
     "- Use only these characters, and only actions their poses can show:",
     ...(chars.length ? chars : ["  (none)"]),
     `- Places available: ${(ctx.places ?? []).join(", ") || "(none)"}. One place is fine; only change place when the story needs it.`,
@@ -222,10 +225,10 @@ function productScenesLines(pr, assets) {
     "- This is a product clip. Scene kinds (field kind):",
     `  - scene (default): characters in a place, as above. shot: wide (whole room), medium (closer on the cast), close (one character's face, set focus), low (floor level close on one character's feet and what they stand on, set focus). Vary the shot: never 3 scenes in a row with the same shot; use close for reactions (pain, surprise, joy) and low for the product in use on the floor.`,
     "  - insert: the real product photo full screen with a slow zoom. Set image to one of the images below and chip to a 1–4 word label of what it shows (at most " + CHIP_MAX + " characters, in the clip language, only from the facts/benefits). The narrator says one short line about it. Use the hero image when the product first appears.",
-    `  - endcard: the last scene only, exactly one: the hero photo, product name, price and a call to buy. The narrator says one short line with the price${pr.cta ? ` and "${pr.cta}"` : ""}.`,
+    `  - endcard: the last scene only, exactly one: the hero photo and product name${pr.show_price && pr.price_text ? " and price" : ""}${pr.cta ? `, with the note "${pr.cta}"` : ""}. The narrator says at most one short, casual line (e.g. what the character uses now); no pushy call to buy${pr.show_price ? "" : ", no price"}.`,
     "- Product images:",
     ...imgs,
-    `- At least ${INSERTS_MIN} insert scenes, showing different images; put a scene with a character using the product between inserts.`,
+    `- At least ${INSERTS_MIN} insert scenes, showing different images; put a scene with a character using the product between inserts. Most of the clip is the story with characters, not inserts.`,
     (assets.floorProps ?? []).length ? "- After the product appears, show the character using the real product prop in at least one scene." : "",
     "- Keep scenes short (3–4 s): about one line each. Hook in the first scene.",
     ...productLines(pr).slice(1),

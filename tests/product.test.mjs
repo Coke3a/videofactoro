@@ -44,3 +44,12 @@ test("forbiddenHits: ไม่สนตัวพิมพ์และช่อ�
   assert.deepEqual(forbiddenHits(p, "กันลื่น"), []);
   assert.deepEqual(forbiddenHits(null, "IPX7"), []);
 });
+
+test("forbiddenHits: ไม่เปิด show_price = ห้ามพูดราคา; เปิดแล้วพูดได้", () => {
+  const p = { price_text: "฿108", forbidden_words: [] };
+  assert.deepEqual(forbiddenHits(p, "แค่ 108 บาท"), ["บาท"]);
+  assert.deepEqual(forbiddenHits(p, "฿108 เท่านั้น"), ["฿108", "฿"]);
+  assert.deepEqual(forbiddenHits({ ...p, show_price: true }, "แค่ 108 บาท"), []);
+  assert.equal(loadProduct(mk(good())).show_price, false);
+  assert.equal(loadProduct(mk({ ...good(), show_price: true })).show_price, true);
+});

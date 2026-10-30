@@ -322,16 +322,14 @@ export function composeHtml({ plan, times, lines = {}, stage, assets, size = { w
       parts.push(ph.html);
       parts.push(`<div id="${eid("name")}" class="end-name" style="top:${r3(y0)}px">${esc(pr.name)}</div>`);
       // ชื่อยาวขึ้นได้ 2 บรรทัด (66px × 1.2) → ราคาเริ่มใต้ 2 บรรทัดเสมอ
-      if (pr.price_text) parts.push(`<div id="${eid("price")}" class="end-price" style="top:${r3(y0 + Y(190))}px">${esc(pr.price_text)}</div>`);
-      if (pr.cta) parts.push(`<div id="${eid("cta")}" class="end-cta" style="top:${r3(y0 + Y(420))}px"><span>${esc(pr.cta)}</span></div>`);
+      const price = pr.show_price && pr.price_text;
+      if (price) parts.push(`<div id="${eid("price")}" class="end-price" style="top:${r3(y0 + Y(190))}px">${esc(pr.price_text)}</div>`);
+      if (pr.cta) parts.push(`<div id="${eid("cta")}" class="end-cta" style="top:${r3(y0 + Y(price ? 420 : 190))}px"><span>${esc(pr.cta)}</span></div>`);
       tw(`#${eid("photo")}`, { opacity: 0, y: Y(60) }, { opacity: 1, y: 0, duration: 0.4, ease: "power2.out" }, T(0));
       tw(`#${eid("name")}`, { opacity: 0, y: Y(30) }, { opacity: 1, y: 0, duration: 0.3, ease: "power2.out" }, T(0.25));
-      if (pr.price_text) tw(`#${eid("price")}`, { opacity: 0, scale: 2.2 }, { opacity: 1, scale: 1, duration: 0.3, ease: "back.out(2)" }, T(0.5));
-      if (pr.cta) {
-        tw(`#${eid("cta")}`, { opacity: 0, y: Y(40) }, { opacity: 1, y: 0, duration: 0.3, ease: "power2.out" }, T(0.8));
-        const n = Math.max(0, Math.floor((t.dur - 1.2) / 0.5) - 1);
-        tw(`#${eid("cta")} span`, { scale: 1 }, { scale: 1.08, duration: 0.5, ease: "sine.inOut", yoyo: true, repeat: n }, T(1.1));
-      }
+      if (price) tw(`#${eid("price")}`, { opacity: 0, scale: 2.2 }, { opacity: 1, scale: 1, duration: 0.3, ease: "back.out(2)" }, T(0.5));
+      // ป้ายนิ่ง ไม่เต้นเรียกให้กด (soft sell)
+      if (pr.cta) tw(`#${eid("cta")}`, { opacity: 0, y: Y(40) }, { opacity: 1, y: 0, duration: 0.3, ease: "power2.out" }, T(price ? 0.8 : 0.5));
     }
     html.push([
       `<section id="${sid}" class="clip card" data-start="${r3(t.start)}" data-duration="${t.dur}" data-track-index="1">`,
