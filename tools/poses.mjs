@@ -87,7 +87,7 @@ export async function makePoses({ dir, slug, char, poses = DEFAULT_POSES, maxRer
       return { done: true };
     });
     result[name] = {
-      file: `${name}.png`, talk: `${name}-talk.png`, score: pose.score, passed: pose.passed,
+      file: `${name}.png`, talk: `${name}-talk.png`, action, score: pose.score, passed: pose.passed,
       talk_score: talk.score ?? null, talk_passed: talk.passed ?? null,
     };
   }
@@ -105,5 +105,7 @@ export function loadPoses(dir, cid) {
   }
   // --replace ที่ค้างครึ่งทางทิ้ง poses.json ที่ชี้ไปยังไฟล์ที่ถูกเก็บเข้า archive แล้ว → ถือว่าท่านั้นไม่มี
   const names = Object.keys(j.poses ?? {}).filter((n) => [j.poses[n].file, j.poses[n].talk].every((f) => !f || existsSync(join(d, f))));
-  return { names, file: (name, talk = false) => join(d, talk ? j.poses[name].talk : j.poses[name].file) };
+  // actions: ท่านี้หน้าตาเป็นอย่างไร ให้ LLM เลือกท่าที่ตรงกับบท (ท่าเก่าที่ไม่ได้เก็บไว้ใช้คำอธิบายเริ่มต้น)
+  const actions = Object.fromEntries(names.map((n) => [n, j.poses[n].action || DEFAULT_POSES[n] || ""]));
+  return { names, actions, file: (name, talk = false) => join(d, talk ? j.poses[name].talk : j.poses[name].file) };
 }

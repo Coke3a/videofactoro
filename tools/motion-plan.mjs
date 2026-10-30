@@ -41,7 +41,7 @@ const oneOf = (list) => (list.length ? { type: "string", enum: list } : str);
 const uniq = (xs) => [...new Set(xs)];
 const arr = (v) => (Array.isArray(v) ? v : []);
 const withDefaults = (a) => ({
-  poses: a?.poses ?? {}, places: a?.places ?? {}, props: arr(a?.props), sfx: arr(a?.sfx),
+  poses: a?.poses ?? {}, poseActions: a?.poseActions ?? {}, places: a?.places ?? {}, props: arr(a?.props), sfx: arr(a?.sfx),
   floorProps: arr(a?.floorProps), product: a?.product ?? null,
 });
 const kindOf = (sc) => (KINDS.includes(sc?.kind) ? sc.kind : "scene");
@@ -150,8 +150,9 @@ function productStoryPrompt(lang, total, ctx, chars, props) {
     pr.angles.length ? `- Story angles from the product brief (pick one): ${pr.angles.join(" | ")}` : "",
     "- The clip is content first: a funny, relatable little story (or a useful tip) people would watch even without the product. The product shows up as a natural part of the story, never as an advert.",
     "- beats: exactly 5, in this order. setup: an everyday situation without the product (the hook, first 3 seconds). problem: the trouble grows, funny and relatable; the character may try something that fails. escalation: the product turns up naturally in the story (shown as its real photo). twist: the character uses it and things go right, showing one or two benefits in action rather than listing them. button: a last gag or warm payoff, with the product just visible; at most a light mention, no sales pitch. Each text is 1–2 plain English sentences.",
-    "- Use only these characters, and only actions their poses can show:",
+    "- Use only these characters, and only actions their poses can show (each pose is described in brackets; never write an action no pose shows, e.g. sleeping when there is no lying pose):",
     ...(chars.length ? chars : ["  (none)"]),
+    "- If the setup sets a goal or question (e.g. 20 push-ups), the twist or button must pay it off on screen (the character reaches it).",
     `- Places available: ${(ctx.places ?? []).join(", ") || "(none)"}. One place is fine; only change place when the story needs it.`,
     "- Existing props (the product prop is the real product photo):",
     ...(props.length ? props : ["  (none)"]),
@@ -161,15 +162,18 @@ function productStoryPrompt(lang, total, ctx, chars, props) {
   ].filter(Boolean).join("\n");
 }
 
+// ชื่อท่า + หน้าตาของท่า: LLM เห็นแค่ชื่อแล้วเขียนบทที่ไม่มีท่ารองรับ (เช่น "งีบ" แต่ไม่มีท่านอน)
+export const poseList = (names, actions = {}) => (names ?? []).map((n) => (actions[n] ? `${n} (${actions[n]})` : n)).join(", ");
+
 export function storySystemPrompt(lang, total, ctx = {}) {
-  const chars = (ctx.characters ?? []).map((c) => `  - ${c.id} (${c.name ?? c.id}): ${c.personality ?? ""} · poses: ${(c.poses ?? []).join(", ")}`);
+  const chars = (ctx.characters ?? []).map((c) => `  - ${c.id} (${c.name ?? c.id}): ${c.personality ?? ""} · poses: ${poseList(c.poses, c.poseActions)}`);
   const props = (ctx.props ?? []).map((p) => `  - ${p.id}: ${p.desc ?? ""}${p.placement === "floor" ? " (lies flat on the floor; characters can stand or exercise on it)" : ""}`);
   if (ctx.product) return productStoryPrompt(lang, total, ctx, chars, props);
   return [
     `You write the story for a ${total}-second kids' cartoon gag clip made of cut-out characters on painted backgrounds. Reply with JSON matching the schema only.`,
     ctx.direction ? `- Project direction: ${ctx.direction}` : "",
     "- beats: exactly 5, in this order: setup → problem → escalation → twist → button (the button is one quick final gag). Each text is 1–2 plain English sentences saying what happens and who does it.",
-    "- Use only these characters, and only actions their poses can show:",
+    "- Use only these characters, and only actions their poses can show (each pose is described in brackets):",
     ...(chars.length ? chars : ["  (none)"]),
     `- Places available: ${(ctx.places ?? []).join(", ") || "(none)"}. Stay in these places.`,
     (ctx.places ?? []).length >= 2
@@ -188,7 +192,7 @@ export function scenesSystemPrompt(lang, total, raw, { narrator = false } = {}) 
   const assets = withDefaults(raw);
   const n = Math.round(total / (assets.product ? 3.5 : 5));
   const max = lineMax(lang);
-  const poses = Object.entries(assets.poses).map(([c, ps]) => `  - ${c}: ${ps.join(", ")}`);
+  const poses = Object.entries(assets.poses).map(([c, ps]) => `  - ${c}: ${poseList(ps, assets.poseActions[c])}`);
   const places = Object.entries(assets.places).map(([p, ss]) => `  - ${p}: ${ss.join(", ")}`);
   const pr = assets.product;
   return [
@@ -211,6 +215,7 @@ export function scenesSystemPrompt(lang, total, raw, { narrator = false } = {}) 
     narrator ? "- The narrator tells the story briefly; characters speak their own short lines." : "- There is no narrator in this project: every line is spoken by a character in the cast.",
     `- beats: { at, who?, pose?, move?, to_spot?, dur?, fx?, sfx?, text? }. at is seconds from scene start as a string ("1.5") or "line<N>" / "line<N>-end" (N counts from 1 within the scene). who is a cast id or a prop id in the scene. move: ${MOVES.join(", ")} (to and run-to need to_spot). fx: stamp (needs text) or shake. sfx: ${(assets.sfx ?? []).join(", ")}.`,
     `- No on-screen text except stamps: a sound word or 1–2 words, at most ${STAMP_MAX} characters (e.g. BONK!, THE END).`,
+    "- The pose must show what is said: while a line is spoken, the speaker (or, for the narrator, the character it describes) wears a pose that shows that action or feeling. Change pose at a line start (\"line<N>\") or after it ends (\"line<N>-end\"), never to a pose that contradicts the line being spoken. Only write lines about actions some pose shows.",
     "- Make it move: most scenes need at least one beat. Every beat must change something: a pose, a move, an fx or an sfx (a beat with only text, who or dur is dropped). End on the button gag.",
     pr
       ? `- Every kind "scene" needs 1–${MAX_CAST} cast characters, each standing on a named spot. insert and endcard scenes have empty cast, props and beats.`

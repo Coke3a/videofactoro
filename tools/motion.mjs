@@ -151,7 +151,9 @@ async function work({ dir, ctx, state, key, id: given, prompt, total, audio, pla
   const costDir = join(dir, ".vf");
   const warnings = [...early];
   const narrator = audio.narrator;
-  const poses = Object.fromEntries(characters.map((c) => [c.id, loadPoses(dir, c.id).names]));
+  const poseSets = Object.fromEntries(characters.map((c) => [c.id, loadPoses(dir, c.id)]));
+  const poses = Object.fromEntries(characters.map((c) => [c.id, poseSets[c.id].names]));
+  const poseActions = Object.fromEntries(characters.map((c) => [c.id, poseSets[c.id].actions]));
   // มี product/product.json = คลิปขายของ: ฉากแทรกรูปจริง + ฉากปิดบอกราคา + มุมกล้องหลายขนาด
   const product = loadProduct(dir);
 
@@ -160,7 +162,7 @@ async function work({ dir, ctx, state, key, id: given, prompt, total, audio, pla
     const user = contextMessage({ dir, characters, places, prompt, notes: [`ความยาวรวม: ${total} วินาที`] });
     const { data } = await llmJson({
       system: storySystemPrompt(lang, total, {
-        characters: characters.map((c) => ({ id: c.id, name: c.name, personality: c.personality, poses: poses[c.id] })),
+        characters: characters.map((c) => ({ id: c.id, name: c.name, personality: c.personality, poses: poses[c.id], poseActions: poseActions[c.id] })),
         places: places.map((p) => p.id), props: listProps(dir), product,
       }),
       user, schema: STORY_SCHEMA, validate: validateStory, maxTokens: 4000,
@@ -196,6 +198,7 @@ async function work({ dir, ctx, state, key, id: given, prompt, total, audio, pla
 
   const assets = {
     poses,
+    poseActions,
     places: Object.fromEntries(places.map((p) => [p.id, Object.keys(stages[p.id].spots)])),
     props: listProps(dir).map((p) => p.id),
     floorProps: listProps(dir).filter((p) => p.placement === "floor").map((p) => p.id),

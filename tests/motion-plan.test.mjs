@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import {
+import { poseList,
   CAMERAS, ENTERS, MOVES, FX, LEAD, GAP, TAIL, SCENE_MIN,
   MOTION_WPS, TOTAL_TOLERANCE, lineMax, STORY_SCHEMA, scenesSchema, storySystemPrompt, scenesSystemPrompt, validateScenePlan, normalizeScenePlan, estimateSeconds, validateStory, sceneSeconds,
 } from "../tools/motion-plan.mjs";
@@ -403,4 +403,13 @@ test("โหมดสินค้า: จับ endcard ไม่อยู่ท
   // ไม่มีสินค้า → kind อื่นนอกจาก scene ใช้ไม่ได้
   const issues = validateScenePlan(productPlan(), ASSETS, { lang: "en", narrator: true });
   assert.ok(issues.some((i) => /needs a product/.test(i)));
+});
+
+test("poseList: ใส่หน้าตาของท่าในวงเล็บ ไม่มีคำอธิบาย = ชื่ออย่างเดียว; prompt ทั้งสองขั้นเห็นคำอธิบาย", () => {
+  assert.equal(poseList(["idle", "pushup"], { pushup: "push-up position" }), "idle, pushup (push-up position)");
+  const story = storySystemPrompt("th", 30, { characters: [{ id: "pim", poses: ["sad"], poseActions: { sad: "sitting, crying" } }] });
+  assert.match(story, /sad \(sitting, crying\)/);
+  const scenes = scenesSystemPrompt("th", 30, { ...ASSETS, poseActions: { biscuit: { idle: "standing still" } } });
+  assert.match(scenes, /idle \(standing still\)/);
+  assert.match(scenes, /The pose must show what is said/);
 });
