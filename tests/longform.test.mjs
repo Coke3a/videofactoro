@@ -13,6 +13,7 @@ import { main as create } from "../tools/project-create.mjs";
 import { main as film, validateFilmPlan } from "../tools/film.mjs";
 import { main as motion } from "../tools/motion.mjs";
 import { finishAudio } from "../tools/longform.mjs";
+import { addTrack, LIBRARY_FULL, MUSIC_FIT_FLOOR } from "../tools/music-lib.mjs";
 import { openState } from "../tools/state.mjs";
 import { setRunner } from "../tools/hf.mjs";
 import { narrationTrackArgs, loopMusicArgs, ffmpeg } from "../tools/assemble.mjs";
@@ -305,6 +306,25 @@ test("เพลง: clef ให้คะแนนต่ำกว่าเกณ�
   assert.equal(posts(MODELS.music).length, 1);
   const idx = JSON.parse(fs.readFileSync(path.join(root, "_music", "index.json"), "utf8"));
   assert.equal(idx.tracks.length, 2);
+});
+
+test("เพลง: คลังเต็ม → ใช้เพลงคะแนนสูงสุดแม้ต่ำกว่าเกณฑ์ ไม่สร้างใหม่ · ต่ำกว่า floor ยังสร้างใหม่", async () => {
+  prepareMotionProject(dir);
+  await motionRun("เพลงตั้งต้น");
+  const lib = path.join(root, "_music");
+  const first = JSON.parse(fs.readFileSync(path.join(lib, "index.json"), "utf8")).tracks[0];
+  for (let i = 1; i < LIBRARY_FULL; i++) addTrack({ lib, src: path.join(lib, first.file), prompt: `Track ${i}`, seconds: first.seconds, madeFor: "test" });
+  calls.length = 0;
+  musicFit = 0.4;
+  const r = await motionRun("เพลงคลังเต็ม");
+  assert.equal(posts(MODELS.music).length, 0, "คลังเต็ม ไม่สร้างเพลงใหม่");
+  assert.equal(r.motion.music_track.reused, true);
+  assert.ok(fs.readFileSync(path.join(lib, "MUSIC.md"), "utf8").includes(`ครบ ${LIBRARY_FULL} เพลง`));
+  calls.length = 0;
+  musicFit = MUSIC_FIT_FLOOR - 0.1;
+  await motionRun("เพลงไม่เข้ากันเลย");
+  musicFit = 0.9;
+  assert.equal(posts(MODELS.music).length, 1, "ไม่เข้ากันเลย ยังสร้างใหม่");
 });
 
 test("finishAudio voices: วางเสียงตามเวลา at รวมยาว total ที่ส่งมา + sfx; voices ไม่มี total → INTERNAL", async () => {

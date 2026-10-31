@@ -23,7 +23,7 @@ Narration is on only when the project has a narrator (`project.json` → `narrat
 2. **per shot** (3 at a time): keyframe (refs + plate, QA) → video (i2v, diegetic sound, request id saved before polling) → narration (TTS) → normalize (720×1280 @24 fps for 9:16, stereo 48 kHz).
 3. **concat** → `films/<id>/film-raw.mp4`.
 4. **narration track**: each line placed at its shot's start (+0.3 s), sped up to 1.3× if too long.
-5. **music** (shared library `_music/`: clef-omni listens to tracks at least as long as the video and reuses the best one scoring ≥ 0.6; otherwise ElevenLabs makes a new track of max(video + 1 s, 90 s), which is added to the library and `_music/MUSIC.md`; copied to `music.mp3`) → **mix** (music trimmed to the video) → `renders/<id>.mp4`.
+5. **music** (shared library `_music/`: clef-omni listens to tracks at least as long as the video and reuses the best one scoring ≥ 0.6; otherwise ElevenLabs makes a new track of max(video + 1 s, 90 s), which is added to the library and `_music/MUSIC.md`; once 8 long-enough tracks exist the library is full and the best one is reused unless all score < 0.3; copied to `music.mp3`) → **mix** (music trimmed to the video) → `renders/<id>.mp4`.
 
 Video QA is not run per shot (it is a weak signal and slow). Inspect a contact sheet instead (see `clip.md`).
 

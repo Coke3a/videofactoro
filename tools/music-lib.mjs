@@ -18,6 +18,10 @@ export const LIBRARY_TRACK_SEC = 90;
 export const MUSIC_FIT_MIN = 0.6;
 // clef ฟังทีละเพลง: จำกัดจำนวนที่ฟังต่อคลิป เลือกเพลงที่ถูกใช้น้อยก่อน
 export const MAX_CANDIDATES = 8;
+// คลังเต็ม (เพลงที่ยาวพอมีครบเท่านี้): ไม่สร้างเพลงใหม่อีก ใช้เพลงคะแนนสูงสุดแม้ไม่ถึง MUSIC_FIT_MIN (Coke 2026-10-31 ประหยัดค่าเพลง)
+export const LIBRARY_FULL = 8;
+// ...ยกเว้นเพลงที่ไม่เข้ากันเลย (spike ~0.05) ยังสร้างใหม่
+export const MUSIC_FIT_FLOOR = 0.3;
 const EXCERPT_SEC = 20;
 
 export const libraryDir = (projectDir) => process.env.VF_MUSIC_LIBRARY || join(dirname(projectDir), "_music");
@@ -40,6 +44,7 @@ export function renderMusicMd(idx) {
     "",
     "เพลงประกอบที่ใช้ร่วมกันทุก project · vf เขียนไฟล์นี้ใหม่ทุกครั้งที่คลังเปลี่ยน (อย่าแก้ด้วยมือ ให้แก้ index.json)",
     `ตอนทำคลิป clef-omni ฟังเพลงที่ยาวพอทีละเพลง ถ้าคะแนนเข้ากับเรื่องถึง ${MUSIC_FIT_MIN} ใช้ซ้ำ ไม่ถึง = สร้างเพลงใหม่ ${LIBRARY_TRACK_SEC} วินาทีแล้วเก็บเข้าคลัง`,
+    `คลังเต็มเมื่อมีเพลงที่ยาวพอครบ ${LIBRARY_FULL} เพลง: ไม่สร้างใหม่อีก ใช้เพลงคะแนนสูงสุด เว้นแต่ทุกเพลงได้ต่ำกว่า ${MUSIC_FIT_FLOOR}`,
     "",
   ];
   for (const t of idx.tracks) {
@@ -70,8 +75,9 @@ const num = (a, k) => (typeof a?.[k]?.noul === "number" && Number.isFinite(a[k].
 // เพลงที่ยาวพอ เรียงจากใช้น้อย → ใช้มาก แล้วให้ clef ฟังทีละเพลง · คืนเพลงคะแนนสูงสุดที่ผ่านเกณฑ์ หรือ null
 export async function pickTrack({ lib, need, summary, musicPrompt, meta, costDir }) {
   const idx = loadLibrary(lib);
-  const pool = idx.tracks
-    .filter((t) => t.seconds >= need && existsSync(join(lib, t.file)))
+  const long = idx.tracks.filter((t) => t.seconds >= need && existsSync(join(lib, t.file)));
+  const full = long.length >= LIBRARY_FULL;
+  const pool = long
     .sort((a, b) => (a.uses?.length ?? 0) - (b.uses?.length ?? 0) || String(b.created).localeCompare(String(a.created)))
     .slice(0, MAX_CANDIDATES);
   const ranked = [];
@@ -96,7 +102,8 @@ export async function pickTrack({ lib, need, summary, musicPrompt, meta, costDir
   }
   ranked.sort((a, b) => b.score - a.score);
   const best = ranked[0];
-  return { pick: best && best.score >= MUSIC_FIT_MIN ? best : null, ranked: ranked.map((r) => ({ id: r.track.id, score: r.score })) };
+  const min = full ? MUSIC_FIT_FLOOR : MUSIC_FIT_MIN;
+  return { pick: best && best.score >= min ? best : null, full, ranked: ranked.map((r) => ({ id: r.track.id, score: r.score })) };
 }
 
 export function addTrack({ lib, src, prompt, seconds, madeFor, source = "generated" }) {

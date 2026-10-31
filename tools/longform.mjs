@@ -111,9 +111,9 @@ export async function finishAudio({ state, dir, base, video, segments, voices, t
     const need = total + 1;
     const lib = libraryDir(dir);
     const use = { project: basename(dir), title: story.title ?? base };
-    const { pick, ranked } = await pickTrack({ lib, need, summary: story.summary ?? "", musicPrompt, meta, costDir });
+    const { pick, ranked, full } = await pickTrack({ lib, need, summary: story.summary ?? "", musicPrompt, meta, costDir });
     if (pick) {
-      log(`ใช้เพลงจากคลัง ${pick.track.id} (clef ${pick.score.toFixed(2)})`);
+      log(`ใช้เพลงจากคลัง ${pick.track.id} (clef ${pick.score.toFixed(2)}${full ? " · คลังเต็ม" : ""})`);
       copyFileSync(join(lib, pick.track.file), join(dir, rel));
       markUsed(lib, pick.track.id, { ...use, score: pick.score });
       return { file: rel, library: pick.track.id, reused: true, score: pick.score, heard: ranked.length };
