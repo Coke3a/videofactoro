@@ -169,7 +169,7 @@ test("film: วิดีโอค้างแล้วรันซ้ำ ตา�
 
 test("film: ภาพที่ถูก flag (3030) เปลี่ยน seed แล้วลองใหม่ ไม่ล้มทั้งเรื่อง; flag ทุกครั้ง = BLOCKED", async () => {
   plan = FILM();
-  plan.shots = [shot(10), shot(10)];
+  plan.shots = [shot(8), shot(12)];
   flagImages = 2;
   const r = await film(["demo", "--prompt", "ภาพโดน flag", "--duration", "20", "--foreground"]);
   assert.ok(fs.existsSync(r.film.file));
@@ -203,7 +203,7 @@ test("ภาพไม่ถูก flag → ไม่เรียก LLM เข�
 
 test("film: วิดีโอช็อตเดียวโดน moderation → ลองช็อตนั้นใหม่ (prompt อ่อนลง แล้ว keyframe ใหม่) ไม่เริ่มทั้งเรื่องใหม่", async () => {
   plan = FILM();
-  plan.shots = [shot(10), shot(10)];
+  plan.shots = [shot(8), shot(12)];
   blockVideos = 2;
   const r = await film(["demo", "--prompt", "วิดีโอโดนบล็อก", "--duration", "20", "--foreground"]);
   assert.ok(fs.existsSync(r.film.file));
@@ -218,7 +218,7 @@ test("film: วิดีโอช็อตเดียวโดน moderation �
 
 test("film: แก้ video_prompt ใน plan.json แล้วรันซ้ำ → ช็อตที่ยังไม่เสร็จใช้ prompt ใหม่", async () => {
   plan = FILM();
-  plan.shots = [shot(10), shot(10)];
+  plan.shots = [shot(8), shot(12)];
   blockVideos = 99;
   const args = ["demo", "--prompt", "แก้ plan แล้วรันต่อ", "--duration", "20", "--foreground"];
   await assert.rejects(film(args), (e) => e.code === "BLOCKED");
@@ -236,7 +236,7 @@ test("film: แก้ video_prompt ใน plan.json แล้วรันซ้�
 
 test("keyframe ใช้ klein-4b เป็นค่าเริ่มต้น; project.json keyframe_quality=high → klein-9b", async () => {
   plan = FILM();
-  plan.shots = [shot(10), shot(10)];
+  plan.shots = [shot(8), shot(12)];
   await film(["demo", "--prompt", "รุ่นภาพปกติ", "--duration", "20", "--foreground"]);
   assert.equal(posts(MODELS.imageFast).length, 2);
   assert.equal(posts(MODELS.image).length, 0);
@@ -384,6 +384,15 @@ test("validateFilmPlan: ผลรวมผิด, ช็อตสั้นไป
   assert.match(issues, /ghost/);
   assert.match(issues, /shots\[2\]\.narration ยาวเกินไป/);
   assert.match(validateFilmPlan(FILM(), CTX, { total: 40 }).join("\n"), /ผลรวม duration = 20/);
+});
+
+test("validateFilmPlan: ช็อตแรก (hook) ยาวเกิน 8 วินาทีไม่ผ่าน", () => {
+  const long = FILM();
+  long.shots = [shot(12), shot(5), shot(5)];
+  assert.match(validateFilmPlan(long, CTX, { total: 22 }).join("\n"), /shots\[0\] \(hook\) ยาว 12/);
+  const ok = FILM();
+  ok.shots = [shot(8), shot(7), shot(7)];
+  assert.deepEqual(validateFilmPlan(ok, CTX, { total: 22 }), []);
 });
 
 test("narrationTrackArgs: หน่วงตามเวลา, เร่ง tempo, เงียบรองพื้นยาวพอดี", () => {

@@ -22,6 +22,8 @@ export const SHOT_MIN = 5;
 export const SHOT_MAX = 20;
 // flux-3-video คิดเงินต่อคลิป (5–20 วินาทีราคาเดียว) และทุกช็อตต้องมี keyframe: ช็อตยาวใกล้ SHOT_MAX = จ่ายน้อยคลิปลง
 export const SHOT_TARGET = 18;
+// คนดู Reels ตัดสินใจใน 2–3 วินาที (คลิป 90 วิ ดูเฉลี่ยแค่ ~3 วิ): ช็อตแรกสั้น เปิดกลางเหตุการณ์
+export const HOOK_SHOT_MAX = 8;
 export const CONCURRENCY = 3;
 export const VIDEO_BLOCK_RETRIES = 2;
 
@@ -57,6 +59,7 @@ export function filmSystemPrompt(lang, total, { narrator = false, musicStyle = "
   return [
     `คุณคือผู้กำกับหนังสั้น ${total} วินาทีจาก project วิดีโอที่มีอยู่แล้ว เขียนรายการช็อตเป็น JSON ตาม schema เท่านั้น`,
     `- โครงเรื่อง: ช็อตแรกเป็น hook ที่ดึงคนดูใน 3 วินาที แล้วไต่ระดับ มีจุดพลิก และจบด้วย payoff ที่ตลกหรือน่าจดจำ`,
+    `- ช็อตแรก (hook): ยาว ${SHOT_MIN}–${HOOK_SHOT_MAX} วินาที เปิดกลางจังหวะที่วุ่นหรือแปลกที่สุดของเรื่อง (ตัดภาพล่วงหน้ามาก่อนได้ แล้วช็อตถัดไปค่อยย้อนเล่า) video_prompt ต้องมีการกระทำใหญ่ตั้งแต่ "0-1s" ห้ามเปิดด้วยการเดินเข้าฉาก วางของ มองไปรอบๆ หรือภาพบรรยากาศ · narration ช็อตแรกเป็นประโยคสั้นประโยคเดียวที่ชวนสงสัยหรือเป็นคำถาม ไม่ใช่การแนะนำตัว`,
     `- shots: ประมาณ ${n} ช็อต ช็อตละ 15–${SHOT_MAX} วินาทีเป็นหลัก (สั้นสุด ${SHOT_MIN} วินาทีเฉพาะช็อตสุดท้ายหรือจังหวะที่ต้องตัดเร็วจริงๆ) · ช็อตยาวต้องไม่นิ่ง: video_prompt เล่า 2–3 จังหวะตามเวลา (เช่น 0-6s / 6-12s / 12-18s) แต่ละจังหวะมีการกระทำใหม่และเปลี่ยนมุมกล้อง ผลรวม duration ต้องใกล้ ${total} วินาที (คลาดได้ไม่เกิน 10%)`,
     "- แต่ละช็อตมีการกระทำชัดเจนหนึ่งอย่าง ต่อเนื่องจากช็อตก่อนหน้า (ตำแหน่ง ของในมือ สถานที่) เปลี่ยนมุมกล้องระหว่างช็อตให้ดูมีชีวิต",
     "- characters: id ตัวละคร 1–3 ตัวต่อช็อต จาก id ที่มีอยู่เท่านั้น · place: id สถานที่ที่มีอยู่ หรือ \"\"",
@@ -72,9 +75,16 @@ export function filmSystemPrompt(lang, total, { narrator = false, musicStyle = "
   ].join("\n");
 }
 
-export const validateFilmPlan = (plan, ctx, { total }) => validateParts(plan, ctx, {
-  total, listKey: "shots", minSec: SHOT_MIN, maxSec: SHOT_MAX, textKeys: ["first_frame_prompt", "video_prompt"],
-});
+export function validateFilmPlan(plan, ctx, { total }) {
+  const issues = validateParts(plan, ctx, {
+    total, listKey: "shots", minSec: SHOT_MIN, maxSec: SHOT_MAX, textKeys: ["first_frame_prompt", "video_prompt"],
+  });
+  const first = Array.isArray(plan?.shots) ? plan.shots[0] : null;
+  if (Number.isInteger(first?.duration) && first.duration > HOOK_SHOT_MAX) {
+    issues.push(`shots[0] (hook) ยาว ${first.duration} วินาที ต้องไม่เกิน ${HOOK_SHOT_MAX}: เปิดด้วยช็อตสั้นที่วุ่นที่สุดของเรื่อง`);
+  }
+  return issues;
+}
 
 function dryRun(total, hd, audio, pj) {
   const quality = hd ? "hd" : "draft";
