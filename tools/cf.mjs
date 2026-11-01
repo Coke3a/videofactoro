@@ -8,6 +8,7 @@ let sleepFn = (ms) => new Promise((r) => setTimeout(r, ms));
 export const setFetch = (fn) => { fetchFn = fn; };
 export const getFetch = () => fetchFn;
 export const setSleep = (fn) => { sleepFn = fn; };
+export const sleep = (ms) => sleepFn(ms);
 let nowFn = () => Date.now();
 export const setNow = (fn) => { nowFn = fn; };
 
@@ -33,7 +34,7 @@ export function classify({ status = 0, body = "" }) {
   return "PROVIDER_DOWN";
 }
 
-function scrub(text) {
+export function scrub(text) {
   const t = process.env.CLOUDFLARE_AI_API_TOKEN;
   let s = String(text ?? "");
   if (t) s = s.split(t).join("***");
