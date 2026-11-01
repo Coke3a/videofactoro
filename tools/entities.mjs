@@ -6,8 +6,9 @@ import { readJson } from "./state.mjs";
 import { startJob, registerJob, finishJob, isWorker, jobRootOf, startHeartbeat, resumeCommand } from "./jobs.mjs";
 import { estimate } from "./pricing.mjs";
 import { MODELS } from "./models.mjs";
-import { readCosts, appendActual, expectedGatewayCalls } from "./cost.mjs";
+import { readCosts, readActual, appendActual, expectedGatewayCalls } from "./cost.mjs";
 import { fetchActualCost } from "./actual-cost.mjs";
+import { scrub } from "./cf.mjs";
 import { libLoad, libUpdate } from "./cache.mjs";
 import { llmJson } from "./llm.mjs";
 import { pickBest, toQaImage, saveVerdicts } from "./qa.mjs";
@@ -48,9 +49,10 @@ async function recordActual({ dir, slug, run, start, end, outcome }) {
   const costDir = join(dir, ".vf");
   let rec;
   try {
-    rec = await (actualCostFetcher ?? fetchActualCost)({ run, start, end, expectedGatewayCalls: expectedGatewayCalls(costDir, run, start, end) });
+    const seenIds = readActual(costDir).filter((r) => r.run === run).flatMap((r) => r.log_ids ?? []);
+    rec = await (actualCostFetcher ?? fetchActualCost)({ run, start, end, expectedGatewayCalls: expectedGatewayCalls(costDir, run), seenIds });
   } catch (e) {
-    rec = { run, start, end, status: "unavailable", usd: null, gateway: null, neurons: null, error: String(e?.message ?? e).slice(0, 300), fetched_at: new Date().toISOString() };
+    rec = { run, start, end, status: "unavailable", usd: null, gateway: null, neurons: null, error: scrub(e?.message ?? e).slice(0, 300), fetched_at: new Date().toISOString() };
   }
   try {
     // items = ชิ้นงานที่รอบนี้ทำ (จาก ledger) ให้ vg.py จับคู่ render กับ run ได้

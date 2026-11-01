@@ -7,7 +7,8 @@ const TOKEN = "tok-secret";
 const W = { run: "r1", start: "2026-11-01T13:30:00.000Z", end: "2026-11-01T13:40:00.000Z" };
 const near = (a, b) => assert.ok(Math.abs(a - b) < 1e-9, `${a} != ${b}`);
 const json = (body, status = 200) => ({ ok: status < 400, status, text: async () => JSON.stringify(body), json: async () => body });
-const log = (model, cost, run = "r1", extra = {}) => ({ model, cost, metadata: { run }, ...extra });
+let ids = 0;
+const log = (model, cost, run = "r1", extra = {}) => ({ id: `L${++ids}`, model, provider: "p", cost, metadata: { run }, ...extra });
 const page = (rows, { page = 1, total = rows.length } = {}) => json({ success: true, result: rows, result_info: { page, per_page: 50, total_count: total } });
 const gql = (groups) => json({ data: { viewer: { accounts: [{ aiInferenceAdaptiveGroups: groups }] } } });
 
@@ -71,8 +72,8 @@ test("sends the JSON filter and the window", async () => {
   const u = logCalls()[0].url;
   assert.ok(u.includes("/accounts/acc1/ai-gateway/gateways/default/logs"), u);
   assert.ok(u.includes("filters=" + encodeURIComponent(JSON.stringify([{ key: "metadata.value", operator: "eq", value: ["r1"] }]))), u);
-  assert.ok(u.includes("start_date=" + encodeURIComponent(W.start)), u);
-  assert.ok(u.includes("end_date=" + encodeURIComponent(W.end)), u);
+  // logs กรองด้วย run อย่างเดียว (ทุก attempt ของ run) แล้วตัดที่เคยบันทึกด้วย id · ช่วงเวลาใช้กับ Neurons เท่านั้น
+  assert.ok(!u.includes("start_date"), u);
   assert.ok(!u.includes("filters%5B0%5D"), u);
   assert.equal(logCalls()[0].init.headers.Authorization, `Bearer ${TOKEN}`);
   const body = JSON.parse(calls.find((c) => c.url.includes("/graphql")).init.body);
@@ -152,4 +153,49 @@ test("no gateway calls expected", async () => {
   assert.equal(r.usd, 0);
   assert.equal(r.status, "ok");
   assert.deepEqual(sleeps, []);
+});
+
+test("a log with no cost makes the result partial and names the model", async () => {
+  fake({ logs: () => page([log("m", 0.1), log("new/model", null)]) });
+  const r = await fetchActualCost({ ...W, expectedGatewayCalls: 2 });
+  assert.equal(r.status, "partial");
+  near(r.usd, 0.1);
+  assert.deepEqual(r.unpriced_models, ["new/model"]);
+});
+
+test("@cf rows and unknown-provider poll rows are neither paid calls nor dollars", async () => {
+  fake({ logs: (url, n) => page(n === 0
+    ? [log("@cf/cloudflare/clef", 0.5), log("@cf/cloudflare/clef", 0.5), log("black-forest-labs/flux-3-video", 0, "r1", { provider: "unknown" })]
+    : [log("google/gemini-3.8-flash", 0.04)]) });
+  const r = await fetchActualCost({ ...W, expectedGatewayCalls: 1 });
+  assert.equal(r.gateway.calls, 1);
+  near(r.usd, 0.04);
+  assert.equal(logCalls().length, 2, "ไม่หยุดเพราะนับแถว @cf/poll");
+});
+
+test("logs already recorded by an earlier attempt are skipped, and count toward expected", async () => {
+  ids = 0;
+  fake({ logs: () => page([log("m", 0.1), log("m", 0.2)]) });
+  const first = await fetchActualCost({ ...W, expectedGatewayCalls: 2 });
+  ids = 0;
+  fake({ logs: () => page([log("m", 0.1), log("m", 0.2), log("m", 0.3)]) });
+  const r = await fetchActualCost({ ...W, expectedGatewayCalls: 3, seenIds: first.log_ids });
+  near(r.usd, 0.3);
+  assert.equal(r.gateway.calls, 1);
+  assert.equal(r.status, "ok");
+  assert.deepEqual(r.log_ids, ["L3"]);
+  assert.deepEqual(sleeps, []);
+});
+
+test("rows repeated across pages are counted once", async () => {
+  const fifty = Array.from({ length: 50 }, () => log("m", 0.01));
+  fake({ logs: (url) => (url.includes("page=2") ? page([fifty[49]], { page: 2, total: 51 }) : page(fifty, { total: 51 })) });
+  const r = await fetchActualCost({ ...W, expectedGatewayCalls: 50 });
+  assert.equal(r.gateway.calls, 50);
+});
+
+test("neurons are marked account-wide for the window", async () => {
+  fake({ logs: () => page([]) });
+  const r = await fetchActualCost({ ...W, expectedGatewayCalls: 0 });
+  assert.equal(r.neurons_scope, "account-window");
 });

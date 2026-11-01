@@ -22,9 +22,9 @@ export function readActual(dir) {
   return text.split("\n").filter(Boolean).map((l) => JSON.parse(l));
 }
 
-// จำนวนครั้งที่ควรเห็นใน AI Gateway logs ของรอบนี้: ใช้รอ log ที่เข้าช้า ไม่ได้ใช้คิดเงิน
-export function expectedGatewayCalls(dir, run, start, end) {
-  return readCosts(dir).filter((r) => r.run === run && typeof r.at === "string" && r.at >= start && r.at <= end &&
+// จำนวนครั้งที่ควรเห็นใน AI Gateway logs ของทั้ง run (ทุก attempt): ใช้รอ log ที่เข้าช้า ไม่ได้ใช้คิดเงิน
+export function expectedGatewayCalls(dir, run) {
+  return readCosts(dir).filter((r) => r.run === run &&
     typeof r.model === "string" && !isCfHosted(r.model) && !r.cached && r.reject_of === undefined).length;
 }
 

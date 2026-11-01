@@ -68,7 +68,7 @@ test("two attempts of one run do not double count", async () => {
   assert.ok(seen[0].end < seen[1].start, `${seen[0].end} !< ${seen[1].start}`);
 });
 
-test("expectedGatewayCalls skips @cf, cached, rerolls and rows outside the window", () => {
+test("expectedGatewayCalls counts the whole run but skips @cf, cached and rerolls", () => {
   const c = join(dir, ".vf");
   const row = (model, extra = {}) => logCost(c, { project: "p", run: "r1", step: "s", model, outcome: "ok", ...extra });
   row("google/gemini-3.8-flash");
@@ -76,10 +76,18 @@ test("expectedGatewayCalls skips @cf, cached, rerolls and rows outside the windo
   row("@cf/cloudflare/clef");
   row("google/gemini-3.8-flash", { cached: true });
   row("google/gemini-3.8-flash", { reject_of: 0 });
+  row("google/gemini-3.8-flash", { at: "2000-01-01T00:00:00Z" });
   logCost(c, { project: "p", run: "other", step: "s", model: "google/gemini-3.8-flash", outcome: "ok" });
-  const start = new Date(Date.now() - 60000).toISOString();
-  const end = new Date(Date.now() + 60000).toISOString();
-  assert.equal(expectedGatewayCalls(c, "r1", start, end), 2);
-  assert.equal(expectedGatewayCalls(c, "r1", "2000-01-01T00:00:00Z", "2000-01-02T00:00:00Z"), 0);
+  assert.equal(expectedGatewayCalls(c, "r1"), 3, "รวมแถวของ attempt ก่อนหน้า (at เก่า)");
+  assert.equal(expectedGatewayCalls(c, "nope"), 0);
   assert.equal(existsSync(join(c, "actual-costs.jsonl")), false);
+});
+
+test("a resumed run passes ids already recorded for that run, so a crashed attempt's logs are picked up once", async () => {
+  stub({ status: "ok", usd: 0.1, neurons: null, log_ids: ["A", "B"] });
+  const state = memState();
+  await go(async ({ run }) => { pinRun(state, run); return {}; });
+  await go(async ({ run }) => { pinRun(state, run); return {}; });
+  assert.deepEqual(seen[0].seenIds, []);
+  assert.deepEqual(seen[1].seenIds, ["A", "B"]);
 });
