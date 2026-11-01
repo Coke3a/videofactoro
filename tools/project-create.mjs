@@ -14,7 +14,7 @@ import { libAdd, libLoad, libUpdate } from "./cache.mjs";
 import { logCost, costRow } from "./cost.mjs";
 import { estimate } from "./pricing.mjs";
 import { MODELS } from "./models.mjs";
-import { pinInput, pinRun, costSince, runEntity, designCharacter, qaUserImage } from "./entities.mjs";
+import { pinInput, pinRun, runEntity, designCharacter, qaUserImage } from "./entities.mjs";
 import { BIBLE_SCHEMA, validateBible, validateCharacter, bibleSystemPrompt, writeProjectFiles } from "./bible.mjs";
 
 const execFileP = promisify(execFile);
@@ -315,7 +315,6 @@ async function work({ dir, slug, prompt, lang, aspect, images, maxRerolls, run: 
     dir,
     characters: chars,
     places,
-    cost: { usd: costSince(costDir, run) },
     ...(warnings.length ? { warnings } : {}),
     next: [`vf project show ${slug}`, `vf character add ${slug} --prompt ...`, `vf place add ${slug} --prompt ...`],
   };

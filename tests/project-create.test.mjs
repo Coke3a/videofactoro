@@ -15,6 +15,7 @@ import { main as statusMain } from "../tools/status.mjs";
 import { main, useUserImage, buildCommand } from "../tools/project-create.mjs";
 import { goodBible } from "./fixtures/bible.mjs";
 import { bodyOf } from "./fixtures/body.mjs";
+import { STUB_COST } from "./_setup.mjs";
 
 process.env.VF_NO_DOTENV = "1";
 const TINY = fileURLToPath(new URL("./fixtures/tiny.png", import.meta.url));
@@ -117,7 +118,7 @@ test("สร้างไฟล์ครบตาม spec §5", async () => {
   assert.deepEqual(r.characters.map((c) => c.id), ["cat", "dog"]);
   assert.equal(r.characters[0].ref, "characters/cat/ref/main.png");
   assert.equal(r.places[0].plate, "places/kitchen/plates/main.jpg");
-  assert.ok(r.cost.usd > 0);
+  assert.deepEqual(r.cost, STUB_COST);
   assert.deepEqual(r.next, ["vf project show demo", "vf character add demo --prompt ...", "vf place add demo --prompt ..."]);
   assert.ok(readCosts(path.join(dir, ".vf")).some((x) => x.step === "bible"));
   assert.ok(!JSON.stringify(r).includes("tok-secret"));
@@ -309,7 +310,7 @@ test("--image ซ้ำตัวเดียวกัน: ใช้ภาพแ�
 
 // --- final fix (R13) ---
 const KINDS = new Set(["bible", "ref", "plate", "qa", "look"]);
-test("R13: แถว cost มี step ตามชนิด + item + run เดียวกันข้าม resume; cost.usd = ผลรวมของ run นั้น (รวมรอบที่พัง)", async () => {
+test("R13: แถว cost มี step ตามชนิด + item + run เดียวกันข้าม resume; cost มาจาก API (stub)", async () => {
   failMatch = DOG;
   await assert.rejects(create(), (e) => e.code === "PROVIDER");
   const vf = path.join(root, "demo", ".vf");
@@ -323,7 +324,7 @@ test("R13: แถว cost มี step ตามชนิด + item + run เด�
   assert.ok(rows.every((x) => x.run === run));
   assert.ok(crashed.length > 0 && crashed.every((x) => x.run === run));
   const sum = rows.reduce((s, x) => s + (x.usd ?? 0), 0);
-  assert.ok(Math.abs(r.cost.usd - sum) < 1e-12, `${r.cost.usd} vs ${sum}`);
+  assert.deepEqual(r.cost, STUB_COST);
   for (const x of rows) {
     assert.ok(KINDS.has(x.step), x.step);
     assert.ok(["ok", "invalid", "qa_reject", "blocked", "error"].includes(x.outcome), x.outcome);

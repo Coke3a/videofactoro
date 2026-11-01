@@ -16,6 +16,7 @@ import { goodBible } from "./fixtures/bible.mjs";
 import { bodyOf } from "./fixtures/body.mjs";
 import { POSE_KEY } from "../tools/motion-check.mjs";
 import { TINY, STORY, SCENES, SILENT_SCENES, STORY_MARK, SCENES_MARK, STAGING_KEY, prepareMotionProject, stubRunner } from "./fixtures/motion.mjs";
+import { STUB_COST } from "./_setup.mjs";
 
 const B64 = fs.readFileSync(TINY).toString("base64");
 const ENV = { CLOUDFLARE_AI_ACCOUNT_ID: "acc1", CLOUDFLARE_AI_API_TOKEN: "tok-secret-123456" };
@@ -156,7 +157,7 @@ test("motion: story → props → stage → scenes → tts → compose → lint 
   assert.equal(plan.title, "Ball Panic");
   assert.equal(plan.summary, "The cat and the dog chase a red ball.");
   assert.ok(fs.readFileSync(path.join(dir, "EPISODES.md"), "utf8").includes("| motion | Ball Panic |"));
-  assert.ok(r.cost.usd > 0);
+  assert.deepEqual(r.cost, STUB_COST);
   await assert.rejects(motion(ARGS), (e) => e.code === "USAGE" && /เสร็จแล้ว/.test(e.message));
 });
 

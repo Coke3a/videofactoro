@@ -4,7 +4,7 @@ import { parse, VfError, log } from "./out.mjs";
 import { resolveProject, stamp } from "./paths.mjs";
 import { openState, step, writeJsonAtomic } from "./state.mjs";
 import { NO_PASS_WARNING } from "./qa.mjs";
-import { pinInput, pinRun, costSince, loadProject, planRows, imageRow, qaRow, runEntity } from "./entities.mjs";
+import { pinInput, pinRun, loadProject, planRows, imageRow, qaRow, runEntity } from "./entities.mjs";
 import { MODELS } from "./models.mjs";
 import { DEFAULT_POSES, TALK_MAX_REROLLS, makePoses, posesDir } from "./poses.mjs";
 
@@ -108,7 +108,6 @@ async function work({ dir, ctx, state, char, poses, replace, partial, run: fresh
     character: char.id,
     poses: all.names ?? Object.keys(made.poses),
     ...(warnings.length ? { warnings } : {}),
-    cost: { usd: costSince(costDir, run) },
     next: [`vf project show ${ctx.slug}`],
   };
 }

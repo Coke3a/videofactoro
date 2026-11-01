@@ -6,7 +6,8 @@ import { readJson } from "./state.mjs";
 import { startJob, registerJob, finishJob, isWorker, jobRootOf, startHeartbeat, resumeCommand } from "./jobs.mjs";
 import { estimate } from "./pricing.mjs";
 import { MODELS } from "./models.mjs";
-import { readCosts, summarize } from "./cost.mjs";
+import { readCosts, appendActual, expectedGatewayCalls } from "./cost.mjs";
+import { fetchActualCost } from "./actual-cost.mjs";
 import { libLoad, libUpdate } from "./cache.mjs";
 import { llmJson } from "./llm.mjs";
 import { pickBest, toQaImage, saveVerdicts } from "./qa.mjs";
@@ -30,16 +31,33 @@ export function pinInput(state, input, keys, hint) {
 }
 
 // run id ของคำสั่งนี้: เก็บใน state ตอนเริ่มครั้งแรก แล้วใช้ค่าเดิมตอนรันซ้ำ (ต้นทุนรวมรอบที่พังด้วย)
+// pinned = run id ที่ใช้จริงในรอบนี้ (ตัวแรกที่ pin) ให้ runEntity ใช้ค้นค่าใช้จ่ายจริง
+let pinned = null;
 export function pinRun(state, fresh) {
-  const cur = state.get("run")?.id;
-  if (cur) return cur;
-  state.set("run", { id: fresh });
-  return fresh;
+  const id = state.get("run")?.id ?? fresh;
+  if (!state.get("run")?.id) state.set("run", { id });
+  pinned ??= id;
+  return id;
 }
 
-// ต้นทุนของคำสั่งนี้เท่านั้น: แถวที่มี run id ของคำสั่งนี้
-export function costSince(costDir, runId) {
-  return summarize(readCosts(costDir).filter((r) => r.run === runId)).totalUsd;
+let actualCostFetcher = null;
+export const setActualCostFetcher = (fn) => { actualCostFetcher = fn; };
+
+// ค่าใช้จ่ายจริงของรอบนี้จาก Cloudflare · พังได้แต่ห้ามทำให้งานพัง → unavailable
+async function recordActual({ dir, slug, run, start, end, outcome }) {
+  const costDir = join(dir, ".vf");
+  let rec;
+  try {
+    rec = await (actualCostFetcher ?? fetchActualCost)({ run, start, end, expectedGatewayCalls: expectedGatewayCalls(costDir, run, start, end) });
+  } catch (e) {
+    rec = { run, start, end, status: "unavailable", usd: null, gateway: null, neurons: null, error: String(e?.message ?? e).slice(0, 300), fetched_at: new Date().toISOString() };
+  }
+  try {
+    // items = ชิ้นงานที่รอบนี้ทำ (จาก ledger) ให้ vg.py จับคู่ render กับ run ได้
+    const items = [...new Set(readCosts(costDir).filter((r) => r.run === run && r.item).map((r) => String(r.item).split("#")[0]))];
+    appendActual(costDir, { ...rec, project: slug, items, outcome });
+  } catch {}
+  return { usd: rec.usd ?? null, status: rec.status, neurons: rec.neurons ? rec.neurons.total : null };
 }
 
 const STAGE = ".new-";
@@ -192,11 +210,17 @@ export async function runEntity({ dir, projectRef, slug, command, label, foregro
       finishJob(reg.dir, outcome);
     } catch {}
   };
+  const fresh = randomBytes(4).toString("hex");
+  const start = new Date().toISOString();
+  pinned = null;
+  const actual = (outcome) => recordActual({ dir, slug, run: pinned ?? fresh, start, end: new Date().toISOString(), outcome });
   try {
-    const out = await work({ run: randomBytes(4).toString("hex") });
+    const out = await work({ run: fresh });
+    out.cost = await actual("ok");
     end({ result: out });
     return out;
   } catch (e) {
+    await actual("error");
     if (e instanceof VfError) e.details = { ...e.details, project: slug, resume: resumeCommand(command) };
     end({ error: { code: e instanceof VfError ? e.code : "INTERNAL", message: e?.message ?? String(e), details: e?.details } });
     throw e;

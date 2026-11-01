@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { parse, VfError } from "./out.mjs";
 import { resolveProject, slugify } from "./paths.mjs";
 import { openState } from "./state.mjs";
-import { pinInput, pinRun, costSince, loadProject, planRows, imageRow, runEntity } from "./entities.mjs";
+import { pinInput, pinRun, loadProject, planRows, imageRow, runEntity } from "./entities.mjs";
 import { MODELS } from "./models.mjs";
 import { importProp, makeProp, propDir, PLACEMENTS, PROP_ID_RE } from "./props.mjs";
 
@@ -61,7 +61,7 @@ export async function main(argv) {
       const run = pinRun(state, fresh);
       const costDir = stateDir;
       const made = await makeProp({ dir, slug: ctx.slug, id, desc, run, costDir, state });
-      return { ...made, cost: { usd: costSince(costDir, run) }, next: [`vf project show ${ctx.slug}`] };
+      return { ...made, next: [`vf project show ${ctx.slug}`] };
     },
   });
 }

@@ -19,6 +19,7 @@ import { RULES } from "../tools/qa-rules.mjs";
 import { validateCharacter, validatePlace } from "../tools/bible.mjs";
 import { goodBible } from "./fixtures/bible.mjs";
 import { bodyOf } from "./fixtures/body.mjs";
+import { STUB_COST } from "./_setup.mjs";
 
 process.env.VF_NO_DOTENV = "1";
 const TINY = fileURLToPath(new URL("./fixtures/tiny.png", import.meta.url));
@@ -135,8 +136,7 @@ test("character add เพิ่มแถวในตาราง PROJECT.md โ
   assert.equal(new Set(lib.map((e) => e.seed)).size, 3);
 
   const all = summarize(readCosts(path.join(dir, ".vf"))).totalUsd;
-  assert.ok(r.cost.usd > 0);
-  assert.ok(Math.abs(r.cost.usd - (all - costBefore)) < 1e-9);
+  assert.deepEqual(r.cost, STUB_COST);
   const rows = readCosts(path.join(dir, ".vf")).slice(nRowsBefore);
   assert.ok(rows.length >= 4 && rows.every((x) => typeof x.run === "string" && x.run === rows[0].run));
   assert.ok(!JSON.stringify(r).includes("tok-secret"));
@@ -262,7 +262,7 @@ test("resume: input ต่างไป → USAGE และไม่เรีย�
   assert.equal(llmCalls().length, 1);
   assert.equal(imageCalls().length - imgBefore, 3);
   assert.equal(r.character.id, "heron");
-  assert.ok(r.cost.usd >= 0);
+  assert.deepEqual(r.cost, STUB_COST);
   await assert.rejects(add(["--id", "heron"]), (e) => e.code === "USAGE");
 });
 
@@ -310,7 +310,7 @@ test("place add เพิ่มสถานที่ใน project.json, PROJECT
   assert.equal(imageCalls().length, 1);
   assert.ok(imageCalls()[0].body.input.prompt.includes("wooden fence"));
   const all = summarize(readCosts(path.join(dir, ".vf"))).totalUsd;
-  assert.ok(r.cost.usd > 0 && Math.abs(r.cost.usd - (all - costBefore)) < 1e-9);
+  assert.deepEqual(r.cost, STUB_COST);
   await assert.rejects(placeAdd(["demo", "--prompt", "สวน", "--id", "kitchen", "--foreground"]), (e) => e.code === "USAGE");
   await assert.rejects(placeAdd(["demo", "--prompt", "สวน", "--id", "cat", "--foreground"]), (e) => e.code === "USAGE");
   llmPlace = { ...llmPlace, id: "yard" };
@@ -404,7 +404,7 @@ test("commitStagedRefs: crash หลังย้าย extra แต่ก่อ�
 });
 
 // --- final fix (R13) ---
-test("R13: character add / place add ที่พังแล้วรันซ้ำ: run เดิม, cost.usd รวมรอบที่พัง, step/item ตามชนิด", async () => {
+test("R13: character add / place add ที่พังแล้วรันซ้ำ: run เดิม, cost มาจาก API (stub), step/item ตามชนิด", async () => {
   const vf = path.join(dir, ".vf");
   let n0 = readCosts(vf).length;
   failMatch = HERON.slice(0, 40);
@@ -413,7 +413,7 @@ test("R13: character add / place add ที่พังแล้วรันซ�
   const r = await add(["--id", "heron"]);
   let rows = readCosts(vf).slice(n0);
   assert.ok(rows.every((x) => x.run === rows[0].run));
-  assert.ok(Math.abs(r.cost.usd - rows.reduce((s, x) => s + (x.usd ?? 0), 0)) < 1e-12);
+  assert.deepEqual(r.cost, STUB_COST);
   assert.ok(rows.some((x) => x.step === "character" && x.item === "heron" && x.usd > 0));
   assert.ok(rows.filter((x) => x.step === "ref").every((x) => x.item === "heron"));
   assert.ok(rows.filter((x) => x.step === "qa").every((x) => x.item === "heron"));
@@ -425,7 +425,7 @@ test("R13: character add / place add ที่พังแล้วรันซ�
   const p = await placeAdd(["demo", "--prompt", "สวนหลังบ้าน", "--id", "garden", "--foreground"]);
   rows = readCosts(vf).slice(n0);
   assert.ok(rows.every((x) => x.run === rows[0].run));
-  assert.ok(Math.abs(p.cost.usd - rows.reduce((s, x) => s + (x.usd ?? 0), 0)) < 1e-12);
+  assert.deepEqual(p.cost, STUB_COST);
   assert.ok(rows.some((x) => x.step === "place" && x.item === "garden" && x.usd > 0));
   assert.ok(rows.filter((x) => x.step === "plate" || x.step === "qa").every((x) => x.item === "garden"));
 });

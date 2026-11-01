@@ -16,7 +16,7 @@ import { WORDS_PER_SEC, CHARS_PER_SEC } from "./clip.mjs";
 import { makeKeyframe, makeVideo, pool, keyframeModel, SOFTEN, GROUNDED_RULES } from "./shots.mjs";
 import { ffmpeg, frameSize, normalizeArgs, concatArgs, concatList } from "./assemble.mjs";
 import { COMMON_OPTIONS, parseCommon, validateParts, finishAudio } from "./longform.mjs";
-import { pinInput, pinRun, costSince, contextMessage, loadProject, planRows, llmRow, imageRow, qaRow, runEntity } from "./entities.mjs";
+import { pinInput, pinRun, contextMessage, loadProject, planRows, llmRow, imageRow, qaRow, runEntity } from "./entities.mjs";
 
 export const SHOT_MIN = 5;
 export const SHOT_MAX = 20;
@@ -240,7 +240,6 @@ async function work({ dir, ctx, state, key, prompt, total, hd, maxRerolls, audio
       id, title: plan.title, seconds, shots: shots.length, quality, file: join(dir, final.file), dir: join(dir, base),
       narration: final.narration, music: final.music, ...(final.music_track ? { music_track: final.music_track } : {}), ...(warnings.length ? { warnings } : {}),
     },
-    cost: { usd: costSince(costDir, run) },
     next: quality === "draft" ? [`vf film ${slug} --prompt "..." --hd  # ทำใหม่แบบ hd เมื่อพอใจ`] : [`vf project show ${slug}`],
   };
 }

@@ -28,7 +28,7 @@ import { FONT_FOR, fontFile, sceneTimes, audioCues, composeHtml } from "./hf-com
 import { gsapFile, hfLint, hfSnapshot, hfRender } from "./hf.mjs";
 import { POSE_KEY, POSE_STATE, POSE_WARN, poseChecks, poseQuestion, FIX_RULES, fixMessage, sameLines } from "./motion-check.mjs";
 import { COMMON_OPTIONS, parseCommon, finishAudio } from "./longform.mjs";
-import { pinInput, pinRun, costSince, contextMessage, loadProject, planRows, llmRow, qaRow, runEntity } from "./entities.mjs";
+import { pinInput, pinRun, contextMessage, loadProject, planRows, llmRow, qaRow, runEntity } from "./entities.mjs";
 
 const execFileP = promisify(execFile);
 
@@ -465,7 +465,6 @@ async function work({ dir, ctx, state, key, id: given, prompt, total, audio, pla
       ...(final.music_track ? { music_track: final.music_track } : {}),
       ...(warnings.length ? { warnings } : {}),
     },
-    cost: { usd: costSince(costDir, run) },
     next: [`vf project show ${slug}`],
   };
 }

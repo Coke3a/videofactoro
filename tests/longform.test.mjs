@@ -22,6 +22,7 @@ import { pool } from "../tools/shots.mjs";
 import { STORY, SCENES, STORY_MARK, SCENES_MARK, prepareMotionProject, stubRunner } from "./fixtures/motion.mjs";
 import { goodBible } from "./fixtures/bible.mjs";
 import { bodyOf } from "./fixtures/body.mjs";
+import { STUB_COST } from "./_setup.mjs";
 
 process.env.VF_NO_DOTENV = "1";
 const TINY = fileURLToPath(new URL("./fixtures/tiny.png", import.meta.url));
@@ -152,7 +153,7 @@ test("film: ช็อตละ keyframe + วิดีโอ draft, ต่อก
   assert.ok(fs.readFileSync(path.join(dir, "EPISODES.md"), "utf8").includes("| film draft | Cake Day |"));
   const videoRows = readCosts(path.join(dir, ".vf")).filter((x) => x.step === "video");
   assert.equal(videoRows.length, 3);
-  assert.ok(r.cost.usd >= 0.18);
+  assert.deepEqual(r.cost, STUB_COST);
 });
 
 test("film: วิดีโอค้างแล้วรันซ้ำ ตาม request เดิม ไม่ POST ใหม่", async () => {

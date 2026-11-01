@@ -6,7 +6,7 @@ import { openState, step } from "./state.mjs";
 import { validateCharacter, addCharacterFiles, ID_RE } from "./bible.mjs";
 import { useUserImage, toPng, makeRef, sha, CANDIDATES } from "./project-create.mjs";
 import {
-  pinInput, pinRun, costSince, pickArchiveName, commitStagedRefs, clearStaged, stagedName, contextMessage, loadProject, parseImagePaths,
+  pinInput, pinRun, pickArchiveName, commitStagedRefs, clearStaged, stagedName, contextMessage, loadProject, parseImagePaths,
   planRows, llmRow, imageRow, qaRow, runEntity, designCharacter, qaUserImage,
 } from "./entities.mjs";
 
@@ -111,7 +111,6 @@ async function work({ dir, ctx, state, key, prompt, images, id, replace, run: fr
 
   return {
     character: { id: cid, ref, look: char.look, ...(extras.length ? { extras } : {}), ...(warning ? { warning } : {}) },
-    cost: { usd: costSince(costDir, run) },
     next: [`vf project show ${slug}`],
   };
 }

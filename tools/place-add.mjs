@@ -6,7 +6,7 @@ import { llmJson } from "./llm.mjs";
 import { openState, step } from "./state.mjs";
 import { PLACE_SCHEMA, validatePlace, placeAddSystemPrompt, addPlaceFiles, ID_RE } from "./bible.mjs";
 import { makePlate, sha } from "./project-create.mjs";
-import { pinInput, pinRun, costSince, contextMessage, loadProject, planRows, llmRow, imageRow, qaRow, runEntity } from "./entities.mjs";
+import { pinInput, pinRun, contextMessage, loadProject, planRows, llmRow, imageRow, qaRow, runEntity } from "./entities.mjs";
 
 const OPTIONS = {
   prompt: { type: "string" },
@@ -57,7 +57,6 @@ async function work({ dir, ctx, state, key, prompt, id, maxRerolls, run: fresh }
 
   return {
     place: { id: place.id, plate, ...(warning ? { warning } : {}) },
-    cost: { usd: costSince(costDir, run) },
     next: [`vf project show ${slug}`],
   };
 }

@@ -17,7 +17,7 @@ import { estimate } from "./pricing.mjs";
 import { sha } from "./project-create.mjs";
 import { tts, music as makeMusic, mix, mediaInfo, narrationTempo, MUSIC_GAIN, MUSIC_GAIN_UNDER_VOICE } from "./audio.mjs";
 import { makeKeyframe, makeVideo, keyframeModel, GROUNDED_RULES } from "./shots.mjs";
-import { pinInput, pinRun, costSince, contextMessage, loadProject, planRows, llmRow, imageRow, qaRow, runEntity } from "./entities.mjs";
+import { pinInput, pinRun, contextMessage, loadProject, planRows, llmRow, imageRow, qaRow, runEntity } from "./entities.mjs";
 
 const execFileP = promisify(execFile);
 const MAX_CHARS = 3;
@@ -273,7 +273,6 @@ async function work({ dir, ctx, state, key, prompt, duration, hd, maxRerolls, au
       file: join(dir, "renders", `${id}.mp4`), raw: join(dir, video.file), keyframe: key1.file,
       narration: plan.narration || null, music: final.music, ...(warnings.length ? { warnings } : {}),
     },
-    cost: { usd: costSince(costDir, run) },
     next: video.quality === "draft" ? [`vf clip ${slug} --prompt "..." --hd  # ทำใหม่แบบ hd เมื่อพอใจ`] : [`vf project show ${slug}`],
   };
 }

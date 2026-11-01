@@ -13,6 +13,7 @@ import { main as clip, validateClipPlan } from "../tools/clip.mjs";
 import { mixArgs, narrationTempo } from "../tools/audio.mjs";
 import { goodBible } from "./fixtures/bible.mjs";
 import { bodyOf } from "./fixtures/body.mjs";
+import { STUB_COST } from "./_setup.mjs";
 
 process.env.VF_NO_DOTENV = "1";
 const TINY = fileURLToPath(new URL("./fixtures/tiny.png", import.meta.url));
@@ -133,7 +134,7 @@ test("clip: keyframe จาก ref + ฉาก, วิดีโอ draft ส่�
   assert.equal(rows.length, 1);
   assert.equal(rows[0].usd, 0.06);
   assert.equal(rows[0].clip, id);
-  assert.ok(r.cost.usd > 0.06);
+  assert.deepEqual(r.cost, STUB_COST);
 });
 
 test("clip --hd: ไม่ส่ง draft และคิด 0.17", async () => {

@@ -1,7 +1,32 @@
 import { appendFileSync, readFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { isCfHosted } from "./cf.mjs";
 
 const file = (dir) => join(dir, "costs.jsonl");
+// ค่าใช้จ่ายจริงจาก Cloudflare: หนึ่งบรรทัดต่อการรันหนึ่งรอบ (attempt) — ตัวเลขเงินหลังรันอ่านจากไฟล์นี้เท่านั้น
+const actualFile = (dir) => join(dir, "actual-costs.jsonl");
+
+export function appendActual(dir, rec) {
+  mkdirSync(dir, { recursive: true });
+  appendFileSync(actualFile(dir), JSON.stringify(rec) + "\n");
+}
+
+export function readActual(dir) {
+  let text;
+  try {
+    text = readFileSync(actualFile(dir), "utf8");
+  } catch (e) {
+    if (e.code === "ENOENT") return [];
+    throw e;
+  }
+  return text.split("\n").filter(Boolean).map((l) => JSON.parse(l));
+}
+
+// จำนวนครั้งที่ควรเห็นใน AI Gateway logs ของรอบนี้: ใช้รอ log ที่เข้าช้า ไม่ได้ใช้คิดเงิน
+export function expectedGatewayCalls(dir, run, start, end) {
+  return readCosts(dir).filter((r) => r.run === run && typeof r.at === "string" && r.at >= start && r.at <= end &&
+    typeof r.model === "string" && !isCfHosted(r.model) && !r.cached && r.reject_of === undefined).length;
+}
 
 // R13: outcome ∈ ok | invalid | qa_reject | blocked | error (+ cached:true) · step = ชนิดงาน · item = id ของชิ้น (หรือ null)
 export const costRow = (meta = {}, model, step) => ({
